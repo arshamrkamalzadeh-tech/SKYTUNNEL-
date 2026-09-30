@@ -17,7 +17,7 @@ try:
 except ImportError:
     QRCODE_AVAILABLE = False
 
-TOKEN = os.getenv("BOT_TOKEN", "69786607:U_ltmyh-8XS6RuBUsLNiIVi9l0Mq0aekXvE")
+TOKEN = os.getenv("BOT_TOKEN", "69786607:p-AAjsil8xAOknphz-PxbDBsvFxFSWknCMg")
 BASE_URL = "https://api.splus.ir/bot" + TOKEN
 CONFIG_API = os.getenv("CONFIG_API", "https://su.randomatic.ir/api/v1/configs")
 CONFIG_KEY = os.getenv("CONFIG_KEY", "sk_live_azIaKWpOvQDoD2-7vX8-yyf3WNPg6U1p")
