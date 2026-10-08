@@ -4406,7 +4406,7 @@ def check_channel_member(user_id, use_cache=True):
 # ---------------- لاگین اکانت از طریق چت ادمین ----------------
 def admin_gate_handler(update):
     """پیام‌های ادمین مربوط به لاگین/مدیریت اکانت رو مدیریت می‌کنه. True یعنی مصرف شد."""
-    if not (GATE_ENABLED and G_AVAILABLE):
+    if not GATE_ENABLED:
         return False
     m = update.get('message')
     if not m:
@@ -4415,6 +4415,12 @@ def admin_gate_handler(update):
     if chat_id != ADMIN_ID:
         return False
     text = (m.get('text') or '').strip()
+    if not G_AVAILABLE:
+        # به‌جای سکوت، به ادمین بگو چرا شماره نمی‌خواد (منوی عادی هم نشون داده می‌شه)
+        if text.startswith('/start') or text.startswith('/gatestatus'):
+            g_notify_admin('⚠️ عضویت اجباری غیرفعاله چون کتابخونه‌ی spluspy روی سرور این بات نصب نیست.\n'
+                           'spluspy رو به requirements همین بات اضافه کن و دوباره دیپلوی کن.')
+        return False
     contact = m.get('contact')
     cmd = text.split()[0].split('@')[0].lower() if text.startswith('/') else ''
 
@@ -4457,10 +4463,16 @@ def admin_gate_handler(update):
                              parse_mode=None, reply_markup=G_CONTACT_KB)
                 return True
             _G_TSTATE.pop('phone', None)
+            print('[gate] شماره از ادمین دریافت شد؛ شروع لاگین اکانت:', phone)
             send_message(chat_id, f'📲 در حال ورود با شماره {phone} ...', parse_mode=None,
                          reply_markup=G_REMOVE_KB)
             g_start_userbot(phone)
             return True
+        # پیامی که نه شماره بود نه متن (مثلاً ساختار غیرمنتظره‌ی contact): بی‌صدا ردش نکن
+        print('[gate] پیام نامعتبر تو مرحله‌ی شماره؛ کلیدهای پیام:', list(m.keys()))
+        send_message(chat_id, 'نتونستم شماره رو بخونم. با دکمه‌ی «ارسال شماره من» یا تایپ دستی بفرست '
+                              '(برای رد شدن /cancel).', parse_mode=None, reply_markup=G_CONTACT_KB)
+        return True
     return False
 
 
