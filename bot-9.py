@@ -270,6 +270,7 @@ CANCEL_KB = {'inline_keyboard': [[{'text': '❌ انصراف', 'callback_data': 
 UI_TEXT = {
     'fa': {
         'cur': 'تومان', 'unit_gb': 'گیگ', 'unit_day': 'روز',
+        'btn_topup': '💠 شارژ کیف پول',
         'btn_cancel': '❌ انصراف',
         'btn_recentorders': '🧾 سفارشات اخیر من',
         'btn_language': '🌐 تغییر زبان',
@@ -4102,22 +4103,40 @@ async def g_get_channel(client):
     return ch
 
 
-async def g_raw_participants(client, ch):
-    """جواب خام GetParticipantsRequest با چند فیلتر (متدهای آماده‌ی کتابخونه برای این کانال خالی برمی‌گردن)."""
-    results = []
+async def g_raw_all_users(client, ch):
+    """همه‌ی اعضا رو با چند فیلتر و صفحه‌بندی از GetParticipantsRequest می‌گیره (اجتماع نتایج)."""
+    ids = set()
+    if tl_functions is None or tl_types is None:
+        return ids
     try:
         inp = await client.get_input_entity(ch)
     except Exception as e:
-        return [('get_input_entity', e)]
-    for name, flt in (('Recent', tl_types.ChannelParticipantsRecent()),
-                      ('Admins', tl_types.ChannelParticipantsAdmins())):
-        try:
-            res = await client(tl_functions.channels.GetParticipantsRequest(
-                channel=inp, filter=flt, offset=0, limit=200, hash=0))
-            results.append((name, res))
-        except Exception as e:
-            results.append((name, e))
-    return results
+        print('[gate] get_input_entity(channel) error:', repr(e))
+        return ids
+    makers = (('Recent', lambda: tl_types.ChannelParticipantsRecent()),
+              ('Search', lambda: tl_types.ChannelParticipantsSearch(q='')),
+              ('Admins', lambda: tl_types.ChannelParticipantsAdmins()))
+    for name, mk in makers:
+        offset = 0
+        while offset < 20000:
+            try:
+                res = await client(tl_functions.channels.GetParticipantsRequest(
+                    channel=inp, filter=mk(), offset=offset, limit=200, hash=0))
+            except Exception as e:
+                print(f'[gate] GetParticipants({name}) error:', repr(e))
+                break
+            parts = getattr(res, 'participants', None) or []
+            if not parts:
+                break
+            ids.update(x.id for x in (getattr(res, 'users', None) or []))
+            for pt in parts:
+                uid_ = getattr(pt, 'user_id', None)
+                if uid_ is not None and _g_is_member_participant(pt):
+                    ids.add(uid_)
+            offset += len(parts)
+            if len(parts) < 200:
+                break
+    return ids
 
 
 async def g_list_members(client, ch):
@@ -4130,13 +4149,11 @@ async def g_list_members(client, ch):
             ids = {p.id for p in await client.get_participants(ch)}
     except Exception as e:
         print('[gate] list_members error:', repr(e))
-    if not ids and tl_functions is not None and tl_types is not None:
-        for _name, res in await g_raw_participants(client, ch):
-            if isinstance(res, Exception):
-                continue
-            ids.update(x.id for x in (getattr(res, 'users', None) or []))
-            if ids:
-                break
+    n_lib = len(ids)
+    # حتی اگه متد آماده‌ی کتابخونه چیزی برگردونه (مثلاً فقط ادمین‌ها)، لیست خام رو هم اضافه کن
+    raw = await g_raw_all_users(client, ch)
+    ids |= raw
+    print(f'[gate] members: lib={n_lib} raw={len(raw)} total={len(ids)} channel={(getattr(ch, "title", None) or getattr(ch, "id", ch))!r}')
     return ids
 
 
@@ -4193,6 +4210,7 @@ async def g_check_one(client, ch, uid, force=False):
             return True
         user = await g_resolve_user(client, uid)
         if user is None:
+            print(f'[gate] user {uid} not in member list and cannot be resolved -> not member')
             return False
 
     if tl_functions is not None:
@@ -4511,6 +4529,11 @@ def join_gate(update):
     if is_check_btn:
         answer_callback(cb_id)
         status = check_channel_member(user_id, use_cache=False)
+        for _retry in range(2):  # تازه‌عضو شده‌ها ممکنه چند ثانیه طول بکشه تا تو لیست بیان
+            if status is not False:
+                break
+            time.sleep(3)
+            status = check_channel_member(user_id, use_cache=False)
         if status is True:
             add_user(chat_id)
             user_steps[str(chat_id)] = {}
