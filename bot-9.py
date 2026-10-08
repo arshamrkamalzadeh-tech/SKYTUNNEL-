@@ -3978,7 +3978,7 @@ GATE_FAIL_OPEN = os.getenv("GATE_FAIL_OPEN", "1").strip() != "0"
 GATE_SESSION_NAME = "gate_session"
 GATE_CONFIG_PATH = "gate_config.json"
 GATE_CODE_TIMEOUT = 300       # چند ثانیه منتظر کد/رمز از ادمین بمونه
-GATE_LIVE_TIMEOUT = 15        # حداکثر صبر برای چک زنده‌ی یک کاربر
+GATE_LIVE_TIMEOUT = 6         # حداکثر صبر برای چک زنده‌ی یک کاربر
 GATE_SYNC_INTERVAL = max(5, int(os.getenv("GATE_SYNC_INTERVAL", "10") or 10))  # هر چند ثانیه لیست اعضا تازه بشه
 GATE_CACHE_TTL = 60           # عضوِ تاییدشده تا این مدت دوباره چک نمی‌شه
 
@@ -4207,8 +4207,8 @@ async def g_list_members(client, ch):
 
 async def g_refresh_members(client, force=False):
     now = time.time()
-    if not force and now - _G['last_refresh'] < 10:
-        return
+    if now - _G['last_refresh'] < (2 if force else 10):
+        return  # همین الان تازه شده؛ دوباره نزن
     _G['last_refresh'] = now
     ch = await g_get_channel(client)
     ids = await g_list_members(client, ch)
@@ -4273,7 +4273,7 @@ async def g_check_one(client, ch, uid, force=False):
             print('[gate] refresh before check failed:', repr(e))
         if uid in _G['members']:
             return True
-    if _G.get('peruser_unsupported'):
+    if _G.get('peruser_unsupported', os.getenv('GATE_PERUSER', '0').strip() != '1'):
         return False  # چک تکی پشتیبانی نمی‌شه و لیست تازه‌ست؛ الکی منتظر نمون
     print(f'[gate] check uid={uid}: not in list (size={len(_G["members"])}, mode={_G["list_mode"]}, '
           f'ids={sorted(_G["members"])})')
@@ -4524,6 +4524,10 @@ def check_channel_member(user_id, use_cache=True):
         with _member_cache_guard:
             _member_cache[user_id] = now
         return True
+    if use_cache and _G['list_mode'] == 'full' and now - _G['last_refresh'] < 30 \
+            and _G.get('peruser_unsupported', os.getenv('GATE_PERUSER', '0').strip() != '1'):
+        # لیست همین چند ثانیه پیش تازه شده و چک تکی هم ممکن نیست؛ نیازی به رفت‌وبرگشت به لوپ یوزربات نیست
+        return False
     try:
         fut = asyncio.run_coroutine_threadsafe(g_check_live(client, user_id, force=not use_cache), loop)
         member = bool(fut.result(timeout=GATE_LIVE_TIMEOUT))
@@ -4664,8 +4668,8 @@ def join_gate(update):
             send_message(chat_id, u(chat_id, 'join_check_error'), reply_markup=join_keyboard(chat_id))
         return True
 
-    _txt = ((update.get('message') or {}).get('text') or '').strip()
-    status = check_channel_member(user_id, use_cache=not _txt.startswith('/start'))
+    # لیست اعضا هر ~۱۰ ثانیه تو پس‌زمینه تازه می‌شه؛ پس /start نیازی به چک اجباری (کند) نداره
+    status = check_channel_member(user_id)
     if status is True:
         return False
     if status is None and GATE_FAIL_OPEN:
@@ -4696,15 +4700,25 @@ def safe_process_update(update):
     elif 'message' in update:
         chat_id = update['message'].get('chat', {}).get('id')
 
+    def _run():
+        t0 = time.time()
+        handled = admin_gate_handler(update) or join_gate(update)
+        t1 = time.time()
+        if not handled:
+            process_update(update)
+        t2 = time.time()
+        if t2 - t0 > 1.5:  # لاگ کندی: معلوم می‌کنه وقت تو گیت رفته یا تو خودِ هندلر
+            what = ((update.get('message') or {}).get('text')
+                    or (update.get('callback_query') or {}).get('data') or '?')
+            print(f'[slow] chat={chat_id} {str(what)[:30]!r} gate={t1 - t0:.1f}s handler={t2 - t1:.1f}s')
+
     lock = get_chat_lock(chat_id) if chat_id is not None else None
     try:
         if lock:
             with lock:
-                if not admin_gate_handler(update) and not join_gate(update):
-                    process_update(update)
+                _run()
         else:
-            if not admin_gate_handler(update) and not join_gate(update):
-                process_update(update)
+            _run()
     except Exception as e:
         print('⚠️ خطا در پردازش آپدیت:', e)
 
