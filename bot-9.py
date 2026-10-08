@@ -4492,6 +4492,7 @@ def bot_api_check_member(user_id):
         data = res.json()
     except Exception as e:
         print('[gate] botapi getChatMember exception:', repr(e))
+        _BOTAPI_GATE['works'] = False
         return None
     if not data.get('ok'):
         print('[gate] botapi getChatMember not ok:', str(data)[:200])
@@ -4520,7 +4521,7 @@ def check_channel_member(user_id, use_cache=True):
             ts = _member_cache.get(user_id)
         if ts and now - ts < GATE_CACHE_TTL:
             return True
-    if bot_api_check_member(user_id) is True:
+    if os.getenv('GATE_BOTAPI', '0').strip() == '1' and bot_api_check_member(user_id) is True:
         with _member_cache_guard:
             _member_cache[user_id] = now
         return True
