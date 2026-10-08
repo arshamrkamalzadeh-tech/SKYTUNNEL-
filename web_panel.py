@@ -25,15 +25,16 @@ except Exception:                      # بعضی ایمیج‌های سبک tzd
 # تنظیمات (از Environment Variables می‌خونه، دقیقاً هم‌نام با bot.py)
 # ---------------------------------------------------------------------------
 
-TURSO_DATABASE_URL = os.getenv("TURSO_DATABASE_URL")
-TURSO_AUTH_TOKEN = os.getenv("TURSO_AUTH_TOKEN")
+TURSO_DATABASE_URL = os.getenv("TURSO_DATABASE_URL", "libsql://skytunnel-mikekamalzadeh-sys.aws-eu-west-1.turso.io")
+TURSO_AUTH_TOKEN = os.getenv("TURSO_AUTH_TOKEN", "eyJhbGciOiJFZERTQSIsInR5cCI6IkpXVCJ9.eyJhIjoicnciLCJpYXQiOjE3ODkwNzE5MDcsImlkIjoiMDFhMDhjZmQtMmMwMS03YWViLTlmYzQtOWYzMTkwNzEwMjA0Iiwia2lkIjoiNmltOXd5bGxUd2luNkVHWEJWNHVJUE01ZWNPM2JyZmJ3NzFqWTFIanFCTSIsInJpZCI6ImU5N2NmZmQwLTgxZDYtNDA3Yi1hZGQ4LTEzMTRjY2MyZTkxYyJ9.tZj3mmc_tNCVRPsLkwuWdrGsXZXmFCcvRCEPcN0iclAMk0QrHWfZxZiGqB5otvhlZaT9fs_WzsO6kTS_gnk1Bw")
 
 BOT_TOKEN = os.getenv("BOT_TOKEN", "69786607:p-AAjsil8xAOknphz-PxbDBsvFxFSWknCMg")
 BASE_URL = "https://api.splus.ir/bot" + BOT_TOKEN
 
 PANEL_USERNAME = os.getenv("PANEL_USERNAME", "admin")
 PANEL_PASSWORD = os.getenv("PANEL_PASSWORD", "change-me-please")
-INSECURE_DEFAULTS = (PANEL_PASSWORD == "change-me-please") or (os.getenv("SECRET_KEY") is None)
+SECRET_KEY = os.getenv("SECRET_KEY", "x7Kp9mZq2vLwR4tYbN8jFcH1")
+INSECURE_DEFAULTS = (PANEL_PASSWORD == "change-me-please") or (SECRET_KEY == "sky-panel-secret-change-me")
 
 # مقادیر پیش‌فرض (fallback) قیمت/کارت/حداقل شارژ — دقیقاً هم‌نام با کلیدهایی
 # که bot.py هم به‌عنوان fallback استفاده می‌کنه. مقدار واقعی و قابل‌تغییر از
@@ -158,7 +159,7 @@ def get_ordered_keys(setting_key, default_keys, settings_dict=None):
     return order
 
 app = Flask(__name__)
-app.secret_key = os.getenv("SECRET_KEY", "sky-panel-secret-change-me")
+app.secret_key = SECRET_KEY
 
 FEATURES = {
     "buy": "🛍 خرید کانفیگ",
