@@ -4116,7 +4116,9 @@ async def g_raw_all_users(client, ch):
     makers = (('Recent', lambda: tl_types.ChannelParticipantsRecent()),
               ('Search', lambda: tl_types.ChannelParticipantsSearch(q='')),
               ('Admins', lambda: tl_types.ChannelParticipantsAdmins()))
-    for name, mk in makers:
+
+    async def _one(name, mk):
+        got = set()
         offset = 0
         while offset < 20000:
             try:
@@ -4131,20 +4133,27 @@ async def g_raw_all_users(client, ch):
             for pt in parts:
                 uid_ = _g_part_uid(pt)
                 if uid_ is not None and _g_is_member_participant(pt):
-                    ids.add(uid_)
+                    got.add(uid_)
             offset += len(parts)
             if len(parts) < 200:
                 break
+        return got
+
+    # فیلترها هم‌زمان اجرا می‌شن (به‌جای پشت‌سرهم) تا همگام‌سازی سریع‌تر تموم بشه
+    for got in await asyncio.gather(*[_one(n, m) for n, m in makers]):
+        ids |= got
     return ids
 
 
 async def g_deep_search(client, ch, have):
     """اگه تعداد واقعی اعضای کانال بیشتر از لیست گرفته‌شده بود، با جست‌وجوی حرف‌به‌حرف دنبال بقیه می‌گرده."""
     extra = set()
+    if os.getenv("GATE_DEEP_SEARCH", "0").strip() != "1":
+        return extra  # پیش‌فرض خاموش: ۶۷ درخواست پشت‌سرهم بات رو کند می‌کرد
     if tl_functions is None or tl_types is None:
         return extra
     now = time.time()
-    if now - _G.get('deep_ts', 0.0) < 60:
+    if now - _G.get('deep_ts', 0.0) < 600:
         return extra
     try:
         inp = await client.get_input_entity(ch)
@@ -4175,21 +4184,24 @@ async def g_deep_search(client, ch, have):
 
 
 async def g_list_members(client, ch):
-    ids = set()
-    try:
-        if hasattr(client, 'iter_participants'):
-            async for p in client.iter_participants(ch):
-                ids.add(p.id)
-        elif hasattr(client, 'get_participants'):
-            ids = {p.id for p in await client.get_participants(ch)}
-    except Exception as e:
-        print('[gate] list_members error:', repr(e))
-    n_lib = len(ids)
-    # حتی اگه متد آماده‌ی کتابخونه چیزی برگردونه (مثلاً فقط ادمین‌ها)، لیست خام رو هم اضافه کن
-    raw = await g_raw_all_users(client, ch)
-    ids |= raw
+    ids = await g_raw_all_users(client, ch)
+    n_raw = len(ids)
+    n_lib = 0
+    if not ids:
+        # روش خام جواب نداد؛ متد آماده‌ی کتابخونه رو امتحان کن
+        try:
+            if hasattr(client, 'iter_participants'):
+                async for p in client.iter_participants(ch):
+                    ids.add(p.id)
+            elif hasattr(client, 'get_participants'):
+                ids = {p.id for p in await client.get_participants(ch)}
+        except Exception as e:
+            print('[gate] list_members error:', repr(e))
+        n_lib = len(ids)
     ids |= await g_deep_search(client, ch, len(ids))
-    print(f'[gate] members: lib={n_lib} raw={len(raw)} total={len(ids)} channel={(getattr(ch, "title", None) or getattr(ch, "id", ch))!r}')
+    if _G.get('last_log_n') != len(ids):
+        _G['last_log_n'] = len(ids)
+        print(f'[gate] members: raw={n_raw} lib={n_lib} total={len(ids)} channel={(getattr(ch, "title", None) or getattr(ch, "id", ch))!r}')
     return ids
 
 
@@ -4261,6 +4273,8 @@ async def g_check_one(client, ch, uid, force=False):
             print('[gate] refresh before check failed:', repr(e))
         if uid in _G['members']:
             return True
+    if _G.get('peruser_unsupported'):
+        return False  # چک تکی پشتیبانی نمی‌شه و لیست تازه‌ست؛ الکی منتظر نمون
     print(f'[gate] check uid={uid}: not in list (size={len(_G["members"])}, mode={_G["list_mode"]}, '
           f'ids={sorted(_G["members"])})')
     user = await g_resolve_user(client, uid)
@@ -4281,6 +4295,8 @@ async def g_check_one(client, ch, uid, force=False):
         except Exception as e:
             if 'NotParticipant' in type(e).__name__:
                 return False
+            if 'NOT_SUPPORTED' in repr(e):
+                _G['peruser_unsupported'] = True  # سروش پلاس چک تکی رو پشتیبانی نمی‌کنه
             print('[gate] GetParticipant error:', repr(e))
 
     if hasattr(client, 'get_chat_member'):
@@ -4632,10 +4648,10 @@ def join_gate(update):
     if is_check_btn:
         answer_callback(cb_id)
         status = check_channel_member(user_id, use_cache=False)
-        for _retry in range(2):  # تازه‌عضو شده‌ها ممکنه چند ثانیه طول بکشه تا تو لیست بیان
+        for _retry in range(1):  # تازه‌عضو شده‌ها ممکنه چند ثانیه طول بکشه تا تو لیست بیان
             if status is not False:
                 break
-            time.sleep(3)
+            time.sleep(2)
             status = check_channel_member(user_id, use_cache=False)
         if status is True:
             add_user(chat_id)
