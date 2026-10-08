@@ -71,7 +71,7 @@ def reseller_price_range_text(chat_id):
 
 RESELLER_API_BASE = os.getenv("RESELLER_API_BASE", "http://YOUR-SERVER-IP:8088")
 # آدرس پنلی که فروشنده بعد از خرید استخر گیگ باهاش کانفیگ می‌سازه (پیش‌فرض: همون آدرس API)
-RESELLER_PANEL_URL = os.getenv("RESELLER_PANEL_URL", "https://resellerpanel.apps.frk1.abrhapaas.com")
+RESELLER_PANEL_URL = os.getenv("RESELLER_PANEL_URL", "https://just-reseller-panel-six.vercel.app/")
 ADMIN_ID = int(os.getenv("ADMIN_ID", "48198481"))
 
 # مقادیر پیش‌فرض (fallback) — اگه از پنل وب مقداری تو جدول settings ثبت نشده
