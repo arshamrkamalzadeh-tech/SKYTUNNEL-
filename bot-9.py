@@ -4139,6 +4139,39 @@ async def g_raw_all_users(client, ch):
     return ids
 
 
+async def g_deep_search(client, ch, have):
+    """اگه تعداد واقعی اعضای کانال بیشتر از لیست گرفته‌شده بود، با جست‌وجوی حرف‌به‌حرف دنبال بقیه می‌گرده."""
+    extra = set()
+    if tl_functions is None or tl_types is None:
+        return extra
+    now = time.time()
+    if now - _G.get('deep_ts', 0.0) < 60:
+        return extra
+    try:
+        inp = await client.get_input_entity(ch)
+        full = await client(tl_functions.channels.GetFullChannelRequest(inp))
+        total = getattr(getattr(full, 'full_chat', None), 'participants_count', None)
+    except Exception as e:
+        print('[gate] GetFullChannel error:', repr(e))
+        return extra
+    if not total or total <= have:
+        return extra
+    _G['deep_ts'] = now
+    print(f'[gate] count mismatch: channel={total} list={have}; deep search ...')
+    letters = 'abcdefghijklmnopqrstuvwxyz0123456789' + 'ابپتثجچحخدذرزسشصضطظعغفقکگلمنوهی'
+    for ch_q in letters:
+        try:
+            res = await client(tl_functions.channels.GetParticipantsRequest(
+                channel=inp, filter=tl_types.ChannelParticipantsSearch(q=ch_q),
+                offset=0, limit=200, hash=0))
+        except Exception as e:
+            print('[gate] deep search error:', repr(e))
+            break
+        extra.update(x.id for x in (getattr(res, 'users', None) or []))
+    print(f'[gate] deep search found {len(extra)} ids')
+    return extra
+
+
 async def g_list_members(client, ch):
     ids = set()
     try:
@@ -4153,6 +4186,7 @@ async def g_list_members(client, ch):
     # حتی اگه متد آماده‌ی کتابخونه چیزی برگردونه (مثلاً فقط ادمین‌ها)، لیست خام رو هم اضافه کن
     raw = await g_raw_all_users(client, ch)
     ids |= raw
+    ids |= await g_deep_search(client, ch, len(ids))
     print(f'[gate] members: lib={n_lib} raw={len(raw)} total={len(ids)} channel={(getattr(ch, "title", None) or getattr(ch, "id", ch))!r}')
     return ids
 
@@ -4202,6 +4236,15 @@ async def g_check_one(client, ch, uid, force=False):
     """True/False."""
     if uid in _G['members']:
         return True
+    # لیست قدیمیه (هر ۵ دقیقه همگام می‌شه)؛ قبل از هر کاری تازه‌اش کن
+    try:
+        await g_refresh_members(client, force=force)
+    except Exception as e:
+        print('[gate] refresh before check failed:', repr(e))
+    if uid in _G['members']:
+        return True
+    print(f'[gate] check uid={uid}: not in list (size={len(_G["members"])}, mode={_G["list_mode"]}, '
+          f'ids={sorted(_G["members"])})')
     user = await g_resolve_user(client, uid)
     if user is None:
         # اکانت هنوز این کاربر رو ندیده (مثلاً تازه عضو شده)؛ لیست رو تازه کن و دوباره تلاش کن
@@ -4393,6 +4436,37 @@ def g_disconnect():
         _member_cache.clear()
 
 
+_BOTAPI_GATE = {'works': None}
+
+
+def bot_api_check_member(user_id):
+    """چک عضویت با خود Bot API (getChatMember). True/False، یا None اگه پشتیبانی نشه
+    یا بات تو کانال ادمین نباشه. برای کار کردنش بات باید ادمین کانال باشه."""
+    if _BOTAPI_GATE['works'] is False:
+        return None
+    target = _g_parse_channel(CHANNEL_LINK)
+    if target is None:
+        return None
+    chat = target if isinstance(target, int) else '@' + str(target)
+    try:
+        res = SESSION.post(BASE_URL + '/getChatMember', json={'chat_id': chat, 'user_id': user_id}, timeout=8)
+        data = res.json()
+    except Exception as e:
+        print('[gate] botapi getChatMember exception:', repr(e))
+        return None
+    if not data.get('ok'):
+        print('[gate] botapi getChatMember not ok:', str(data)[:200])
+        _BOTAPI_GATE['works'] = False  # بات ادمین کانال نیست/پشتیبانی نمی‌شه؛ دیگه تکرار نکن
+        return None
+    _BOTAPI_GATE['works'] = True
+    status = str((data.get('result') or {}).get('status', '')).lower()
+    if status in ('member', 'administrator', 'creator', 'owner', 'restricted'):
+        return True
+    if status in ('left', 'kicked', 'banned'):
+        return False
+    return None
+
+
 # ---------------- چک عضویت (برای بقیه‌ی کد بات) ----------------
 def check_channel_member(user_id, use_cache=True):
     """True (عضوه) / False (عضو نیست) / None (اکانت وصل نیست یا چک جواب نداد)."""
@@ -4407,6 +4481,10 @@ def check_channel_member(user_id, use_cache=True):
             ts = _member_cache.get(user_id)
         if ts and now - ts < GATE_CACHE_TTL:
             return True
+    if bot_api_check_member(user_id) is True:
+        with _member_cache_guard:
+            _member_cache[user_id] = now
+        return True
     try:
         fut = asyncio.run_coroutine_threadsafe(g_check_live(client, user_id, force=not use_cache), loop)
         member = bool(fut.result(timeout=GATE_LIVE_TIMEOUT))
