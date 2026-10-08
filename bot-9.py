@@ -7,6 +7,12 @@ import io
 import math
 import html as _html
 import threading
+import asyncio
+import builtins
+import getpass
+import glob
+import inspect
+import queue
 import turso_serverless
 import secrets
 import hashlib
@@ -853,6 +859,32 @@ UI_TEXT['en'].update({
     'topup_rejected': '❌ Your deposit receipt was rejected. Please contact support.',
 })
 
+# متن‌های عضویت اجباری در کانال
+UI_TEXT['fa'].update({
+    'join_required': (
+        '📢 <b>عضویت در کانال</b>\n{divider}\n'
+        'برای استفاده از ربات، اول باید عضو کانال ما بشید.\n\n'
+        'بعد از عضویت، به ربات برگردید و دکمه‌ی «✅ عضو شدم» رو بزنید.'
+    ),
+    'btn_join_channel': '📢 عضویت در کانال',
+    'btn_joined': '✅ عضو شدم',
+    'join_not_yet': '⚠️ هنوز عضو کانال نشدید. اول عضو بشید، بعد دکمه‌ی «✅ عضو شدم» رو بزنید.',
+    'join_check_error': '⚠️ الان نمی‌تونم عضویت شما رو بررسی کنم. چند لحظه دیگه دوباره «✅ عضو شدم» رو بزنید.',
+    'join_ok': '✅ عضویت شما تأیید شد. خوش اومدید!',
+})
+UI_TEXT['en'].update({
+    'join_required': (
+        '📢 <b>Channel membership</b>\n{divider}\n'
+        'To use this bot you must first join our channel.\n\n'
+        'After joining, come back to the bot and tap "✅ I\'ve joined".'
+    ),
+    'btn_join_channel': '📢 Join the channel',
+    'btn_joined': "✅ I've joined",
+    'join_not_yet': "⚠️ You haven't joined the channel yet. Join first, then tap \"✅ I've joined\".",
+    'join_check_error': "⚠️ I can't verify your membership right now. Please tap \"✅ I've joined\" again in a moment.",
+    'join_ok': '✅ Your membership is confirmed. Welcome!',
+})
+
 
 
 # بعضی متن‌های فارسی از قبل تو پنل زیر کلیدهای قدیمی (text_*, ctype_label_*)
@@ -931,7 +963,7 @@ def get_ctype_label(chat_id, ctype):
 # فیلترینگ/VPN طبیعیه)، این هندشیک تکراری روی هر پیام چند ثانیه اضافه می‌کنه.
 # با یه Session مشترک، اتصال‌ها نگه‌داشته (keep-alive) و دوباره استفاده می‌شن.
 SESSION = requests.Session()
-_adapter = requests.adapters.HTTPAdapter(pool_connections=10, pool_maxsize=10, max_retries=0)
+_adapter = requests.adapters.HTTPAdapter(pool_connections=20, pool_maxsize=40, max_retries=0)
 SESSION.mount('https://', _adapter)
 SESSION.mount('http://', _adapter)
 
@@ -941,7 +973,11 @@ SESSION.mount('http://', _adapter)
 # قبلاً تا اون تموم نمی‌شد، بات به هیچ پیام دیگه‌ای (حتی «/start» یه نفر دیگه)
 # جواب نمی‌داد. max_workers=8 یعنی هم‌زمان حداکثر ۸ آپدیت می‌تونن پردازش بشن؛
 # برای یه بات فروش با حجم معمولی کاربر، عدد امن و کافی‌ایه.
-UPDATE_EXECUTOR = ThreadPoolExecutor(max_workers=8)
+UPDATE_EXECUTOR = ThreadPoolExecutor(max_workers=16)
+
+# کارهای فرعیِ «فایر-اند-فورگت» (مثل answerCallbackQuery یا رفرش کش تنظیمات) که
+# نباید جواب اصلی به کاربر رو معطل کنن، تو یه استخر جدا اجرا می‌شن.
+BG_EXECUTOR = ThreadPoolExecutor(max_workers=4)
 
 # قفل جدا برای هر chat_id: دو آپدیت از یه کاربر واحد (مثلاً دوبار زدن سریع
 # دکمه‌ی «تایید خرید») صف می‌شن و یکی‌یکی اجرا می‌شن؛ کاربرهای مختلف همچنان
@@ -1141,8 +1177,26 @@ def get_wallet_db(user_id):
     return res[0] if res else 0
 
 
-@with_db_retry
+_user_kb_cache = {}
+
+
 def get_user_kb_style(user_id):
+    """استایل کیبورد ذخیره‌شده‌ی کاربر؛ بعد از اولین خوندن تو حافظه کش می‌شه تا
+    هر بار نمایش منوی اصلی یه کوئری اضافه به دیتابیس نزنه."""
+    if user_id in _user_kb_cache:
+        return _user_kb_cache[user_id]
+    val = _get_user_kb_style_db(user_id)
+    _user_kb_cache[user_id] = val
+    return val
+
+
+def set_user_kb_style(user_id, style):
+    _set_user_kb_style_db(user_id, style)
+    _user_kb_cache[user_id] = style
+
+
+@with_db_retry
+def _get_user_kb_style_db(user_id):
     conn = get_conn()
     c = conn.cursor()
     c.execute('SELECT kb_style FROM users WHERE user_id=?', (user_id,))
@@ -1152,7 +1206,7 @@ def get_user_kb_style(user_id):
 
 
 @with_db_retry
-def set_user_kb_style(user_id, style):
+def _set_user_kb_style_db(user_id, style):
     conn = get_conn()
     c = conn.cursor()
     c.execute('UPDATE users SET kb_style=? WHERE user_id=?', (style, user_id))
@@ -1233,8 +1287,21 @@ def get_latest_config_row(user_id):
     return res
 
 
-@with_db_retry
+_user_info_cache = {}
+
+
 def upsert_user_info(user_id, username, first_name):
+    """قبلاً روی هر پیام یه نوشتن تو دیتابیس (رفت‌وبرگشت شبکه به Turso) انجام
+    می‌شد. حالا فقط وقتی اجرا می‌شه که کاربر تازه باشه یا یوزرنیم/اسمش عوض شده."""
+    key = (username, first_name)
+    if _user_info_cache.get(user_id) == key:
+        return
+    _upsert_user_info_db(user_id, username, first_name)
+    _user_info_cache[user_id] = key
+
+
+@with_db_retry
+def _upsert_user_info_db(user_id, username, first_name):
     conn = get_conn()
     c = conn.cursor()
     c.execute('''INSERT INTO users (user_id, wallet, joined_at, username, first_name)
@@ -1799,15 +1866,49 @@ def get_setting(key, default='1'):
     به‌جای ۱۰-۱۵ کوئری، معمولاً صفر یا یک کوئری به دیتابیس تنظیمات می‌زنه.
     یعنی تغییرات پنل هم حداکثر با همون چند ثانیه تاخیر (نه بلافاصله) روی ربات
     اعمال می‌شه؛ اگه لازمه فوری باشه، TTL رو کمتر کنید."""
-    global _settings_cache, _settings_cache_ts
     now = time.time()
     if now - _settings_cache_ts > _SETTINGS_CACHE_TTL:
-        try:
-            _settings_cache = _fetch_all_settings()
-            _settings_cache_ts = now
-        except Exception as e:
-            print('⚠️ خطا در رفرش کش تنظیمات (با آخرین مقادیر کش‌شده ادامه داده می‌شه):', e)
+        if _settings_cache_ts == 0.0:
+            # اولین بار (کش خالیه): باید همون لحظه خونده بشه
+            _refresh_settings_cache()
+        else:
+            # کش کهنه شده ولی مقدار قبلی هست: همون رو فوراً برگردون و رفرش رو
+            # تو پس‌زمینه انجام بده تا کاربرِ بدشانس هر ۲۰ ثانیه معطل نشه
+            _schedule_settings_refresh()
     return _settings_cache.get(key, default)
+
+
+_settings_refresh_lock = threading.Lock()
+_settings_refreshing = False
+
+
+def _refresh_settings_cache():
+    global _settings_cache, _settings_cache_ts
+    try:
+        _settings_cache = _fetch_all_settings()
+        _settings_cache_ts = time.time()
+    except Exception as e:
+        print('⚠️ خطا در رفرش کش تنظیمات (با آخرین مقادیر کش‌شده ادامه داده می‌شه):', e)
+
+
+def _schedule_settings_refresh():
+    global _settings_refreshing
+    with _settings_refresh_lock:
+        if _settings_refreshing:
+            return
+        _settings_refreshing = True
+
+    def _job():
+        global _settings_refreshing
+        try:
+            _refresh_settings_cache()
+        finally:
+            _settings_refreshing = False
+
+    try:
+        BG_EXECUTOR.submit(_job)
+    except Exception:
+        _settings_refreshing = False
 
 
 _label_counter_lock = threading.Lock()
@@ -2010,11 +2111,20 @@ def send_photo_bytes(chat_id, image_bytes, filename='qr.png', caption=None, pars
         return {'ok': False}
 
 
-def answer_callback(callback_query_id):
+def _answer_callback_sync(callback_query_id):
     try:
         SESSION.post(BASE_URL + '/answerCallbackQuery', json={'callback_query_id': callback_query_id}, timeout=5)
     except Exception:
         pass
+
+
+def answer_callback(callback_query_id):
+    """جواب‌دادن به callback فقط برای برداشتن «ساعت شنی» دکمه‌ست؛ لازم نیست
+    پردازش اصلی منتظرش بمونه، پس تو پس‌زمینه ارسال می‌شه."""
+    try:
+        BG_EXECUTOR.submit(_answer_callback_sync, callback_query_id)
+    except Exception:
+        _answer_callback_sync(callback_query_id)
 
 
 def make_config(gb, label, days, proto='both'):
@@ -3845,6 +3955,579 @@ def process_update(update):
             user_steps[str(chat_id)] = {}
 
 
+# ---------------------------------------------------------------------------
+# عضویت اجباری در کانال — اکانت شخصی (userbot) داخل خودِ همین بات لاگین می‌شه
+# ---------------------------------------------------------------------------
+# روش کار: وقتی ADMIN_ID بات رو /start کنه و اکانت وصل نباشه، بات ازش شماره‌ی
+# موبایل و بعد کد تأیید می‌گیره و اون اکانت (که باید مالک/ادمین کانال باشه) تو
+# پس‌زمینه لاگین می‌مونه. قبل از جواب‌دادن به هر کاربر، عضویتش تو کانال با همین
+# اکانت چک می‌شه. اگه عضو نبود، پیام «اول عضو کانال شو» + دکمه‌ی «✅ عضو شدم» می‌بینه.
+#
+# env ها (همه اختیاری):
+#   GATE_ENABLED   : 0 = کل قابلیت خاموش (پیش‌فرض 1)
+#   CHANNEL_LINK   : لینک/یوزرنیم کانال (پیش‌فرض https://splus.ir/skytunnel)
+#   GATE_FAIL_OPEN : اگه اکانت هنوز وصل نیست/چک جواب نداد: 1 = کاربر رد شه، 0 = بسته بشه
+# دستورهای ادمین: /start (لاگین)، /gatestatus، /gatedisconnect، /cancel
+#
+# نکته: سشن لاگین و تنظیمات رو دیسکِ همین سرور ذخیره می‌شن (gate_session*، gate_config.json).
+# اگه دیسک با هر دیپلوی پاک بشه، بعدش باید دوباره /start بزنی و لاگین کنی.
+GATE_ENABLED = os.getenv("GATE_ENABLED", "1").strip() != "0"
+CHANNEL_LINK = os.getenv("CHANNEL_LINK", "https://splus.ir/skytunnel").strip()
+GATE_FAIL_OPEN = os.getenv("GATE_FAIL_OPEN", "1").strip() != "0"
+GATE_SESSION_NAME = "gate_session"
+GATE_CONFIG_PATH = "gate_config.json"
+GATE_CODE_TIMEOUT = 300       # چند ثانیه منتظر کد/رمز از ادمین بمونه
+GATE_LIVE_TIMEOUT = 15        # حداکثر صبر برای چک زنده‌ی یک کاربر
+GATE_SYNC_INTERVAL = 300      # هر چند ثانیه لیست اعضا تازه بشه
+GATE_CACHE_TTL = 300          # عضوِ تاییدشده تا این مدت دوباره چک نمی‌شه
+
+try:
+    import spluspy
+    G_AVAILABLE = True
+except Exception as _gate_imp_err:  # کتابخونه نصب نیست -> گیت خاموش، بات عادی کار می‌کنه
+    spluspy = None
+    G_AVAILABLE = False
+    print('⚠️ کتابخونه‌ی spluspy نصب نیست؛ عضویت اجباری غیرفعال شد:', _gate_imp_err)
+
+try:
+    from spluspy.tl import functions as tl_functions, types as tl_types
+except Exception:
+    tl_functions, tl_types = None, None
+
+try:
+    from spluspy import events as sp_events
+except Exception:
+    sp_events = None
+
+_G = {'running': False, 'starting': False, 'waiting': None, 'phone': None, 'account': None,
+      'client': None, 'loop': None, 'gen': 0, 'ch': None, 'ch_src': None,
+      'list_mode': None, 'last_refresh': 0.0, 'members': set()}
+_G_ANSWERS = queue.Queue()
+_G_TSTATE = {}
+_member_cache = {}
+_member_cache_guard = threading.Lock()
+
+G_CONTACT_KB = {
+    'keyboard': [[{'text': '📱 ارسال شماره من', 'request_contact': True}]],
+    'resize_keyboard': True,
+    'one_time_keyboard': True,
+}
+G_REMOVE_KB = {'remove_keyboard': True}
+
+
+# ---------------- تنظیمات محلی (فقط شماره‌ی ذخیره‌شده) ----------------
+def _g_cfg_load():
+    if os.path.exists(GATE_CONFIG_PATH):
+        try:
+            with open(GATE_CONFIG_PATH, 'r', encoding='utf-8') as f:
+                return json.load(f)
+        except Exception:
+            pass
+    return {}
+
+
+def _g_cfg_save(cfg):
+    with open(GATE_CONFIG_PATH, 'w', encoding='utf-8') as f:
+        json.dump(cfg, f, ensure_ascii=False)
+
+
+def g_normalize_phone(s):
+    d = re.sub(r'\D', '', str(s))
+    if d.startswith('00'):
+        d = d[2:]
+    if d.startswith('0'):
+        d = '98' + d[1:]
+    elif len(d) == 10 and d.startswith('9'):
+        d = '98' + d
+    return '+' + d if len(d) >= 10 else None
+
+
+def _g_parse_channel(raw):
+    s = str(raw or '').strip()
+    if not s:
+        return None
+    if re.fullmatch(r'-?\d+', s):
+        return int(s)
+    s = s.split('?')[0].rstrip('/')
+    if 'joinchat' in s.lower() or s.split('/')[-1].startswith('+'):
+        return None  # لینک دعوت خصوصی پشتیبانی نمی‌شه
+    return s.split('/')[-1].lstrip('@') or None
+
+
+def g_notify_admin(text, markup=None):
+    send_message(ADMIN_ID, text, parse_mode=None, reply_markup=markup)
+
+
+# ---------------- گرفتن کد/رمز لاگین از ادمین ----------------
+def g_ask(kind):
+    while not _G_ANSWERS.empty():
+        _G_ANSWERS.get_nowait()
+    _G['waiting'] = kind
+    if kind == 'code':
+        g_notify_admin('📩 کد تأیید به سروش پلاسِ اکانتت ارسال شد.\n'
+                       'کد رو همین‌جا بفرست — ولی با خط‌تیره بین رقم‌ها، مثلاً 1-2-3-4-5\n'
+                       '(اگه کد رو سرراست تو چت بفرستی ممکنه سروش پلاس باطلش کنه)')
+    else:
+        g_notify_admin('🔐 اکانتت رمز دومرحله‌ای داره. رمزت رو بفرست:')
+    try:
+        ans = _G_ANSWERS.get(timeout=GATE_CODE_TIMEOUT)
+    except queue.Empty:
+        _G['waiting'] = None
+        raise TimeoutError('از ادمین جوابی نیومد')
+    _G['waiting'] = None
+    return re.sub(r'\D', '', ans) if kind == 'code' else ans
+
+
+def _g_fake_input(prompt=''):
+    p = str(prompt).lower()
+    if any(k in p for k in ('phone', 'mobile', 'number', 'شماره')):
+        return _G['phone'] or ''
+    if any(k in p for k in ('pass', '2fa', 'رمز')):
+        return g_ask('password')
+    return g_ask('code')
+
+
+if G_AVAILABLE:
+    builtins.input = _g_fake_input
+    getpass.getpass = lambda prompt='', stream=None: _g_fake_input(prompt)
+
+
+# ---------------- منطق یوزربات (async) ----------------
+async def g_get_channel(client):
+    if _G['ch'] is not None and _G['ch_src'] == CHANNEL_LINK:
+        return _G['ch']
+    getter = getattr(client, 'get_entity', None) or getattr(client, 'get_chat')
+    ch = await getter(_g_parse_channel(CHANNEL_LINK))
+    _G['ch'], _G['ch_src'] = ch, CHANNEL_LINK
+    return ch
+
+
+async def g_raw_participants(client, ch):
+    """جواب خام GetParticipantsRequest با چند فیلتر (متدهای آماده‌ی کتابخونه برای این کانال خالی برمی‌گردن)."""
+    results = []
+    try:
+        inp = await client.get_input_entity(ch)
+    except Exception as e:
+        return [('get_input_entity', e)]
+    for name, flt in (('Recent', tl_types.ChannelParticipantsRecent()),
+                      ('Admins', tl_types.ChannelParticipantsAdmins())):
+        try:
+            res = await client(tl_functions.channels.GetParticipantsRequest(
+                channel=inp, filter=flt, offset=0, limit=200, hash=0))
+            results.append((name, res))
+        except Exception as e:
+            results.append((name, e))
+    return results
+
+
+async def g_list_members(client, ch):
+    ids = set()
+    try:
+        if hasattr(client, 'iter_participants'):
+            async for p in client.iter_participants(ch):
+                ids.add(p.id)
+        elif hasattr(client, 'get_participants'):
+            ids = {p.id for p in await client.get_participants(ch)}
+    except Exception as e:
+        print('[gate] list_members error:', repr(e))
+    if not ids and tl_functions is not None and tl_types is not None:
+        for _name, res in await g_raw_participants(client, ch):
+            if isinstance(res, Exception):
+                continue
+            ids.update(x.id for x in (getattr(res, 'users', None) or []))
+            if ids:
+                break
+    return ids
+
+
+async def g_refresh_members(client, force=False):
+    now = time.time()
+    if not force and now - _G['last_refresh'] < 10:
+        return
+    _G['last_refresh'] = now
+    ch = await g_get_channel(client)
+    ids = await g_list_members(client, ch)
+    if ids:
+        _G['members'] = set(ids)
+        _G['list_mode'] = 'full'
+    else:
+        _G['list_mode'] = 'live'
+    return len(ids)
+
+
+async def g_resolve_user(client, uid):
+    for getter in ('get_input_entity', 'get_entity'):
+        fn = getattr(client, getter, None)
+        if not fn:
+            continue
+        try:
+            return await fn(uid)
+        except Exception:
+            pass
+    if tl_types is not None and tl_functions is not None:
+        try:
+            iu = tl_types.InputUser(user_id=uid, access_hash=0)
+            res = await client(tl_functions.users.GetUsersRequest([iu]))
+            if res:
+                return await client.get_input_entity(res[0])
+        except Exception:
+            pass
+    return None
+
+
+def _g_is_member_participant(part):
+    if tl_types is None:
+        return True
+    return not isinstance(part, (tl_types.ChannelParticipantLeft, tl_types.ChannelParticipantBanned))
+
+
+async def g_check_one(client, ch, uid, force=False):
+    """True/False."""
+    if uid in _G['members']:
+        return True
+    user = await g_resolve_user(client, uid)
+    if user is None:
+        # اکانت هنوز این کاربر رو ندیده (مثلاً تازه عضو شده)؛ لیست رو تازه کن و دوباره تلاش کن
+        await g_refresh_members(client, force=force)
+        if uid in _G['members']:
+            return True
+        user = await g_resolve_user(client, uid)
+        if user is None:
+            return False
+
+    if tl_functions is not None:
+        try:
+            res = await client(tl_functions.channels.GetParticipantRequest(ch, user))
+            return _g_is_member_participant(res.participant)
+        except Exception as e:
+            if 'NotParticipant' in type(e).__name__:
+                return False
+            print('[gate] GetParticipant error:', repr(e))
+
+    if hasattr(client, 'get_chat_member'):
+        try:
+            m = await client.get_chat_member(ch, user)
+            status = str(getattr(m, 'status', '')).lower()
+            if status:
+                return not any(s in status for s in ('left', 'banned', 'kicked'))
+        except Exception as e:
+            print('[gate] get_chat_member error:', repr(e))
+
+    if hasattr(client, 'get_permissions'):
+        try:
+            if (await client.get_permissions(ch, user)) is not None:
+                return True
+        except Exception as e:
+            if 'NotParticipant' in type(e).__name__:
+                return False
+            print('[gate] get_permissions error:', repr(e))
+
+    return uid in _G['members']
+
+
+async def g_check_live(client, uid, force=False):
+    ch = await g_get_channel(client)
+    return await g_check_one(client, ch, uid, force=force)
+
+
+def g_register_join_handler(client):
+    if sp_events is None or not hasattr(client, 'add_event_handler'):
+        print('[gate] events پشتیبانی نمی‌شه؛ فقط چک زنده فعاله')
+        return
+    try:
+        async def _on_action(event):
+            try:
+                uids = list(getattr(event, 'user_ids', None) or [])
+                single = getattr(event, 'user_id', None)
+                if single is not None:
+                    uids.append(single)
+                if not uids:
+                    return
+                if getattr(event, 'user_left', False) or getattr(event, 'user_kicked', False):
+                    for x in uids:
+                        _G['members'].discard(x)
+                else:
+                    for x in uids:
+                        _G['members'].add(x)
+            except Exception as e:
+                print('[gate] event handler error:', repr(e))
+
+        client.add_event_handler(_on_action, sp_events.ChatAction())
+    except Exception as e:
+        print('[gate] register handler error:', repr(e))
+
+
+async def g_sync_loop(client, gen):
+    notified = None
+    while _G['gen'] == gen:
+        try:
+            n = await g_refresh_members(client, force=True)
+            key = (CHANNEL_LINK, _G['list_mode'])
+            if notified != key:
+                notified = key
+                if _G['list_mode'] == 'full':
+                    g_notify_admin(f'✅ کانال همگام شد ({n} عضو). عضویت‌ها از الان چک می‌شن.')
+                else:
+                    g_notify_admin('✅ به کانال وصل شدم. لیست کامل اعضا برنگشت، پس عضویت هر کاربر '
+                                   'موقع درخواست زنده چک می‌شه.')
+        except Exception as e:
+            print('[gate] sync error:', repr(e))
+            _G['ch'] = None
+            if notified != ('err', CHANNEL_LINK):
+                notified = ('err', CHANNEL_LINK)
+                g_notify_admin('⚠️ نتونستم به کانال وصل بشم. مطمئن شو لینک درسته و اکانت '
+                               f'({_G["account"] or "؟"}) مالک/ادمین کانال هست.\nخطا: {e!r}')
+        for _ in range(max(1, GATE_SYNC_INTERVAL // 5)):
+            if _G['gen'] != gen:
+                return
+            await asyncio.sleep(5)
+
+
+async def g_userbot_main(phone, gen):
+    _G['loop'] = asyncio.get_running_loop()
+
+    client = spluspy.Client(GATE_SESSION_NAME)
+    kwargs = {'phone': phone}
+    try:
+        if 'code_callback' in inspect.signature(client.start).parameters:
+            kwargs['code_callback'] = lambda: g_ask('code')
+    except (TypeError, ValueError):
+        pass
+
+    res = client.start(**kwargs)
+    if inspect.isawaitable(res):
+        await res
+
+    cfg = _g_cfg_load()
+    cfg['phone'] = phone
+    _g_cfg_save(cfg)
+
+    try:
+        me = client.get_me()
+        if inspect.isawaitable(me):
+            me = await me
+        uname = getattr(me, 'username', None)
+        _G['account'] = ('@' + uname) if uname else str(getattr(me, 'id', ''))
+    except Exception as e:
+        print('[gate] get_me error:', repr(e))
+
+    if _G['gen'] != gen:
+        return
+    g_register_join_handler(client)
+    _G['running'], _G['starting'], _G['client'] = True, False, client
+    g_notify_admin(f'✅ لاگین انجام شد. در حال همگام‌سازی کانال {CHANNEL_LINK} ...')
+
+    await g_sync_loop(client, gen)
+
+
+def g_userbot_thread(phone, gen):
+    try:
+        asyncio.run(g_userbot_main(phone, gen))
+    except Exception as e:
+        print('[gate] userbot error:', repr(e))
+        if _G['gen'] == gen:
+            _G['running'], _G['starting'], _G['waiting'] = False, False, None
+            g_notify_admin(f'❌ خطا در اتصال اکانت:\n{e!r}\n\nدوباره /start بزن.')
+
+
+def g_start_userbot(phone):
+    _G['gen'] += 1
+    gen = _G['gen']
+    _G.update({'phone': phone, 'starting': True, 'running': False, 'client': None, 'ch': None})
+    threading.Thread(target=g_userbot_thread, args=(phone, gen), daemon=True).start()
+
+
+def g_boot_restore():
+    if not (GATE_ENABLED and G_AVAILABLE):
+        return
+    phone = _g_cfg_load().get('phone')
+    has_session = any(not f.endswith(('-journal', '-wal', '-shm')) for f in glob.glob(GATE_SESSION_NAME + '*'))
+    if phone and has_session:
+        g_start_userbot(phone)
+
+
+async def _g_safe_disconnect(client):
+    res = client.disconnect()
+    if inspect.isawaitable(res):
+        await res
+
+
+def g_disconnect():
+    _G['gen'] += 1  # حلقه‌ی همگام‌سازی قبلی خودش تموم می‌شه
+    client, loop = _G['client'], _G['loop']
+    if client is not None and loop is not None:
+        try:
+            asyncio.run_coroutine_threadsafe(_g_safe_disconnect(client), loop).result(timeout=10)
+        except Exception:
+            pass
+    try:
+        _g_cfg_save({})
+    except Exception:
+        pass
+    for f in glob.glob(GATE_SESSION_NAME + '*'):
+        try:
+            os.remove(f)
+        except Exception:
+            pass
+    _G.update({'running': False, 'starting': False, 'waiting': None, 'phone': None, 'account': None,
+               'client': None, 'loop': None, 'ch': None, 'list_mode': None, 'members': set()})
+    with _member_cache_guard:
+        _member_cache.clear()
+
+
+# ---------------- چک عضویت (برای بقیه‌ی کد بات) ----------------
+def check_channel_member(user_id, use_cache=True):
+    """True (عضوه) / False (عضو نیست) / None (اکانت وصل نیست یا چک جواب نداد)."""
+    client, loop = _G['client'], _G['loop']
+    if not _G['running'] or client is None or loop is None:
+        return None
+    now = time.time()
+    if use_cache:
+        if user_id in _G['members']:
+            return True
+        with _member_cache_guard:
+            ts = _member_cache.get(user_id)
+        if ts and now - ts < GATE_CACHE_TTL:
+            return True
+    try:
+        fut = asyncio.run_coroutine_threadsafe(g_check_live(client, user_id, force=not use_cache), loop)
+        member = bool(fut.result(timeout=GATE_LIVE_TIMEOUT))
+    except Exception as e:
+        print('⚠️ خطا در چک عضویت:', repr(e))
+        return None
+    with _member_cache_guard:
+        if member:
+            _member_cache[user_id] = now
+        else:
+            _member_cache.pop(user_id, None)
+    return member
+
+
+# ---------------- لاگین اکانت از طریق چت ادمین ----------------
+def admin_gate_handler(update):
+    """پیام‌های ادمین مربوط به لاگین/مدیریت اکانت رو مدیریت می‌کنه. True یعنی مصرف شد."""
+    if not (GATE_ENABLED and G_AVAILABLE):
+        return False
+    m = update.get('message')
+    if not m:
+        return False
+    chat_id = m.get('chat', {}).get('id')
+    if chat_id != ADMIN_ID:
+        return False
+    text = (m.get('text') or '').strip()
+    contact = m.get('contact')
+    cmd = text.split()[0].split('@')[0].lower() if text.startswith('/') else ''
+
+    # جواب کد تأیید / رمز دومرحله‌ای (پیام بعد از دریافت پاک می‌شه)
+    if _G['waiting'] and text and not cmd:
+        _G_ANSWERS.put(text)
+        if m.get('message_id') is not None:
+            delete_message(chat_id, m['message_id'])
+        return True
+
+    if cmd == '/gatestatus':
+        status = '🟢 وصل' if _G['running'] else ('🟡 در حال وصل‌شدن' if _G['starting'] else '🔴 وصل نیست (/start)')
+        mode = {'full': 'لیست کامل', 'live': 'چک زنده'}.get(_G['list_mode'], '—')
+        g_notify_admin(f'وضعیت اکانت: {status}\nاکانت: {_G["account"] or "—"}\nکانال: {CHANNEL_LINK}\n'
+                       f'روش چک: {mode}\nاعضای کش‌شده: {len(_G["members"])}')
+        return True
+
+    if cmd == '/gatedisconnect':
+        g_disconnect()
+        g_notify_admin('🗑 اکانت قطع شد و سشن پاک شد. برای وصل‌شدن دوباره /start بزن.')
+        return True
+
+    if cmd == '/start' and not (_G['running'] or _G['starting'] or _G['waiting']):
+        _G_TSTATE['phone'] = True
+        send_message(chat_id, '📱 برای کنترل عضویت کاربرها تو کانال، شماره‌ی اکانتی رو بفرست که مالک/ادمین '
+                              'کانال هست (با دکمه‌ی زیر یا دستی تایپ کن).\nبرای رد شدن /cancel بزن.',
+                     parse_mode=None, reply_markup=G_CONTACT_KB)
+        return True
+
+    if _G_TSTATE.get('phone'):
+        if cmd == '/cancel':
+            _G_TSTATE.pop('phone', None)
+            send_message(chat_id, 'باشه، لغو شد.', parse_mode=None, reply_markup=G_REMOVE_KB)
+            main_menu(chat_id)
+            return True
+        if contact or (text and not cmd):
+            phone = g_normalize_phone((contact or {}).get('phone_number') or text)
+            if not phone:
+                send_message(chat_id, 'این رو نتونستم به‌عنوان شماره بخونم. دوباره بفرست.',
+                             parse_mode=None, reply_markup=G_CONTACT_KB)
+                return True
+            _G_TSTATE.pop('phone', None)
+            send_message(chat_id, f'📲 در حال ورود با شماره {phone} ...', parse_mode=None,
+                         reply_markup=G_REMOVE_KB)
+            g_start_userbot(phone)
+            return True
+    return False
+
+
+# ---------------- گیت روی آپدیت‌ها ----------------
+def join_keyboard(chat_id):
+    return {'inline_keyboard': [
+        [{'text': u(chat_id, 'btn_join_channel'), 'url': CHANNEL_LINK}],
+        [{'text': u(chat_id, 'btn_joined'), 'callback_data': 'check_join'}],
+    ]}
+
+
+def join_gate(update):
+    """True یعنی این آپدیت همین‌جا مدیریت شد (کاربر عضو نیست) و نباید به
+    process_update بره؛ False یعنی ادامه بده."""
+    if not (GATE_ENABLED and G_AVAILABLE):
+        return False
+
+    cb_id = None
+    is_check_btn = False
+    if 'callback_query' in update:
+        q = update['callback_query']
+        chat_id = q.get('message', {}).get('chat', {}).get('id')
+        user_id = (q.get('from') or {}).get('id', chat_id)
+        cb_id = q.get('id')
+        is_check_btn = (q.get('data') == 'check_join')
+    elif 'message' in update:
+        msg = update['message']
+        chat_id = msg.get('chat', {}).get('id')
+        user_id = (msg.get('from') or {}).get('id', chat_id)
+    else:
+        return False
+
+    if chat_id is None or user_id is None or chat_id == ADMIN_ID:
+        return False
+
+    if is_check_btn:
+        answer_callback(cb_id)
+        status = check_channel_member(user_id, use_cache=False)
+        if status is True:
+            add_user(chat_id)
+            user_steps[str(chat_id)] = {}
+            send_message(chat_id, u(chat_id, 'join_ok'))
+            main_menu(chat_id)
+        elif status is False:
+            send_message(chat_id, u(chat_id, 'join_not_yet'), reply_markup=join_keyboard(chat_id))
+        else:
+            send_message(chat_id, u(chat_id, 'join_check_error'), reply_markup=join_keyboard(chat_id))
+        return True
+
+    status = check_channel_member(user_id)
+    if status is True:
+        return False
+    if status is None and GATE_FAIL_OPEN:
+        return False
+
+    if cb_id:
+        answer_callback(cb_id)
+    if status is False:
+        send_message(chat_id, u(chat_id, 'join_required', divider=DIVIDER), reply_markup=join_keyboard(chat_id))
+    else:
+        send_message(chat_id, u(chat_id, 'join_check_error'), reply_markup=join_keyboard(chat_id))
+    return True
+
+
+g_boot_restore()
+
+
 def safe_process_update(update):
     """آپدیت رو پردازش می‌کنه، ولی قبلش قفل مخصوص همون chat_id رو می‌گیره.
     این یعنی دو تا آپدیت از دو کاربر مختلف هنوز کاملاً موازی پردازش می‌شن
@@ -3862,15 +4545,18 @@ def safe_process_update(update):
     try:
         if lock:
             with lock:
-                process_update(update)
+                if not admin_gate_handler(update) and not join_gate(update):
+                    process_update(update)
         else:
-            process_update(update)
+            if not admin_gate_handler(update) and not join_gate(update):
+                process_update(update)
     except Exception as e:
         print('⚠️ خطا در پردازش آپدیت:', e)
 
 
 while True:
     try:
+        _poll_started = time.time()
         updates = get_updates(last_update_id + 1)
 
         if updates.get('ok') and updates.get('result'):
@@ -3884,7 +4570,12 @@ while True:
                 UPDATE_EXECUTOR.submit(safe_process_update, update)
 
         else:
-            time.sleep(1)
+            # اگه سرور long-polling رو رعایت کرده (۲۵ ثانیه صبر کرده)، لازم نیست
+            # دوباره بخوابیم. فقط وقتی جواب فوری و خالی اومده یه وقفه‌ی خیلی کوتاه
+            # می‌ذاریم تا CPU نسوزه (قبلاً همیشه ۱ ثانیه بود و تا ۱ ثانیه به
+            # جواب پیام‌ها اضافه می‌کرد).
+            if time.time() - _poll_started < 3:
+                time.sleep(1 if not updates.get('ok') else 0.2)
 
     except Exception as loop_error:
         print('⚠️ خطای غیرمنتظره در حلقه اصلی:', loop_error)
