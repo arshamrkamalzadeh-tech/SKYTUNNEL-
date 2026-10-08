@@ -16,7 +16,7 @@ import queue
 import turso_serverless
 import secrets
 import hashlib
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 from concurrent.futures import ThreadPoolExecutor
 
 try:
@@ -1138,6 +1138,8 @@ def init_db():
         'ALTER TABLE users ADD COLUMN username TEXT',
         'ALTER TABLE users ADD COLUMN first_name TEXT',
         'ALTER TABLE users ADD COLUMN joined_at TEXT',
+        'ALTER TABLE users ADD COLUMN last_active TEXT',
+        'ALTER TABLE users ADD COLUMN last_action TEXT',
         'ALTER TABLE user_configs ADD COLUMN type TEXT',
         "ALTER TABLE user_configs ADD COLUMN status TEXT DEFAULT 'active'",
         'ALTER TABLE users ADD COLUMN kb_style TEXT',
@@ -1311,6 +1313,71 @@ def _upsert_user_info_db(user_id, username, first_name):
         (user_id, datetime.now().isoformat(), username, first_name))
     conn.commit()
     conn.close()
+
+
+_activity_cache = {}      # user_id -> (action, زمان آخرین نوشتن)
+ACTIVITY_THROTTLE_SEC = 20
+
+
+@with_db_retry
+def _touch_user_db(user_id, action, ts):
+    conn = get_conn()
+    c = conn.cursor()
+    c.execute('''INSERT INTO users (user_id, wallet, joined_at, last_active, last_action)
+        VALUES (?, 0, ?, ?, ?)
+        ON CONFLICT(user_id) DO UPDATE SET last_active=excluded.last_active,
+                                           last_action=excluded.last_action''',
+        (user_id, datetime.now().isoformat(), ts, action))
+    conn.commit()
+    conn.close()
+
+
+def _describe_update(update, step_name):
+    """آپدیت رو به مقدار خامی تبدیل می‌کنه که پنل (action_label) می‌فهمه:
+    cmd:/x ، btn:<key> ، cb:<data> ، photo ، step:<name> ، text"""
+    if 'callback_query' in update:
+        return 'cb:' + str((update['callback_query'].get('data') or ''))[:60]
+    message = update.get('message') or {}
+    text = message.get('text') or ''
+    if text.startswith('/'):
+        return 'cmd:' + text.split()[0][:40]
+    if text:
+        key = get_label_to_action_key().get(text)
+        if key:
+            return 'btn:' + key
+    if message.get('photo'):
+        return 'photo'
+    if step_name:
+        return 'step:' + str(step_name)
+    return 'text'
+
+
+def _record_activity(user_id, update, step_name):
+    try:
+        action = _describe_update(update, step_name)
+        now = time.time()
+        prev = _activity_cache.get(user_id)
+        if prev and prev[0] == action and now - prev[1] < ACTIVITY_THROTTLE_SEC:
+            return
+        _activity_cache[user_id] = (action, now)
+        ts = datetime.now(timezone.utc).isoformat(timespec='seconds')
+        _touch_user_db(user_id, action, ts)
+    except Exception as e:
+        print('⚠️ ثبت آخرین فعالیت ناموفق بود:', e)
+
+
+def track_activity(update):
+    """آخرین فعالیت کاربر رو تو پس‌زمینه ثبت می‌کنه (جواب کاربر معطل نمی‌شه)."""
+    if 'callback_query' in update:
+        chat_id = (update['callback_query'].get('message') or {}).get('chat', {}).get('id')
+    elif 'message' in update:
+        chat_id = (update['message'].get('chat') or {}).get('id')
+    else:
+        return
+    if chat_id is None:
+        return
+    step_name = (user_steps.get(str(chat_id)) or {}).get('step')   # قبل از اینکه هندلر step رو عوض کنه
+    BG_EXECUTOR.submit(_record_activity, chat_id, update, step_name)
 
 
 @with_db_retry
@@ -4703,6 +4770,10 @@ def safe_process_update(update):
 
     def _run():
         t0 = time.time()
+        try:
+            track_activity(update)
+        except Exception as e:
+            print('⚠️ track_activity:', e)
         handled = admin_gate_handler(update) or join_gate(update)
         t1 = time.time()
         if not handled:
