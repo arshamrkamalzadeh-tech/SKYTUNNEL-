@@ -3979,8 +3979,8 @@ GATE_SESSION_NAME = "gate_session"
 GATE_CONFIG_PATH = "gate_config.json"
 GATE_CODE_TIMEOUT = 300       # چند ثانیه منتظر کد/رمز از ادمین بمونه
 GATE_LIVE_TIMEOUT = 15        # حداکثر صبر برای چک زنده‌ی یک کاربر
-GATE_SYNC_INTERVAL = 300      # هر چند ثانیه لیست اعضا تازه بشه
-GATE_CACHE_TTL = 300          # عضوِ تاییدشده تا این مدت دوباره چک نمی‌شه
+GATE_SYNC_INTERVAL = max(5, int(os.getenv("GATE_SYNC_INTERVAL", "10") or 10))  # هر چند ثانیه لیست اعضا تازه بشه
+GATE_CACHE_TTL = 60           # عضوِ تاییدشده تا این مدت دوباره چک نمی‌شه
 
 try:
     import spluspy
@@ -4128,9 +4128,8 @@ async def g_raw_all_users(client, ch):
             parts = getattr(res, 'participants', None) or []
             if not parts:
                 break
-            ids.update(x.id for x in (getattr(res, 'users', None) or []))
             for pt in parts:
-                uid_ = getattr(pt, 'user_id', None)
+                uid_ = _g_part_uid(pt)
                 if uid_ is not None and _g_is_member_participant(pt):
                     ids.add(uid_)
             offset += len(parts)
@@ -4167,7 +4166,10 @@ async def g_deep_search(client, ch, have):
         except Exception as e:
             print('[gate] deep search error:', repr(e))
             break
-        extra.update(x.id for x in (getattr(res, 'users', None) or []))
+        for pt in (getattr(res, 'participants', None) or []):
+            uid_ = _g_part_uid(pt)
+            if uid_ is not None and _g_is_member_participant(pt):
+                extra.add(uid_)
     print(f'[gate] deep search found {len(extra)} ids')
     return extra
 
@@ -4226,6 +4228,15 @@ async def g_resolve_user(client, uid):
     return None
 
 
+def _g_part_uid(pt):
+    """آیدی کاربرِ یک participant (فقط خودِ participant؛ نه users جانبی مثل دعوت‌کننده)."""
+    uid_ = getattr(pt, 'user_id', None)
+    if uid_ is None:
+        peer = getattr(pt, 'peer', None)
+        uid_ = getattr(peer, 'user_id', None)
+    return uid_
+
+
 def _g_is_member_participant(part):
     if tl_types is None:
         return True
@@ -4234,15 +4245,22 @@ def _g_is_member_participant(part):
 
 async def g_check_one(client, ch, uid, force=False):
     """True/False."""
+    if force:
+        # چک اجباری (/start یا دکمه‌ی «عضو شدم»): اول لیست رو تازه کن تا لفت‌دادن‌ها دیده بشن
+        try:
+            await g_refresh_members(client, force=True)
+        except Exception as e:
+            print('[gate] forced refresh failed:', repr(e))
     if uid in _G['members']:
         return True
     # لیست قدیمیه (هر ۵ دقیقه همگام می‌شه)؛ قبل از هر کاری تازه‌اش کن
-    try:
-        await g_refresh_members(client, force=force)
-    except Exception as e:
-        print('[gate] refresh before check failed:', repr(e))
-    if uid in _G['members']:
-        return True
+    if not force:
+        try:
+            await g_refresh_members(client, force=False)
+        except Exception as e:
+            print('[gate] refresh before check failed:', repr(e))
+        if uid in _G['members']:
+            return True
     print(f'[gate] check uid={uid}: not in list (size={len(_G["members"])}, mode={_G["list_mode"]}, '
           f'ids={sorted(_G["members"])})')
     user = await g_resolve_user(client, uid)
@@ -4333,15 +4351,20 @@ async def g_sync_loop(client, gen):
                                    'موقع درخواست زنده چک می‌شه.')
         except Exception as e:
             print('[gate] sync error:', repr(e))
+            if 'flood' in repr(e).lower() or 'too_many' in repr(e).lower() or '429' in repr(e):
+                _G['flood'] = True
             _G['ch'] = None
             if notified != ('err', CHANNEL_LINK):
                 notified = ('err', CHANNEL_LINK)
                 g_notify_admin('⚠️ نتونستم به کانال وصل بشم. مطمئن شو لینک درسته و اکانت '
                                f'({_G["account"] or "؟"}) مالک/ادمین کانال هست.\nخطا: {e!r}')
-        for _ in range(max(1, GATE_SYNC_INTERVAL // 5)):
+        wait = GATE_SYNC_INTERVAL
+        if _G.pop('flood', False):
+            wait = max(wait, 60)  # محدودیت سرعت سروش پلاس؛ یه مدت آروم‌تر
+        for _ in range(int(wait)):
             if _G['gen'] != gen:
                 return
-            await asyncio.sleep(5)
+            await asyncio.sleep(1)
 
 
 async def g_userbot_main(phone, gen):
@@ -4496,6 +4519,8 @@ def check_channel_member(user_id, use_cache=True):
             _member_cache[user_id] = now
         else:
             _member_cache.pop(user_id, None)
+    if not member:
+        _G['members'].discard(user_id)
     return member
 
 
@@ -4623,7 +4648,8 @@ def join_gate(update):
             send_message(chat_id, u(chat_id, 'join_check_error'), reply_markup=join_keyboard(chat_id))
         return True
 
-    status = check_channel_member(user_id)
+    _txt = ((update.get('message') or {}).get('text') or '').strip()
+    status = check_channel_member(user_id, use_cache=not _txt.startswith('/start'))
     if status is True:
         return False
     if status is None and GATE_FAIL_OPEN:
