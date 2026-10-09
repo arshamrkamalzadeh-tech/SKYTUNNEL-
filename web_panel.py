@@ -2418,63 +2418,66 @@ THEMES = {
 SELLER_THEME_ORDER = [k for k in THEMES]
 
 
-# ⚠️ باید با LAYOUTS داخل app.py (پنل فروشندگان) یکی باشه (CSS فقط اون‌جاست)
+# ⚠️ باید با LAYOUTS داخل app.py (پنل فروشندگان) یکی باشه (CSS و رندرها فقط اون‌جاست)
 LAYOUTS = {
     'default':    {'name': 'مدرن گرد (پیش‌فرض)', 'suggest': '',
-                   'desc': 'همون ظاهر فعلی: کارت‌های خیلی گرد، گرادینت بنفش و منوی پایین.'},
-    'sanaei':     {'name': 'ثنایی', 'suggest': 'sanaei',
-                   'desc': 'الهام‌گرفته از پنل ثنایی (3x-ui): سایدبار تیره، کارت‌های تخت، تگ‌های کوچک و ظاهر اداری/ابزاری.'},
-    'pasarguard': {'name': 'پاسارگاد', 'suggest': 'pasarguard',
-                   'desc': 'الهام‌گرفته از داشبورد پاسارگاد: مینیمال و خنثی با کارت‌های خط‌دار، دکمه‌های ساده و منوی کناری روشن.'},
-    'glass':      {'name': 'شیشه‌ای (Aurora)', 'suggest': '',
-                   'desc': 'پس‌زمینه‌ی رنگی و محو، کارت‌های نیمه‌شفاف و منوی شناور پایین.'},
-    'compact':    {'name': 'فشرده (برای تعداد زیاد)', 'suggest': '',
-                   'desc': 'لیست یک‌خطی و فشرده؛ تو یک صفحه چند برابر کانفیگ بیشتری دیده می‌شه. روی دسکتاپ منوی بالا دارد.'},
-    'brutal':     {'name': 'بروتالیست (پررنگ)', 'suggest': '',
-                   'desc': 'حاشیه‌های ضخیم، سایه‌ی سخت و دکمه‌های فشاری؛ شاد و کاملاً متفاوت.'},
+                   'desc': 'همون ظاهر فعلی: کارت‌های گرد، گرادینت و منوی پایین.'},
+    'sanaei':     {'name': 'ثنایی (جدولی)', 'suggest': 'sanaei',
+                   'desc': 'الهام‌گرفته از پنل ثنایی: نوار بالای تیره، کاشی‌های وضعیت و کانفیگ‌ها داخل جدول. بدون منوی پایین (منو از دکمه‌ی بالا).'},
+    'pasarguard': {'name': 'پاسارگاد (ریل کناری)', 'suggest': 'pasarguard',
+                   'desc': 'الهام‌گرفته از پاسارگاد: ریل آیکونی کنار صفحه، کارت‌های خط‌دار و کانفیگ‌ها به‌شکل کاشی‌های دوستونه با نوار مصرف.'},
+    'bento':      {'name': 'موزاییک (Bento)', 'suggest': '',
+                   'desc': 'پس‌زمینه‌ی رنگی محو، کاشی‌های شیشه‌ای با اندازه‌های مختلف و کانفیگ‌ها به‌صورت کارت‌های بزرگِ افقی (با کشیدن ورق می‌خورن).'},
+    'console':    {'name': 'کنسول (ترمینال)', 'suggest': '',
+                   'desc': 'مشکی و سبز با فونت مونو و بدون گوشه‌ی گرد؛ هر کانفیگ یه خط با نوار مصرف. پالت ثابته و به تم رنگی کاری نداره.'},
+    'poster':     {'name': 'پوستر (بولد)', 'suggest': '',
+                   'desc': 'حاشیه‌ی ضخیم و سایه‌ی سخت؛ هر کانفیگ یه بلوک رنگی با عدد درشتِ روزهای مانده و اعتبار با عدد غول‌پیکر.'},
 }
 LAYOUT_ORDER = list(LAYOUTS)
+_LAYOUT_ALIAS = {'glass': 'bento', 'compact': 'console', 'brutal': 'poster'}   # اسم‌های نسخه‌ی قبل
 
 
 def _layout_preview(key, t):
-    """پیش‌نمایش کوچیک هر طراحی با رنگ‌های تم t (فقط از مقادیر validate‌شده ساخته می‌شه)."""
+    """پیش‌نمایش کوچیک ساختار هر طراحی (فقط از مقادیر validate‌شده ساخته می‌شه)."""
     bg, card, line, p, ink = t["bg"], t["card"], t["line"], t["p"], t["ink"]
-    def d(style, inner=""):
-        return f'<div style="{style}">{inner}</div>'
     A = "position:absolute;"
-    if key == "sanaei":
-        body = (d(A + "top:0;bottom:0;right:0;width:24%;background:#0b1a33") +
-                d(A + "top:8px;right:28%;left:8px;height:34px;border-radius:3px;background:" + p) +
-                d(A + f"top:48px;right:28%;left:8px;height:22px;border-radius:3px;background:{card};border:1px solid {line}") +
-                d(A + f"top:76px;right:28%;left:8px;height:22px;border-radius:3px;background:{card};border:1px solid {line}") +
-                d(A + "top:14px;right:5px;width:14px;height:5px;border-radius:2px;background:" + p))
-    elif key == "pasarguard":
-        body = (d(A + f"top:0;bottom:0;right:0;width:24%;background:{card};border-left:1px solid {line}") +
-                d(A + f"top:8px;right:28%;left:8px;height:34px;border-radius:7px;background:{card};border:1px solid {line}") +
-                d(A + f"top:48px;right:28%;left:8px;height:22px;border-radius:7px;background:{card};border:1px solid {line}") +
-                d(A + "top:78px;right:28%;width:36%;height:12px;border-radius:5px;background:" + p) +
-                d(A + f"top:12px;right:5px;width:14px;height:6px;border-radius:3px;background:{line}"))
-    elif key == "glass":
-        body = (d(A + "top:-20px;left:-10px;width:70px;height:70px;border-radius:50%;filter:blur(14px);background:" + p + "88") +
-                d(A + "bottom:-24px;right:-10px;width:80px;height:70px;border-radius:50%;filter:blur(16px);background:#ff78aa66") +
-                d(A + "top:9px;right:9px;left:9px;height:38px;border-radius:14px;background:rgba(255,255,255,.35);border:1px solid rgba(255,255,255,.7)") +
-                d(A + "top:54px;right:9px;left:9px;height:24px;border-radius:12px;background:rgba(255,255,255,.28);border:1px solid rgba(255,255,255,.6)") +
-                d(A + "bottom:6px;right:22%;left:22%;height:12px;border-radius:999px;background:rgba(255,255,255,.55);border:1px solid rgba(255,255,255,.8)"))
-    elif key == "compact":
-        rows = "".join(d(A + f"top:{8 + i * 20}px;right:9px;left:9px;height:16px;border-bottom:1px solid {line};background:{card}",
-                         d("position:absolute;right:4px;top:4px;width:30%;height:7px;border-radius:3px;background:" + ink + "55") +
-                         d("position:absolute;left:4px;top:4px;width:18%;height:7px;border-radius:3px;background:" + p)) for i in range(5))
-        body = rows
-    elif key == "brutal":
+    def d(style, inner=""):
+        return f'<div style="{A}{style}">{inner}</div>'
+    if key == "sanaei":      # نوار تیره + کاشی + جدول
+        body = (d("top:0;left:0;right:0;height:14px;background:#0b1a33") +
+                "".join(d(f"top:20px;right:{6 + i * 25}%;width:22%;height:16px;border-radius:2px;background:{card};border:1px solid {line}") for i in range(4)) +
+                d(f"top:42px;left:6px;right:6px;bottom:6px;border-radius:2px;background:{card};border:1px solid {line}",
+                  "".join(d(f"top:{4 + i * 14}px;left:4px;right:4px;height:1px;background:{line}") + d(f"top:{8 + i * 14}px;right:6px;width:30%;height:5px;border-radius:2px;background:{ink}44") + d(f"top:{8 + i * 14}px;left:6px;width:22%;height:5px;border-radius:2px;background:{p}") for i in range(4))))
+    elif key == "pasarguard":  # ریل کناری + کاشی دوستونه
+        body = (d(f"top:0;bottom:0;right:0;width:15%;background:{card};border-left:1px solid {line}") +
+                "".join(d(f"top:{8 + i * 17}px;right:3.5%;width:8%;height:9px;border-radius:3px;background:{p if i == 0 else line}") for i in range(4)) +
+                "".join(d(f"top:{10 + (i // 2) * 50}px;{'right:20%' if i % 2 == 0 else 'left:7px'};width:34%;height:44px;border-radius:7px;background:{card};border:1px solid {line}",
+                          d(f"bottom:14px;left:5px;right:5px;height:4px;border-radius:2px;background:{p}") + d(f"top:6px;right:6px;width:40%;height:5px;border-radius:2px;background:{ink}55")) for i in range(4)))
+    elif key == "bento":     # کاشی‌های مختلف + کارت افقی
+        g = "background:rgba(255,255,255,.4);border:1px solid rgba(255,255,255,.8)"
+        body = (d(f"top:-18px;left:-10px;width:70px;height:70px;border-radius:50%;filter:blur(14px);background:{p}88") +
+                d("bottom:-24px;right:-10px;width:80px;height:70px;border-radius:50%;filter:blur(16px);background:#ff78aa66") +
+                d(f"top:8px;right:8px;left:8px;height:34px;border-radius:14px;background:linear-gradient(135deg,{p},{p}99)") +
+                d(f"top:48px;right:8px;width:30%;height:26px;border-radius:12px;{g}") +
+                d(f"top:48px;right:35%;width:30%;height:26px;border-radius:12px;{g}") +
+                d(f"top:80px;right:8px;width:46%;height:24px;border-radius:14px;{g}") +
+                d(f"top:80px;left:-14px;width:46%;height:24px;border-radius:14px;{g}"))
+    elif key == "console":   # مشکی/سبز با خطوط
+        body = d("inset:0;background:#070b08") + "".join(
+            d(f"top:{10 + i * 20}px;left:8px;right:8px;height:14px;border-bottom:1px dashed #1f3626",
+              d("right:0;top:3px;width:26%;height:6px;background:#c8f7d2aa") +
+              d("right:34%;top:4px;width:34%;height:5px;background:repeating-linear-gradient(90deg,#39ff7a 0 4px,transparent 4px 6px)") +
+              d("left:0;top:3px;width:8px;height:8px;background:#39ff7a")) for i in range(5))
+    elif key == "poster":    # بلوک رنگی + عدد درشت
         b = f"2px solid {ink}"
-        body = (d(A + f"top:9px;right:9px;left:13px;height:34px;border-radius:8px;background:{p};border:{b};box-shadow:3px 3px 0 {ink}") +
-                d(A + f"top:54px;right:9px;left:13px;height:30px;border-radius:8px;background:{card};border:{b};box-shadow:3px 3px 0 {ink}") +
-                d(A + f"bottom:5px;right:9px;width:36%;height:10px;border-radius:6px;background:{p};border:{b}"))
-    else:  # default
-        body = (d(A + f"top:10px;right:9px;left:9px;height:38px;border-radius:12px;background:linear-gradient(160deg,{p},{p}99)") +
-                d(A + f"top:56px;right:9px;width:42%;height:26px;border-radius:10px;background:{card};border:1px solid {line}") +
-                d(A + f"top:56px;left:9px;width:42%;height:26px;border-radius:10px;background:{card};border:1px solid {line}") +
-                d(A + f"bottom:6px;right:9px;width:42%;height:10px;border-radius:999px;background:{p}"))
+        body = "".join(d(f"top:{8 + i * 50}px;right:9px;left:13px;height:42px;background:{card};border:{b};box-shadow:3px 3px 0 {ink}",
+                         d(f"top:0;bottom:0;right:0;width:30%;background:{p if i == 0 else '#e8a317'};border-left:{b}") +
+                         d(f"top:8px;left:8px;width:34%;height:6px;background:{ink}") + d(f"top:22px;left:8px;width:50%;height:7px;border:{b}")) for i in range(2))
+    else:                    # پیش‌فرض
+        body = (d(f"top:10px;right:9px;left:9px;height:38px;border-radius:12px;background:linear-gradient(160deg,{p},{p}99)") +
+                d(f"top:56px;right:9px;width:42%;height:26px;border-radius:10px;background:{card};border:1px solid {line}") +
+                d(f"top:56px;left:9px;width:42%;height:26px;border-radius:10px;background:{card};border:1px solid {line}") +
+                d(f"bottom:6px;right:9px;width:42%;height:10px;border-radius:999px;background:{p}"))
     return f'<div class="tc-prev" style="background:{bg}">{body}</div>'
 
 
@@ -2511,6 +2514,7 @@ def seller_theme_page():
               f'<div class="tc-box">{custom_prev}<span class="tc-name">🎨 سفارشی (رنگ دلخواه)</span></div></label>')
 
     cur_layout = settings.get("seller_layout", "default")
+    cur_layout = _LAYOUT_ALIAS.get(cur_layout, cur_layout)
     if cur_layout not in LAYOUTS:
         cur_layout = "default"
     prev_t = THEMES.get(current, THEMES["default"]) if current != "custom" else {"bg": "#f6f4ff", "card": "#ffffff", "line": "#e6e1fb", "p": cp, "ink": "#14112b"}
@@ -2564,7 +2568,7 @@ def seller_theme_save():
         return redirect(url_for("seller_theme_page"))
     sug = LAYOUTS[layout]["suggest"]
     # اگه ادمین طراحی ثنایی/پاسارگاد رو تازه انتخاب کرده و تیک «رنگ پیشنهادی» روشنه، رنگ هم عوض می‌شه
-    old_layout = get_all_settings().get("seller_layout", "default")
+    old_layout = _LAYOUT_ALIAS.get(get_all_settings().get("seller_layout", "default"), get_all_settings().get("seller_layout", "default"))
     if sug and request.form.get("apply_colors") and layout != old_layout:
         theme = sug
     if theme != "custom" and theme not in THEMES:
