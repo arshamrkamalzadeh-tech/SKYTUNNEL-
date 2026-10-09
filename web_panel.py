@@ -33,8 +33,9 @@ BASE_URL = "https://api.splus.ir/bot" + BOT_TOKEN
 
 PANEL_USERNAME = os.getenv("PANEL_USERNAME", "admin")
 PANEL_PASSWORD = os.getenv("PANEL_PASSWORD", "change-me-please")
-SECRET_KEY = os.getenv("SECRET_KEY", "x7Kp9mZq2vLwR4tYbN8jFcH1")
-INSECURE_DEFAULTS = (PANEL_PASSWORD == "change-me-please") or (SECRET_KEY == "sky-panel-secret-change-me")
+_DEFAULT_SECRET_KEY = "x7Kp9mZq2vLwR4tYbN8jFcH1"
+SECRET_KEY = os.getenv("SECRET_KEY", _DEFAULT_SECRET_KEY)
+INSECURE_DEFAULTS = (PANEL_PASSWORD == "change-me-please") or (SECRET_KEY == _DEFAULT_SECRET_KEY)
 
 # مقادیر پیش‌فرض (fallback) قیمت/کارت/حداقل شارژ — دقیقاً هم‌نام با کلیدهایی
 # که bot.py هم به‌عنوان fallback استفاده می‌کنه. مقدار واقعی و قابل‌تغییر از
@@ -589,6 +590,7 @@ def ensure_schema():
             "ALTER TABLE users ADD COLUMN lang TEXT",
             "ALTER TABLE resellers ADD COLUMN username TEXT",
             "ALTER TABLE resellers ADD COLUMN password_hash TEXT",
+            "ALTER TABLE resellers ADD COLUMN password_plain TEXT",
         ):
             try:
                 c.execute(stmt)
@@ -928,15 +930,32 @@ def reseller_username_taken(username, except_user_id):
 
 
 @with_db_retry
-def set_reseller_login(user_id, username=None, password_hash=None):
+def set_reseller_login(user_id, username=None, password_hash=None, password_plain=None):
     conn = get_conn()
     c = conn.cursor()
     if username is not None:
         c.execute("UPDATE resellers SET username=? WHERE user_id=?", (username, user_id))
     if password_hash is not None:
-        c.execute("UPDATE resellers SET password_hash=? WHERE user_id=?", (password_hash, user_id))
+        c.execute("UPDATE resellers SET password_hash=?, password_plain=? WHERE user_id=?",
+                  (password_hash, password_plain, user_id))
     conn.commit()
     conn.close()
+
+
+@with_db_retry
+def get_reseller_plain_passwords():
+    """{user_id: رمز_خام}. فقط برای رمزهایی که بعد از این آپدیت ثبت/تغییر کردن پر می‌شه."""
+    conn = get_conn()
+    c = conn.cursor()
+    try:
+        c.execute("SELECT user_id, password_plain FROM resellers WHERE password_plain IS NOT NULL AND password_plain <> ''")
+        res = {row[0]: row[1] for row in c.fetchall()}
+    except Exception as e:
+        if "stream" in str(e).lower():
+            raise
+        res = {}
+    conn.close()
+    return res
 
 
 @with_db_retry
@@ -995,6 +1014,25 @@ def hash_reseller_password(password):
     salt = secrets.token_hex(16)
     dk = hashlib.pbkdf2_hmac("sha256", password.encode("utf-8"), salt.encode("utf-8"), _PBKDF2_ITERS)
     return f"pbkdf2_sha256${_PBKDF2_ITERS}${salt}${dk.hex()}"
+
+
+def secret_widget(value, label_hint=""):
+    """رمز مخفی‌شده + دکمه‌ی نمایش و کپی."""
+    v = esc(value)
+    return (f'<span class="secret"><code class="masked" data-v="{v}">••••••••</code>'
+            f'<button type="button" class="mini" onclick="revealSecret(this)" title="نمایش / مخفی" aria-label="نمایش رمز">👁</button>'
+            f'<button type="button" class="mini" data-copy="{v}" onclick="copyFrom(this)" title="کپی" aria-label="کپی رمز">📋</button></span>')
+
+
+def copy_widget(value):
+    v = esc(value)
+    return (f'<span class="secret"><code>{v}</code>'
+            f'<button type="button" class="mini" data-copy="{v}" onclick="copyFrom(this)" title="کپی" aria-label="کپی">📋</button></span>')
+
+
+def login_info_text(username, password):
+    panel = get_setting("reseller_panel_url", DEFAULT_RESELLER_PANEL_URL)
+    return f"پنل: {panel}\nنام کاربری: {username}\nرمز عبور: {password}"
 
 
 # ---------------------------------------------------------------------------
@@ -1152,143 +1190,171 @@ BASE_HTML = """<!DOCTYPE html>
   (function () {
     var t = null;
     try { t = localStorage.getItem('sky-theme'); } catch (e) {}
-    if (!t) t = (window.matchMedia && matchMedia('(prefers-color-scheme: dark)').matches) ? 'dark' : 'light';
+    if (!t) t = 'dark';
     document.documentElement.setAttribute('data-theme', t);
   })();
 </script>
 <style>
   :root {
-    --bg: #f3f5fa; --surface: #ffffff; --surface-2: #f6f8fc; --border: #e2e7f0; --ink: #14213d; --muted: #66748f;
-    --brand: #3b5bfd; --brand-ink: #ffffff; --brand-dim: rgba(59,91,253,.10);
-    --side: #101a33; --side-ink: #b4c0de; --side-active: rgba(255,255,255,.09); --sun: #ffb324;
-    --ok: #0f8a63; --ok-dim: rgba(15,138,99,.12); --warn: #9a5b00; --warn-dim: rgba(255,179,36,.22);
-    --danger: #cf3d3d; --danger-dim: rgba(207,61,61,.10);
-    --shadow: 0 1px 2px rgba(16,26,51,.05), 0 6px 20px rgba(16,26,51,.05);
-    --radius: 16px; --nav-h: 66px;
+    --bg: #eef1fb; --surface: rgba(255,255,255,.78); --surface-2: rgba(240,243,255,.9); --border: rgba(99,102,241,.16); --ink: #121a3a; --muted: #62709a;
+    --g1: #6d4aff; --g2: #00b8e6; --g3: #ff4fa3;
+    --brand: #5b4bff; --brand-ink: #ffffff; --brand-dim: rgba(91,75,255,.12);
+    --grad: linear-gradient(135deg, var(--g1), var(--g2));
+    --side: #0c1230; --side-ink: #aab6e0; --side-active: rgba(255,255,255,.08); --sun: #ffb324;
+    --ok: #0b8f67; --ok-dim: rgba(11,143,103,.13); --warn: #a45f00; --warn-dim: rgba(255,179,36,.22);
+    --danger: #d23b57; --danger-dim: rgba(210,59,87,.11);
+    --shadow: 0 1px 2px rgba(20,24,70,.05), 0 10px 30px rgba(60,60,160,.09);
+    --glow: 0 6px 22px rgba(109,74,255,.35);
+    --radius: 18px; --nav-h: 70px; --blur: blur(14px) saturate(140%);
   }
   [data-theme="dark"] {
-    --bg: #0b1226; --surface: #131d38; --surface-2: #19254a; --border: #26345c; --ink: #e8edfb; --muted: #94a3c6;
-    --brand: #6f86ff; --brand-ink: #0b1226; --brand-dim: rgba(111,134,255,.16);
-    --side: #0a1020; --side-ink: #9fb0d8; --side-active: rgba(255,255,255,.07);
-    --ok: #3ddc97; --ok-dim: rgba(61,220,151,.14); --warn: #ffc457; --warn-dim: rgba(255,179,36,.16);
-    --danger: #ff7b7b; --danger-dim: rgba(255,123,123,.14);
-    --shadow: 0 1px 2px rgba(0,0,0,.25), 0 6px 20px rgba(0,0,0,.2);
+    --bg: #060a1a; --surface: rgba(17,24,52,.66); --surface-2: rgba(28,38,78,.62); --border: rgba(130,150,255,.15); --ink: #eaf0ff; --muted: #8f9dc6;
+    --g1: #8b6cff; --g2: #22d3ff; --g3: #ff5fae;
+    --brand: #8b7bff; --brand-ink: #ffffff; --brand-dim: rgba(139,123,255,.18);
+    --side: rgba(8,12,32,.82); --side-ink: #9eacd6; --side-active: rgba(255,255,255,.07);
+    --ok: #3ddc97; --ok-dim: rgba(61,220,151,.14); --warn: #ffc457; --warn-dim: rgba(255,179,36,.15);
+    --danger: #ff7b93; --danger-dim: rgba(255,123,147,.14);
+    --shadow: 0 1px 2px rgba(0,0,0,.35), 0 12px 34px rgba(0,0,0,.32);
+    --glow: 0 6px 26px rgba(139,108,255,.45);
   }
   * { box-sizing: border-box; }
   html { scroll-behavior: smooth; }
-  body { margin: 0; font-family: 'Vazirmatn', Tahoma, sans-serif; font-size: 14.5px; line-height: 1.8; background: var(--bg); color: var(--ink); -webkit-text-size-adjust: 100%; }
+  body { margin: 0; font-family: 'Vazirmatn', Tahoma, sans-serif; font-size: 14.5px; line-height: 1.8; background: var(--bg); color: var(--ink); -webkit-text-size-adjust: 100%; min-height: 100vh; }
+  body::before { content: ''; position: fixed; inset: 0; z-index: -2; pointer-events: none;
+    background: radial-gradient(900px 520px at 88% -8%, rgba(109,74,255,.26), transparent 62%),
+                radial-gradient(760px 520px at -4% 18%, rgba(0,184,230,.17), transparent 62%),
+                radial-gradient(820px 620px at 55% 118%, rgba(255,79,163,.13), transparent 62%); }
+  body::after { content: ''; position: fixed; inset: 0; z-index: -1; pointer-events: none; opacity: .5;
+    background-image: linear-gradient(var(--border) 1px, transparent 1px), linear-gradient(90deg, var(--border) 1px, transparent 1px);
+    background-size: 46px 46px; -webkit-mask-image: radial-gradient(ellipse at 50% 0%, #000 0%, transparent 70%); mask-image: radial-gradient(ellipse at 50% 0%, #000 0%, transparent 70%); }
   a { color: var(--brand); }
+  ::selection { background: var(--g1); color: #fff; }
   :focus-visible { outline: 3px solid var(--brand); outline-offset: 2px; }
-  code { font-family: ui-monospace, Menlo, Consolas, monospace; font-size: .92em; background: var(--surface-2); padding: 1px 6px; border-radius: 6px; direction: ltr; unicode-bidi: embed; }
+  code { font-family: ui-monospace, Menlo, Consolas, monospace; font-size: .92em; background: var(--surface-2); padding: 1px 8px; border-radius: 8px; direction: ltr; unicode-bidi: embed; border: 1px solid var(--border); }
   h2, h3, h4 { margin: 0; }
   h3 { font-size: 16.5px; margin: 0 0 12px; font-weight: 700; }
   .muted, small.muted { color: var(--muted); }
   .num { font-variant-numeric: tabular-nums; }
+  ::-webkit-scrollbar { width: 9px; height: 9px; }
+  ::-webkit-scrollbar-thumb { background: var(--border); border-radius: 9px; }
+  @keyframes fadeUp { from { opacity: 0; transform: translateY(12px); } to { opacity: 1; transform: none; } }
+  @keyframes spin { to { transform: rotate(360deg); } }
+  @keyframes floaty { 0%,100% { transform: translate(0,0) scale(1); } 50% { transform: translate(24px,-30px) scale(1.08); } }
+  @keyframes pulse { 0% { box-shadow: 0 0 0 0 rgba(61,220,151,.55); } 100% { box-shadow: 0 0 0 9px rgba(61,220,151,0); } }
 
   /* ---------- سایدبار (دسکتاپ) ---------- */
   .sidebar { display: none; }
   @media (min-width: 1000px) {
     :root { --nav-h: 0px; }
-    .sidebar { display: flex; flex-direction: column; position: fixed; top: 0; right: 0; bottom: 0; width: 262px; background: var(--side); color: var(--side-ink); padding: 22px 14px; overflow-y: auto; z-index: 30; }
-    .shell { margin-right: 262px; }
+    .sidebar { display: flex; flex-direction: column; position: fixed; top: 14px; right: 14px; bottom: 14px; width: 262px; background: var(--side); -webkit-backdrop-filter: var(--blur); backdrop-filter: var(--blur); color: var(--side-ink); padding: 20px 14px; overflow-y: auto; z-index: 30; border: 1px solid var(--border); border-radius: 24px; box-shadow: var(--shadow); }
+    .shell { margin-right: 290px; }
     .bottom-nav, .topbar { display: none !important; }
     .app { padding-bottom: 48px !important; }
   }
-  .brand { display: flex; align-items: center; gap: 12px; padding: 4px 8px 20px; }
-  .mark { width: 38px; height: 38px; border-radius: 50%; background: var(--sun); position: relative; overflow: hidden; flex-shrink: 0; }
-  .mark::after { content: ''; position: absolute; left: 0; right: 0; bottom: 0; height: 42%; background: var(--side); border-top: 2px solid #26345c; }
-  .brand b { display: block; color: #fff; font-size: 18px; line-height: 1.3; }
-  .brand span { font-size: 12px; opacity: .8; display: flex; align-items: center; gap: 6px; }
-  .dot { width: 8px; height: 8px; border-radius: 50%; display: inline-block; background: #3ddc97; }
-  .dot.off { background: #7d8aab; }
-  .nav-group { font-size: 11.5px; font-weight: 700; letter-spacing: .3px; opacity: .55; padding: 16px 12px 6px; }
-  .side-link { display: flex; align-items: center; gap: 12px; padding: 10px 12px; border-radius: 12px; color: var(--side-ink); text-decoration: none; font-weight: 500; font-size: 14.5px; }
+  .brand { display: flex; align-items: center; gap: 12px; padding: 4px 8px 18px; }
+  .mark { width: 40px; height: 40px; border-radius: 13px; background: var(--grad); position: relative; flex-shrink: 0; box-shadow: 0 0 24px rgba(124,92,255,.55); }
+  .mark::after { content: ''; position: absolute; inset: 9px; border-radius: 50%; border: 2.5px solid rgba(255,255,255,.92); border-top-color: transparent; animation: spin 6s linear infinite; }
+  .brand b { display: block; color: #fff; font-size: 18px; line-height: 1.3; letter-spacing: .3px; }
+  .brand span { font-size: 12px; opacity: .85; display: flex; align-items: center; gap: 6px; }
+  .dot { width: 8px; height: 8px; border-radius: 50%; display: inline-block; background: #3ddc97; animation: pulse 1.8s infinite; }
+  .dot.off { background: #7d8aab; animation: none; }
+  .nav-group { font-size: 11px; font-weight: 700; letter-spacing: .6px; opacity: .5; padding: 16px 12px 6px; }
+  .side-link { display: flex; align-items: center; gap: 12px; padding: 10px 12px; border-radius: 13px; color: var(--side-ink); text-decoration: none; font-weight: 500; font-size: 14.5px; transition: .18s; border: 1px solid transparent; }
   .side-link svg { width: 20px; height: 20px; flex-shrink: 0; }
-  .side-link:hover { background: var(--side-active); color: #fff; }
-  .side-link.active { background: var(--brand); color: #fff; font-weight: 700; }
+  .side-link:hover { background: var(--side-active); color: #fff; transform: translateX(-3px); }
+  .side-link.active { background: var(--grad); color: #fff; font-weight: 700; box-shadow: var(--glow); }
   .side-foot { margin-top: auto; padding-top: 16px; display: flex; gap: 8px; }
-  .side-foot a, .side-foot button { flex: 1; text-align: center; padding: 9px 10px; border-radius: 10px; font-size: 13px; background: var(--side-active); color: #fff; border: none; text-decoration: none; cursor: pointer; font-family: inherit; font-weight: 600; }
+  .side-foot a, .side-foot button { flex: 1; text-align: center; padding: 9px 10px; border-radius: 12px; font-size: 13px; background: var(--side-active); color: #fff; border: 1px solid var(--border); text-decoration: none; cursor: pointer; font-family: inherit; font-weight: 600; box-shadow: none; }
+  .side-foot a:hover, .side-foot button:hover { background: rgba(255,255,255,.14); filter: none; transform: none; }
 
   /* ---------- نوار بالا و پایین (موبایل) ---------- */
-  .topbar { position: sticky; top: 0; z-index: 20; background: var(--side); color: #fff; padding: calc(env(safe-area-inset-top, 0px) + 10px) 16px 10px; display: flex; align-items: center; justify-content: space-between; border-bottom: 3px solid var(--sun); }
+  .topbar { position: sticky; top: 0; z-index: 20; background: var(--side); -webkit-backdrop-filter: var(--blur); backdrop-filter: var(--blur); color: #fff; padding: calc(env(safe-area-inset-top, 0px) + 10px) 16px 10px; display: flex; align-items: center; justify-content: space-between; border-bottom: 1px solid var(--border); }
   .topbar .brand { padding: 0; }
   .topbar .brand b { font-size: 17px; }
-  .icon-btn { width: 38px; height: 38px; border-radius: 10px; border: 1px solid rgba(255,255,255,.16); background: transparent; color: #dbe3f7; display: inline-flex; align-items: center; justify-content: center; cursor: pointer; font-size: 17px; text-decoration: none; font-family: inherit; }
-  .bottom-nav { position: fixed; bottom: 0; left: 0; right: 0; z-index: 40; background: var(--side); padding-bottom: env(safe-area-inset-bottom, 0px); }
+  .icon-btn { width: 38px; height: 38px; border-radius: 12px; border: 1px solid rgba(255,255,255,.16); background: rgba(255,255,255,.05); color: #dbe3f7; display: inline-flex; align-items: center; justify-content: center; cursor: pointer; font-size: 17px; text-decoration: none; font-family: inherit; padding: 0; box-shadow: none; }
+  .bottom-nav { position: fixed; bottom: 10px; left: 10px; right: 10px; z-index: 40; background: var(--side); -webkit-backdrop-filter: var(--blur); backdrop-filter: var(--blur); border: 1px solid var(--border); border-radius: 22px; margin-bottom: env(safe-area-inset-bottom, 0px); box-shadow: var(--shadow); }
   .nav-inner { max-width: 760px; margin: 0 auto; display: flex; }
-  .bottom-nav a { flex: 1; display: flex; flex-direction: column; align-items: center; gap: 2px; padding: 9px 4px 8px; color: var(--side-ink); text-decoration: none; font-size: 11.5px; border-top: 3px solid transparent; }
+  .bottom-nav a { flex: 1; display: flex; flex-direction: column; align-items: center; gap: 2px; padding: 9px 4px 8px; color: var(--side-ink); text-decoration: none; font-size: 11.5px; position: relative; }
   .bottom-nav a svg { width: 22px; height: 22px; }
-  .bottom-nav a.active { color: #fff; font-weight: 700; border-top-color: var(--sun); }
-  .drawer-overlay { display: none; position: fixed; inset: 0; background: rgba(8,13,28,.6); z-index: 50; }
+  .bottom-nav a.active { color: #fff; font-weight: 700; }
+  .bottom-nav a.active::before { content: ''; position: absolute; top: 0; width: 28px; height: 3px; border-radius: 3px; background: var(--grad); box-shadow: var(--glow); }
+  .drawer-overlay { display: none; position: fixed; inset: 0; background: rgba(4,7,20,.65); -webkit-backdrop-filter: blur(4px); backdrop-filter: blur(4px); z-index: 50; }
   .drawer-overlay:target { display: block; }
-  .drawer { position: absolute; bottom: 0; left: 50%; transform: translateX(-50%); width: 100%; max-width: 760px; background: var(--surface); border-radius: 22px 22px 0 0; padding: 10px 20px calc(env(safe-area-inset-bottom, 0px) + 24px); max-height: 84vh; overflow-y: auto; }
+  .drawer { position: absolute; bottom: 0; left: 50%; transform: translateX(-50%); width: 100%; max-width: 760px; background: var(--bg); border: 1px solid var(--border); border-radius: 26px 26px 0 0; padding: 10px 20px calc(env(safe-area-inset-bottom, 0px) + 24px); max-height: 84vh; overflow-y: auto; }
   .drawer .handle { width: 40px; height: 4px; background: var(--border); border-radius: 4px; margin: 8px auto 12px; }
   .drawer h4 { font-size: 12px; color: var(--muted); margin: 16px 0 2px; }
   .drawer a.dl { display: flex; align-items: center; gap: 12px; padding: 12px 2px; color: var(--ink); text-decoration: none; font-weight: 600; border-bottom: 1px solid var(--border); }
   .drawer a.dl svg { width: 20px; height: 20px; color: var(--brand); }
 
   /* ---------- محتوا ---------- */
-  .app { max-width: 1120px; margin: 0 auto; padding: 22px 16px calc(var(--nav-h) + env(safe-area-inset-bottom, 0px) + 40px); }
-  @media (min-width: 1000px) { .app { padding: 32px 36px 48px; } }
+  .app { max-width: 1140px; margin: 0 auto; padding: 22px 16px calc(var(--nav-h) + env(safe-area-inset-bottom, 0px) + 40px); animation: fadeUp .45s both; }
+  @media (max-width: 999px) { .app { padding-bottom: calc(100px + env(safe-area-inset-bottom, 0px)); } }
+  @media (min-width: 1000px) { .app { padding: 32px 30px 48px; } }
   .page-head { display: flex; align-items: center; justify-content: space-between; gap: 12px; flex-wrap: wrap; margin-bottom: 18px; }
-  .page-title { font-size: 26px; font-weight: 800; line-height: 1.4; margin: 0; }
-  .panel, .card { background: var(--surface); border: 1px solid var(--border); border-radius: var(--radius); padding: 18px 20px; margin-bottom: 16px; box-shadow: var(--shadow); }
+  .page-title { font-size: 27px; font-weight: 800; line-height: 1.4; margin: 0; background: linear-gradient(90deg, var(--ink), var(--brand)); -webkit-background-clip: text; background-clip: text; -webkit-text-fill-color: transparent; }
+  .panel, .card { background: var(--surface); -webkit-backdrop-filter: var(--blur); backdrop-filter: var(--blur); border: 1px solid var(--border); border-radius: var(--radius); padding: 18px 20px; margin-bottom: 16px; box-shadow: var(--shadow); animation: fadeUp .5s both; transition: border-color .2s, transform .2s; }
+  .card:hover { border-color: rgba(139,123,255,.38); }
   .panel > h3:first-child, .card > h3:first-child { margin-top: 0; }
   .grid { display: grid; gap: 14px; }
   .grid.cols-2 { grid-template-columns: repeat(auto-fit, minmax(300px, 1fr)); }
   .stats { display: grid; grid-template-columns: repeat(auto-fit, minmax(170px, 1fr)); gap: 12px; margin-bottom: 16px; }
-  .stat { background: var(--surface); border: 1px solid var(--border); border-radius: var(--radius); padding: 14px 16px; box-shadow: var(--shadow); display: flex; flex-direction: column; gap: 2px; }
+  .stat { background: var(--surface); -webkit-backdrop-filter: var(--blur); backdrop-filter: var(--blur); border: 1px solid var(--border); border-radius: var(--radius); padding: 14px 16px; box-shadow: var(--shadow); display: flex; flex-direction: column; gap: 2px; position: relative; overflow: hidden; animation: fadeUp .5s both; transition: transform .2s, border-color .2s; }
+  .stat::before { content: ''; position: absolute; top: 0; right: 0; left: 0; height: 3px; background: var(--grad); opacity: .85; }
+  .stat:hover { transform: translateY(-3px); border-color: rgba(139,123,255,.4); }
   .stat span { font-size: 12.5px; color: var(--muted); }
-  .stat b { font-size: 22px; font-weight: 800; line-height: 1.4; }
+  .stat b { font-size: 23px; font-weight: 800; line-height: 1.4; }
   .stat small { color: var(--muted); font-size: 12px; }
-  .hero { background: linear-gradient(135deg, #1b2c5c, #101a33); color: #fff; border-radius: 22px; padding: 24px; margin-bottom: 16px; position: relative; overflow: hidden; }
-  .hero::after { content: ''; position: absolute; left: -50px; bottom: -80px; width: 190px; height: 190px; border-radius: 50%; background: var(--sun); opacity: .95; }
+  .hero { background: linear-gradient(135deg, #3a1fb8 0%, #1a2a8f 45%, #0a6fa3 100%); color: #fff; border-radius: 26px; padding: 26px; margin-bottom: 16px; position: relative; overflow: hidden; box-shadow: 0 14px 44px rgba(70,50,200,.38); animation: fadeUp .5s both; }
+  .hero::before { content: ''; position: absolute; left: -60px; top: -80px; width: 260px; height: 260px; border-radius: 50%; background: radial-gradient(circle, rgba(255,79,163,.55), transparent 68%); animation: floaty 9s ease-in-out infinite; }
+  .hero::after { content: ''; position: absolute; right: -40px; bottom: -90px; width: 240px; height: 240px; border-radius: 50%; background: radial-gradient(circle, rgba(34,211,255,.5), transparent 68%); animation: floaty 11s ease-in-out infinite reverse; }
   .hero > * { position: relative; z-index: 1; }
-  .hero-label { font-size: 13px; color: #b4c0de; }
-  .hero-number { font-size: 44px; font-weight: 800; line-height: 1.3; margin: 2px 0 8px; }
-  .hero-unit { font-size: 16px; margin-right: 8px; color: #b4c0de; font-weight: 500; }
-  .hero-meta { display: flex; gap: 26px; flex-wrap: wrap; padding-top: 12px; border-top: 1px solid rgba(255,255,255,.14); }
+  .hero-label { font-size: 13px; color: #cdd6ff; }
+  .hero-number { font-size: 46px; font-weight: 800; line-height: 1.3; margin: 2px 0 8px; text-shadow: 0 4px 24px rgba(0,0,0,.3); }
+  .hero-unit { font-size: 16px; margin-right: 8px; color: #cdd6ff; font-weight: 500; }
+  .hero-meta { display: flex; gap: 26px; flex-wrap: wrap; padding-top: 12px; border-top: 1px solid rgba(255,255,255,.2); }
   .hero-meta div { display: flex; flex-direction: column; }
   .hero-meta b { font-size: 18px; }
-  .hero-meta span { font-size: 12px; color: #b4c0de; }
+  .hero-meta span { font-size: 12px; color: #cdd6ff; }
   .ledger-row { display: flex; justify-content: space-between; gap: 12px; padding: 10px 0; border-bottom: 1px dashed var(--border); }
   .ledger-row:last-child { border-bottom: none; }
   .ledger-row span { color: var(--muted); }
-  .row-link { display: flex; align-items: center; gap: 12px; padding: 11px 0; text-decoration: none; color: var(--ink); border-bottom: 1px solid var(--border); }
+  .row-link { display: flex; align-items: center; gap: 12px; padding: 11px 8px; margin: 0 -8px; border-radius: 12px; text-decoration: none; color: var(--ink); border-bottom: 1px solid var(--border); transition: background .15s; }
+  .row-link:hover { background: var(--brand-dim); }
   .row-link:last-child { border-bottom: none; }
   .row-main { flex: 1; display: flex; flex-direction: column; min-width: 0; }
   .row-main small { color: var(--muted); font-size: 12.5px; }
   .chev { color: var(--muted); font-size: 22px; }
-  .icon-badge { width: 38px; height: 38px; border-radius: 11px; background: var(--warn-dim); display: flex; align-items: center; justify-content: center; flex-shrink: 0; }
+  .icon-badge { width: 38px; height: 38px; border-radius: 12px; background: var(--warn-dim); display: flex; align-items: center; justify-content: center; flex-shrink: 0; }
   .empty-note { color: var(--muted); margin: 4px 0 0; }
-  .alert { background: var(--warn-dim); color: var(--warn); border-radius: 12px; padding: 12px 16px; margin-bottom: 16px; font-weight: 600; font-size: 13.5px; }
+  .alert { background: var(--warn-dim); color: var(--warn); border: 1px solid rgba(255,179,36,.3); border-radius: 14px; padding: 12px 16px; margin-bottom: 16px; font-weight: 600; font-size: 13.5px; }
   .chart { width: 100%; height: auto; display: block; }
-  .chart .bar { fill: var(--brand); }
-  .chart .bar:hover { opacity: .75; }
+  .chart .bar { fill: var(--brand); filter: drop-shadow(0 0 6px rgba(139,123,255,.55)); transition: opacity .15s; }
+  .chart .bar:hover { opacity: .7; }
   .chart text { fill: var(--muted); font-size: 10px; font-family: inherit; }
-  .chart .gridline { stroke: var(--border); stroke-width: 1; }
+  .chart .gridline { stroke: var(--border); stroke-width: 1; stroke-dasharray: 3 4; }
 
   /* ---------- جدول ---------- */
-  table { display: block; max-width: 100%; overflow-x: auto; border-collapse: collapse; background: var(--surface); border-radius: 14px; border: 1px solid var(--border); margin-bottom: 14px; box-shadow: var(--shadow); }
+  table { display: block; max-width: 100%; overflow-x: auto; border-collapse: collapse; background: var(--surface); -webkit-backdrop-filter: var(--blur); backdrop-filter: var(--blur); border-radius: 16px; border: 1px solid var(--border); margin-bottom: 14px; box-shadow: var(--shadow); }
   th, td { padding: 11px 14px; text-align: right; border-bottom: 1px solid var(--border); font-size: 13.5px; white-space: nowrap; vertical-align: middle; }
   th { background: var(--surface-2); color: var(--muted); font-weight: 600; font-size: 12.5px; }
   tr:last-child td { border-bottom: none; }
-  tbody tr:hover td { background: var(--surface-2); }
+  tbody tr { transition: background .15s; }
+  tbody tr:hover td { background: var(--brand-dim); }
   td.wrap { white-space: normal; min-width: 180px; }
   @media (max-width: 700px) {
-    table.rt { display: block; border: none; background: none; box-shadow: none; overflow: visible; }
+    table.rt { display: block; border: none; background: none; box-shadow: none; overflow: visible; -webkit-backdrop-filter: none; backdrop-filter: none; }
     table.rt thead { display: none; }
     table.rt tbody, table.rt tr { display: block; }
-    table.rt tr { background: var(--surface); border: 1px solid var(--border); border-radius: 14px; margin-bottom: 10px; padding: 6px 14px; box-shadow: var(--shadow); }
+    table.rt tr { background: var(--surface); -webkit-backdrop-filter: var(--blur); backdrop-filter: var(--blur); border: 1px solid var(--border); border-radius: 16px; margin-bottom: 10px; padding: 6px 14px; box-shadow: var(--shadow); }
     table.rt td { display: flex; justify-content: space-between; align-items: center; gap: 14px; border: none; padding: 7px 0; white-space: normal; text-align: left; }
     table.rt td::before { content: attr(data-label); color: var(--muted); font-size: 12px; flex-shrink: 0; text-align: right; }
     table.rt tbody tr:hover td { background: none; }
   }
 
   /* ---------- فرم‌ها ---------- */
-  input[type=text], input[type=number], input[type=password], textarea, select {
-    background: var(--surface); border: 1.5px solid var(--border); color: var(--ink); border-radius: 11px; padding: 10px 14px; font-size: 14.5px; width: 100%; font-family: inherit; }
-  input:focus, textarea:focus, select:focus { outline: none; border-color: var(--brand); box-shadow: 0 0 0 3px var(--brand-dim); }
+  input[type=text], input[type=number], input[type=password], input[type=search], textarea, select {
+    background: var(--surface-2); border: 1.5px solid var(--border); color: var(--ink); border-radius: 13px; padding: 10px 14px; font-size: 14.5px; width: 100%; font-family: inherit; transition: border-color .15s, box-shadow .15s; }
+  input:focus, textarea:focus, select:focus { outline: none; border-color: var(--brand); box-shadow: 0 0 0 4px var(--brand-dim); }
   textarea { min-height: 110px; resize: vertical; }
   label { display: block; margin: 14px 0 6px; font-size: 13px; color: var(--muted); font-weight: 600; }
   input[type=radio], input[type=checkbox] { width: auto; accent-color: var(--brand); }
@@ -1297,26 +1363,28 @@ BASE_HTML = """<!DOCTYPE html>
   .reorder-row label { margin-top: 0; }
   .reorder-arrows { display: flex; flex-direction: column; gap: 4px; margin-bottom: 1px; }
   .reorder-arrows button { padding: 4px 11px; font-size: 11px; line-height: 1.4; }
-  button, .btn { background: var(--brand); color: var(--brand-ink); border: 1.5px solid var(--brand); border-radius: 11px; padding: 9px 18px; font-size: 14px; font-weight: 700; cursor: pointer; font-family: inherit; text-decoration: none; display: inline-block; line-height: 1.7; }
-  button:hover, .btn:hover { filter: brightness(1.08); }
-  button.secondary, .btn.secondary { background: transparent; color: var(--ink); border-color: var(--border); }
-  button.secondary:hover, .btn.secondary:hover { background: var(--surface-2); filter: none; }
-  button.danger, .btn.danger { background: transparent; color: var(--danger); border-color: var(--danger-dim); }
-  button.danger:hover, .btn.danger:hover { background: var(--danger-dim); filter: none; }
-  button.sm, .btn.sm { padding: 4px 12px; font-size: 12.5px; border-radius: 9px; }
+  button, .btn { background: var(--grad); color: var(--brand-ink); border: 1.5px solid transparent; border-radius: 13px; padding: 9px 18px; font-size: 14px; font-weight: 700; cursor: pointer; font-family: inherit; text-decoration: none; display: inline-block; line-height: 1.7; box-shadow: var(--glow); transition: transform .15s, filter .15s, box-shadow .15s; }
+  button:hover, .btn:hover { filter: brightness(1.1); transform: translateY(-1px); }
+  button:active, .btn:active { transform: translateY(0) scale(.98); }
+  button.secondary, .btn.secondary { background: var(--surface-2); color: var(--ink); border-color: var(--border); box-shadow: none; }
+  button.secondary:hover, .btn.secondary:hover { border-color: var(--brand); filter: none; }
+  button.danger, .btn.danger { background: var(--danger-dim); color: var(--danger); border-color: transparent; box-shadow: none; }
+  button.danger:hover, .btn.danger:hover { background: var(--danger); color: #fff; filter: none; }
+  button.sm, .btn.sm { padding: 4px 12px; font-size: 12.5px; border-radius: 10px; }
   .btn.block, button.block { width: 100%; text-align: center; }
   .badge { padding: 2px 11px; border-radius: 999px; font-size: 12px; font-weight: 700; display: inline-block; white-space: nowrap; }
   .badge.on, .badge.answered, .badge.approved { background: var(--ok-dim); color: var(--ok); }
   .badge.off, .badge.rejected { background: var(--danger-dim); color: var(--danger); }
   .badge.open, .badge.pending { background: var(--warn-dim); color: var(--warn); }
   .badge.closed { background: var(--surface-2); color: var(--muted); }
-  .flash { background: var(--ok-dim); color: var(--ok); padding: 11px 16px; border-radius: 12px; margin-bottom: 12px; font-size: 14px; font-weight: 600; }
-  .flash.error { background: var(--danger-dim); color: var(--danger); }
+  .flash { background: var(--ok-dim); color: var(--ok); padding: 11px 16px; border-radius: 14px; margin-bottom: 12px; font-size: 14px; font-weight: 600; border: 1px solid rgba(61,220,151,.25); animation: fadeUp .35s both; }
+  .flash.error { background: var(--danger-dim); color: var(--danger); border-color: rgba(255,123,147,.3); }
   .flex { display: flex; gap: 10px; align-items: center; flex-wrap: wrap; }
   .pager { display: flex; gap: 8px; margin: 14px 0; flex-wrap: wrap; }
   .chips-row { display: flex; gap: 8px; flex-wrap: wrap; margin-bottom: 14px; }
-  .pill { padding: 6px 14px; border-radius: 999px; border: 1px solid var(--border); background: var(--surface); color: var(--ink); text-decoration: none; font-size: 13px; font-weight: 600; }
-  .pill.active { background: var(--brand); color: var(--brand-ink); border-color: var(--brand); }
+  .pill { padding: 6px 14px; border-radius: 999px; border: 1px solid var(--border); background: var(--surface); color: var(--ink); text-decoration: none; font-size: 13px; font-weight: 600; transition: .15s; }
+  .pill:hover { border-color: var(--brand); }
+  .pill.active { background: var(--grad); color: #fff; border-color: transparent; box-shadow: var(--glow); }
   .kv { display: grid; grid-template-columns: repeat(auto-fit, minmax(190px, 1fr)); gap: 14px; }
   .kv div span { display: block; font-size: 12px; color: var(--muted); }
   .kv div b { font-size: 15px; }
@@ -1329,14 +1397,50 @@ BASE_HTML = """<!DOCTYPE html>
   .switch-row:last-child { border-bottom: none; }
   .savebar { position: sticky; bottom: calc(var(--nav-h) + env(safe-area-inset-bottom, 0px) + 10px); z-index: 5; padding: 10px 0; }
 
+  /* ---------- نمایش اطلاعات ورود فروشنده ---------- */
+  .secret { display: inline-flex; align-items: center; gap: 6px; max-width: 100%; }
+  .secret code { min-width: 74px; text-align: center; letter-spacing: .4px; user-select: all; }
+  .secret code.masked { letter-spacing: 2px; color: var(--muted); user-select: none; }
+  .mini { width: 30px; height: 30px; padding: 0; border-radius: 9px; font-size: 14px; line-height: 1; background: var(--surface-2); color: var(--ink); border: 1px solid var(--border); box-shadow: none; display: inline-flex; align-items: center; justify-content: center; }
+  .mini:hover { border-color: var(--brand); background: var(--brand-dim); filter: none; }
+  .cred-box { background: var(--surface-2); border: 1px dashed var(--border); border-radius: 16px; padding: 14px 16px; margin-bottom: 14px; display: grid; gap: 12px; grid-template-columns: repeat(auto-fit, minmax(230px, 1fr)); }
+  .cred-box > div > span { display: block; font-size: 12px; color: var(--muted); margin-bottom: 3px; }
+  .search-box { position: relative; flex: 1; min-width: 220px; }
+  .search-box input { padding-right: 40px; }
+  .search-box::before { content: '🔎'; position: absolute; right: 13px; top: 50%; transform: translateY(-50%); font-size: 14px; pointer-events: none; opacity: .75; }
+  .toast { position: fixed; bottom: 96px; left: 50%; transform: translate(-50%, 20px); background: var(--grad); color: #fff; padding: 10px 22px; border-radius: 999px; font-weight: 700; font-size: 13.5px; box-shadow: var(--glow); opacity: 0; pointer-events: none; transition: .3s; z-index: 99; }
+  .toast.show { opacity: 1; transform: translate(-50%, 0); }
+
+  /* ---------- انتخاب تم پنل فروشندگان ---------- */
+  .theme-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(170px, 1fr)); gap: 14px; }
+  .theme-card { display: block; margin: 0; cursor: pointer; position: relative; }
+  .theme-card input { position: absolute; opacity: 0; pointer-events: none; }
+  .theme-card .tc-box { border: 2px solid var(--border); border-radius: 18px; padding: 10px; background: var(--surface); transition: .18s; }
+  .theme-card:hover .tc-box { transform: translateY(-3px); border-color: var(--brand); }
+  .theme-card input:checked + .tc-box { border-color: var(--brand); box-shadow: var(--glow); }
+  .theme-card input:checked + .tc-box::after { content: '✓ فعال'; position: absolute; top: 14px; left: 14px; background: var(--grad); color: #fff; font-size: 11.5px; font-weight: 700; padding: 1px 10px; border-radius: 999px; }
+  .theme-card input:focus-visible + .tc-box { outline: 3px solid var(--brand); outline-offset: 2px; }
+  .tc-name { font-weight: 700; font-size: 14px; color: var(--ink); display: block; margin-top: 8px; text-align: center; }
+  .tc-prev { border-radius: 12px; padding: 10px 9px 9px; height: 112px; position: relative; overflow: hidden; }
+  .tc-prev .tc-credit { height: 38px; border-radius: 11px; margin-bottom: 7px; }
+  .tc-prev .tc-row { display: flex; gap: 6px; }
+  .tc-prev .tc-c { flex: 1; height: 26px; border-radius: 9px; border: 1px solid transparent; }
+  .tc-prev .tc-btn { height: 12px; border-radius: 999px; width: 42%; margin-top: 8px; }
+  input[type=color] { width: 58px; height: 44px; padding: 3px; border-radius: 12px; border: 1.5px solid var(--border); background: var(--surface-2); cursor: pointer; }
+
   /* ---------- ورود ---------- */
-  .login-wrap { min-height: 100vh; background: var(--side); display: flex; flex-direction: column; align-items: center; justify-content: flex-end; padding: 0 16px 40px; }
-  .sunrise { width: min(420px, 100%); height: auto; margin-bottom: -1px; }
-  .sun { animation: rise 1.6s cubic-bezier(.2,.8,.2,1) both; }
-  @keyframes rise { from { transform: translateY(70px); } to { transform: translateY(0); } }
-  .login-box { background: var(--surface); border-radius: 20px; padding: 26px 24px 24px; width: 100%; max-width: 390px; }
-  .login-box h2 { margin: 0 0 8px; font-size: 24px; text-align: center; }
-  @media (prefers-reduced-motion: reduce) { .sun { animation: none; } html { scroll-behavior: auto; } }
+  .login-wrap { min-height: 100vh; display: flex; align-items: center; justify-content: center; padding: 24px 16px; position: relative; overflow: hidden; }
+  .orb { position: absolute; border-radius: 50%; filter: blur(60px); opacity: .55; animation: floaty 12s ease-in-out infinite; pointer-events: none; }
+  .orb.o1 { width: 340px; height: 340px; background: var(--g1); top: -80px; right: -60px; }
+  .orb.o2 { width: 300px; height: 300px; background: var(--g2); bottom: -60px; left: -40px; animation-delay: -4s; }
+  .orb.o3 { width: 220px; height: 220px; background: var(--g3); top: 55%; right: 30%; opacity: .3; animation-delay: -8s; }
+  .login-box { position: relative; z-index: 1; background: var(--surface); -webkit-backdrop-filter: blur(22px) saturate(150%); backdrop-filter: blur(22px) saturate(150%); border: 1px solid var(--border); border-radius: 28px; padding: 32px 28px 28px; width: 100%; max-width: 410px; box-shadow: 0 24px 70px rgba(30,20,120,.35); animation: fadeUp .7s both; }
+  .login-logo { display: flex; flex-direction: column; align-items: center; gap: 10px; margin-bottom: 8px; }
+  .login-logo .mark { width: 64px; height: 64px; border-radius: 20px; }
+  .login-logo .mark::after { inset: 15px; border-width: 3.5px; }
+  .login-box h2 { margin: 0; font-size: 24px; text-align: center; }
+  .login-box .sub { text-align: center; color: var(--muted); font-size: 13px; margin-bottom: 8px; }
+  @media (prefers-reduced-motion: reduce) { *, *::before, *::after { animation: none !important; transition: none !important; } html { scroll-behavior: auto; } }
 </style>
 </head>
 <body>
@@ -1346,6 +1450,36 @@ __BODY__
     var t = document.documentElement.getAttribute('data-theme') === 'dark' ? 'light' : 'dark';
     document.documentElement.setAttribute('data-theme', t);
     try { localStorage.setItem('sky-theme', t); } catch (e) {}
+  }
+  function toast(msg) {
+    var t = document.getElementById('toast');
+    if (!t) { t = document.createElement('div'); t.id = 'toast'; t.className = 'toast'; document.body.appendChild(t); }
+    t.textContent = msg; t.classList.add('show');
+    clearTimeout(window.__tt); window.__tt = setTimeout(function () { t.classList.remove('show'); }, 1800);
+  }
+  function copyText(text) {
+    function fallback() {
+      var ta = document.createElement('textarea'); ta.value = text; ta.style.position = 'fixed'; ta.style.opacity = '0';
+      document.body.appendChild(ta); ta.select();
+      try { document.execCommand('copy'); toast('✅ کپی شد'); } catch (e) { toast('⚠️ کپی نشد'); }
+      document.body.removeChild(ta);
+    }
+    if (navigator.clipboard && window.isSecureContext) {
+      navigator.clipboard.writeText(text).then(function () { toast('✅ کپی شد'); }, fallback);
+    } else { fallback(); }
+  }
+  function copyFrom(btn) { copyText(btn.getAttribute('data-copy') || ''); }
+  function revealSecret(btn) {
+    var box = btn.closest('.secret'), code = box.querySelector('code');
+    var hidden = code.classList.contains('masked');
+    if (hidden) { code.textContent = code.getAttribute('data-v'); code.classList.remove('masked'); btn.textContent = '🙈'; }
+    else { code.textContent = '••••••••'; code.classList.add('masked'); btn.textContent = '👁'; }
+  }
+  function filterRows(inp, tableId) {
+    var q = inp.value.trim().toLowerCase();
+    document.querySelectorAll('#' + tableId + ' tbody tr').forEach(function (tr) {
+      tr.style.display = (!q || tr.textContent.toLowerCase().indexOf(q) > -1) ? '' : 'none';
+    });
   }
   function genPw(id) {
     var c = 'abcdefghjkmnpqrstuvwxyzABCDEFGHJKLMNPQRSTUVWXYZ23456789', a = new Uint32Array(12), s = '', i;
@@ -1369,6 +1503,7 @@ ICONS = {
     "settings": '<circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.7 1.7 0 0 0 .3 1.8l.1.1a2 2 0 1 1-2.8 2.8l-.1-.1a1.7 1.7 0 0 0-1.8-.3 1.7 1.7 0 0 0-1 1.5V21a2 2 0 1 1-4 0v-.1a1.7 1.7 0 0 0-1.1-1.5 1.7 1.7 0 0 0-1.8.3l-.1.1a2 2 0 1 1-2.8-2.8l.1-.1a1.7 1.7 0 0 0 .3-1.8 1.7 1.7 0 0 0-1.5-1H3a2 2 0 1 1 0-4h.1a1.7 1.7 0 0 0 1.5-1.1 1.7 1.7 0 0 0-.3-1.8l-.1-.1a2 2 0 1 1 2.8-2.8l.1.1a1.7 1.7 0 0 0 1.8.3H9a1.7 1.7 0 0 0 1-1.5V3a2 2 0 1 1 4 0v.1a1.7 1.7 0 0 0 1 1.5 1.7 1.7 0 0 0 1.8-.3l.1-.1a2 2 0 1 1 2.8 2.8l-.1.1a1.7 1.7 0 0 0-.3 1.8V9a1.7 1.7 0 0 0 1.5 1H21a2 2 0 1 1 0 4h-.1a1.7 1.7 0 0 0-1.5 1z"/>',
     "texts": '<path d="M4 6h16M4 12h16M4 18h10"/>',
     "appearance": '<circle cx="13.5" cy="6.5" r="1.5"/><circle cx="17.5" cy="10.5" r="1.5"/><circle cx="8.5" cy="7.5" r="1.5"/><circle cx="6.5" cy="12.5" r="1.5"/><path d="M12 2a10 10 0 1 0 0 20c1.1 0 2-.9 2-2 0-.5-.2-1-.5-1.3-.3-.4-.5-.8-.5-1.3 0-1.1.9-2 2-2h2.4a4.6 4.6 0 0 0 4.6-4.6C22 6 17.5 2 12 2z"/>',
+    "sellertheme": '<rect x="3" y="3" width="18" height="18" rx="4"/><path d="M3 9h18M9 21V9"/>',
     "more": '<path d="M4 7h16M4 12h16M4 17h16"/>',
     "logout": '<path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4"/><path d="M16 17l5-5-5-5M21 12H9"/>',
 }
@@ -1385,7 +1520,8 @@ NAV = [
     ("فروش", [("discounts", "کدهای تخفیف", "discount_codes"), ("topups", "شارژهای کیف پول", "topups_page"),
               ("broadcast", "پیام همگانی", "broadcast")]),
     ("ربات", [("settings", "تنظیمات ربات", "settings_page"), ("texts", "متن‌های ربات", "texts_page"),
-              ("appearance", "دکمه‌ها و ظاهر", "appearance_page")]),
+              ("appearance", "دکمه‌ها و ظاهر", "appearance_page"),
+              ("sellertheme", "تم پنل فروشندگان", "seller_theme_page")]),
 ]
 BOTTOM = [("dashboard", "داشبورد", "dashboard"), ("users", "کاربران", "users"), ("tickets", "تیکت‌ها", "tickets")]
 
@@ -1486,19 +1622,20 @@ def bar_chart(points, fmt, color_class="bar"):
 
 LOGIN_HTML = """
 <div class="login-wrap">
-  <svg class="sunrise" viewBox="0 0 320 130" aria-hidden="true">
-    <defs><clipPath id="sky"><rect x="0" y="0" width="320" height="120"/></clipPath></defs>
-    <g clip-path="url(#sky)"><circle class="sun" cx="160" cy="120" r="70" fill="#ffb324"/></g>
-    <line x1="0" y1="120" x2="320" y2="120" stroke="#26345c" stroke-width="3"/>
-  </svg>
+  <div class="orb o1"></div><div class="orb o2"></div><div class="orb o3"></div>
   <form method="post" class="login-box">
-    <h2>ورود به پنل مدیریت</h2>
+    <div class="login-logo"><div class="mark"></div><h2>SkyTunnel</h2></div>
+    <div class="sub">ورود به پنل مدیریت</div>
     __ERROR__
     <label for="username">نام کاربری</label>
     <input id="username" type="text" name="username" autocapitalize="off" autocorrect="off" spellcheck="false" autocomplete="username" required>
     <label for="password">رمز عبور</label>
-    <input id="password" type="password" name="password" autocapitalize="off" autocorrect="off" spellcheck="false" autocomplete="current-password" required>
-    <div style="margin-top:20px;"><button type="submit" class="block">ورود</button></div>
+    <div class="flex" style="flex-wrap:nowrap;gap:8px;">
+      <input id="password" type="password" name="password" autocapitalize="off" autocorrect="off" spellcheck="false" autocomplete="current-password" required>
+      <button type="button" class="mini" style="width:44px;height:44px;flex-shrink:0;" aria-label="نمایش رمز"
+              onclick="var p=document.getElementById('password');p.type=p.type==='password'?'text':'password';">👁</button>
+    </div>
+    <div style="margin-top:22px;"><button type="submit" class="block">ورود به پنل ✦</button></div>
   </form>
 </div>
 """
@@ -1998,15 +2135,29 @@ def toggle_maintenance():
 @login_required
 def resellers_page():
     rows = get_all_resellers()
+    plain = get_reseller_plain_passwords()
+    total_pool = sum(float(r[3] or 0) for r in rows)
+    total_rev = sum(int(r[6] or 0) for r in rows)
+    active_cnt = sum(1 for r in rows if r[5] == "active")
     rows_html = ""
     for user_id, login_name, has_pw, gb_balance, price_per_gb, status, revenue, configs_count, tg_user, tg_name in rows:
         badge = '<span class="badge on">فعال</span>' if status == "active" else '<span class="badge off">مسدود</span>'
-        login_cell = f'<code>{esc(login_name)}</code>' if login_name else '<span class="badge open">تعیین نشده</span>'
-        pw_cell = '<span class="badge on">تنظیم شده</span>' if has_pw else '<span class="badge open">تنظیم نشده</span>'
+        login_cell = copy_widget(login_name) if login_name else '<span class="badge open">تعیین نشده</span>'
+        pw_plain = plain.get(user_id)
+        if pw_plain:
+            pw_cell = secret_widget(pw_plain)
+        elif has_pw:
+            pw_cell = '<span class="badge open" title="این رمز قبل از آپدیت پنل ثبت شده و فقط هش اون ذخیره‌ست؛ برای دیدنش یه رمز جدید بذارید.">ثبت نشده (ریست کنید)</span>'
+        else:
+            pw_cell = '<span class="badge off">تنظیم نشده</span>'
+        both = ""
+        if login_name and pw_plain:
+            both = (f'<button type="button" class="secondary sm" data-copy="{esc(login_info_text(login_name, pw_plain))}" '
+                    f'onclick="copyFrom(this)">📋 کپی ورود</button>')
         rows_html += f"""
         <tr>
           <td data-label="فروشنده" class="wrap">{user_display(tg_name, tg_user, user_id)}<br><small class="muted num">{user_id}</small></td>
-          <td data-label="نام کاربری ورود">{login_cell}</td>
+          <td data-label="نام کاربری">{login_cell}</td>
           <td data-label="رمز عبور">{pw_cell}</td>
           <td data-label="استخر باقیمانده" class="num">{float(gb_balance or 0):g} گیگ</td>
           <td data-label="قیمت هر گیگ" class="num">{int(price_per_gb or 0):,}</td>
@@ -2015,6 +2166,7 @@ def resellers_page():
           <td data-label="وضعیت">{badge}</td>
           <td data-label="عملیات">
             <div class="flex">
+              {both}
               <form method="post" action="{url_for('reseller_price', user_id=user_id)}" class="flex">
                 <input type="hidden" name="next" value="list">
                 <input type="number" name="price_per_gb" value="{int(price_per_gb or 0)}" min="1" style="width:100px;" required>
@@ -2028,9 +2180,19 @@ def resellers_page():
             </div></td>
         </tr>"""
     content = f"""
-    <div class="card"><small class="muted">فروشنده‌ها دیگه با «کلید API» وارد پنل فروشندگان نمی‌شن؛ با <b>نام کاربری و رمز عبور</b> وارد می‌شن
-    که خودشون از داخل ربات می‌سازن. از صفحه‌ی «مدیریت» هر فروشنده می‌تونید نام کاربری و رمزش رو عوض (ریست) کنید.</small></div>
-    <table class="rt">
+    <div class="stats">
+      <div class="stat"><span>👥 کل فروشنده‌ها</span><b class="num">{len(rows):,}</b></div>
+      <div class="stat"><span>✅ فعال</span><b class="num">{active_cnt:,}</b></div>
+      <div class="stat"><span>📦 مجموع استخر گیگ</span><b class="num">{total_pool:,.1f}</b><small>گیگ</small></div>
+      <div class="stat"><span>💰 مجموع درآمد</span><b class="num">{total_rev:,}</b><small>تومان</small></div>
+    </div>
+    <div class="card"><small class="muted">فروشنده‌ها با <b>نام کاربری و رمز عبور</b> وارد پنل فروشندگان می‌شن که خودشون از داخل ربات می‌سازن.
+    اینجا نام کاربری و رمز هر فروشنده رو می‌بینید (با 👁 نمایش و با 📋 کپی کنید). رمزهایی که قبل از این آپدیت ساخته شدن فقط به‌صورت هش ذخیره شدن و قابل نمایش نیستن؛
+    با ریست از صفحه‌ی «جزئیات / ورود» یا وقتی فروشنده رمزش رو عوض کنه، از اون به بعد نمایش داده می‌شن.</small></div>
+    <div class="flex" style="margin-bottom:14px;">
+      <div class="search-box"><input type="search" placeholder="جستجو: نام، آیدی، نام کاربری…" oninput="filterRows(this,'resellers-table')" autocomplete="off"></div>
+    </div>
+    <table class="rt" id="resellers-table">
       <thead><tr><th>فروشنده</th><th>نام کاربری ورود</th><th>رمز عبور</th><th>استخر</th><th>قیمت هر گیگ</th><th>درآمد (تومان)</th><th>کانفیگ فعال</th><th>وضعیت</th><th>عملیات</th></tr></thead>
       <tbody>{rows_html if rows_html else '<tr><td colspan="9">هنوز فروشنده‌ای فعال نشده.</td></tr>'}</tbody>
     </table>"""
@@ -2046,6 +2208,7 @@ def reseller_detail(user_id):
         return redirect(url_for("resellers_page"))
     _uid, login_name, has_pw, gb_balance, price_per_gb, status, revenue, configs_count, tg_user, tg_name = r
     created = get_reseller_created(user_id)
+    pw_plain = get_reseller_plain_passwords().get(user_id)
     configs = get_reseller_configs(user_id)
     keys = get_reseller_api_keys(user_id)
 
@@ -2085,9 +2248,10 @@ def reseller_detail(user_id):
 
     <div class="card">
       <h3>🔐 اطلاعات ورود به پنل فروشندگان</h3>
-      <div class="kv" style="margin-bottom:6px;">
-        <div><span>نام کاربری فعلی</span><b>{f'<code>{esc(login_name)}</code>' if login_name else '— تعیین نشده —'}</b></div>
-        <div><span>رمز عبور</span><b>{'تنظیم شده (به‌صورت هش ذخیره می‌شه و قابل نمایش نیست)' if has_pw else 'هنوز تنظیم نشده'}</b></div>
+      <div class="cred-box">
+        <div><span>نام کاربری</span><b>{copy_widget(login_name) if login_name else '— تعیین نشده —'}</b></div>
+        <div><span>رمز عبور</span><b>{secret_widget(pw_plain) if pw_plain else ('<span class="badge open">قبل از آپدیت ثبت شده — فقط هش موجوده؛ رمز جدید بذارید</span>' if has_pw else '<span class="badge off">هنوز تنظیم نشده</span>')}</b></div>
+        {f'<div><span>همه‌ی اطلاعات</span><button type="button" class="secondary sm" data-copy="{esc(login_info_text(login_name, pw_plain))}" onclick="copyFrom(this)">📋 کپی آدرس پنل + نام کاربری + رمز</button></div>' if (login_name and pw_plain) else ''}
       </div>
       <form method="post" action="{url_for('reseller_credentials', user_id=user_id)}" autocomplete="off">
         <label for="new_username">نام کاربری جدید (اختیاری — حرف انگلیسی، عدد، _ و نقطه؛ ۳ تا ۲۰ کاراکتر)</label>
@@ -2156,7 +2320,8 @@ def reseller_credentials(user_id):
         flash("⚠️ این فروشنده هنوز نام کاربری نداره؛ همراه رمز یه نام کاربری هم وارد کنید.")
         return back
     set_reseller_login(user_id, username=new_username or None,
-                       password_hash=hash_reseller_password(new_password) if new_password else None)
+                       password_hash=hash_reseller_password(new_password) if new_password else None,
+                       password_plain=new_password if new_password else None)
     done = []
     if new_username:
         done.append("نام کاربری")
@@ -2220,6 +2385,104 @@ def reseller_revoke_key(user_id, key_id):
     revoke_reseller_api_key(user_id, key_id)
     flash("کلید API ابطال شد.")
     return redirect(url_for("reseller_detail", user_id=user_id))
+
+
+# ---------------------------------------------------------------------------
+# تم‌ها — از «پنل ادمین ← تم پنل فروشندگان» انتخاب می‌شن. تم «default» همون ظاهر اصلیه
+# و هیچ تغییری روی CSS/HTML اعمال نمی‌کنه.
+# ⚠️ این بلوک (THEMES) باید در web_panel.py و app.py دقیقاً یکی باشه.
+# برای اضافه‌کردن تم جدید فقط یه آیتم به THEMES اضافه کن (در هر دو فایل):
+#   کلید = شناسه‌ی انگلیسی، name = اسم فارسی، dark = تیره؟، p = رنگ اصلی،
+#   bg = پس‌زمینه، card = کارت‌ها، ink = رنگ متن، mut = متن کم‌رنگ، line = خط‌ها
+# بقیه‌ی رنگ‌ها (سایه‌ها، گرادینت‌ها، دکمه‌ها، …) خودکار از همین‌ها ساخته می‌شن.
+# ---------------------------------------------------------------------------
+THEMES = {
+    'default':  {'name': 'بنفش (پیش‌فرض)', 'dark': False, 'p': '#6a3df0', 'bg': '#f7f6fd', 'card': '#ffffff', 'ink': '#14112b', 'mut': '#7d7a94', 'line': '#ebe9f5'},
+    'ocean':    {'name': 'آبی اقیانوسی',   'dark': False, 'p': '#0b6fe0', 'bg': '#f1f6fd', 'card': '#ffffff', 'ink': '#0e1a30', 'mut': '#667895', 'line': '#e2eaf5'},
+    'emerald':  {'name': 'سبز زمردی',      'dark': False, 'p': '#0d9467', 'bg': '#f0f9f5', 'card': '#ffffff', 'ink': '#0d2219', 'mut': '#5f7a6e', 'line': '#dcefe6'},
+    'sunset':   {'name': 'غروب نارنجی',    'dark': False, 'p': '#e4531a', 'bg': '#fff6f0', 'card': '#ffffff', 'ink': '#2a150b', 'mut': '#8a6d5f', 'line': '#f5e4d9'},
+    'rose':     {'name': 'صورتی شکوفه',    'dark': False, 'p': '#d6336c', 'bg': '#fff4f8', 'card': '#ffffff', 'ink': '#2b0f1a', 'mut': '#8f6577', 'line': '#f6dfe7'},
+    'midnight': {'name': 'شب‌ستاره (تیره)', 'dark': True,  'p': '#7061f2', 'bg': '#0c1122', 'card': '#151c34', 'ink': '#e8edff', 'mut': '#8e9bc2', 'line': '#242d4d'},
+    'cyber':    {'name': 'سایبر (تیره)',    'dark': True,  'p': '#0891b2', 'bg': '#060d14', 'card': '#0e1822', 'ink': '#e3f6ff', 'mut': '#7fa0b4', 'line': '#1a2d3b'},
+    'graphite': {'name': 'گرافیت (تیره)',   'dark': True,  'p': '#5b6cf0', 'bg': '#111214', 'card': '#1a1c1f', 'ink': '#ececf0', 'mut': '#9a9aa6', 'line': '#2a2c31'},
+}
+
+
+SELLER_THEME_ORDER = [k for k in THEMES]
+
+
+def _theme_preview(t):
+    """پیش‌نمایش کوچیک یه تم (فقط از مقادیر validate‌شده‌ی خودمون ساخته می‌شه)."""
+    return (f'<div class="tc-prev" style="background:{t["bg"]}">'
+            f'<div class="tc-credit" style="background:linear-gradient(160deg,{t["p"]},{t["p"]}99)"></div>'
+            f'<div class="tc-row"><div class="tc-c" style="background:{t["card"]};border-color:{t["line"]}"></div>'
+            f'<div class="tc-c" style="background:{t["card"]};border-color:{t["line"]}"></div></div>'
+            f'<div class="tc-btn" style="background:{t["p"]}"></div></div>')
+
+
+@app.route("/seller-theme")
+@login_required
+def seller_theme_page():
+    settings = get_all_settings()
+    current = settings.get("seller_theme", "default")
+    if current != "custom" and current not in THEMES:
+        current = "default"
+    try:
+        custom = json.loads(settings.get("seller_theme_custom") or "{}")
+    except Exception:
+        custom = {}
+    cp = custom.get("p") if re.match(r"^#[0-9a-fA-F]{6}$", str(custom.get("p", ""))) else "#6a3df0"
+    cdark = bool(custom.get("dark"))
+
+    cards = ""
+    for tid in SELLER_THEME_ORDER:
+        t = THEMES[tid]
+        cards += (f'<label class="theme-card"><input type="radio" name="theme" value="{tid}"{" checked" if current == tid else ""}>'
+                  f'<div class="tc-box">{_theme_preview(t)}<span class="tc-name">{esc(t["name"])}</span></div></label>')
+    custom_prev = _theme_preview({"bg": "#f6f4ff", "card": "#ffffff", "line": "#e6e1fb", "p": cp})
+    cards += (f'<label class="theme-card"><input type="radio" name="theme" value="custom"{" checked" if current == "custom" else ""}>'
+              f'<div class="tc-box">{custom_prev}<span class="tc-name">🎨 سفارشی (رنگ دلخواه)</span></div></label>')
+
+    content = f"""
+    <div class="card"><small class="muted">تمی که اینجا انتخاب کنید ظاهر <b>پنل فروشندگان</b> (همون سایتی که فروشنده‌ها باهاش وارد می‌شن) رو برای همه عوض می‌کنه.
+    تغییر ظرف حدود ۲۰ ثانیه روی پنل فروشندگان اعمال می‌شه. «بنفش (پیش‌فرض)» همون ظاهر اصلیه و هر وقت خواستید می‌تونید برگردید.</small></div>
+    <form method="post" action="{url_for('seller_theme_save')}">
+      <div class="theme-grid">{cards}</div>
+      <div class="card" style="margin-top:16px;">
+        <h3>🎨 تم سفارشی</h3>
+        <small class="muted">فقط اگه گزینه‌ی «سفارشی» رو انتخاب کنید استفاده می‌شه. بقیه‌ی رنگ‌ها (پس‌زمینه، کارت‌ها، گرادینت‌ها) خودکار با رنگ اصلی هماهنگ می‌شن.</small>
+        <div class="flex" style="margin-top:12px;gap:18px;">
+          <div><label for="custom_p" style="margin-top:0;">رنگ اصلی</label>
+            <input id="custom_p" type="color" name="custom_p" value="{esc(cp)}"></div>
+          <div><label style="margin-top:0;">حالت</label>
+            <div class="flex">
+              <label style="display:flex;align-items:center;gap:6px;margin:0;cursor:pointer;"><input type="radio" name="custom_mode" value="light"{"" if cdark else " checked"}> روشن</label>
+              <label style="display:flex;align-items:center;gap:6px;margin:0;cursor:pointer;"><input type="radio" name="custom_mode" value="dark"{" checked" if cdark else ""}> تیره</label>
+            </div></div>
+        </div>
+      </div>
+      <div class="savebar"><button type="submit" class="block">💾 ذخیره و اعمال تم</button></div>
+    </form>"""
+    return render_page("تم پنل فروشندگان", "sellertheme", content)
+
+
+@app.route("/seller-theme/save", methods=["POST"])
+@login_required
+def seller_theme_save():
+    theme = request.form.get("theme", "default")
+    if theme != "custom" and theme not in THEMES:
+        flash("⚠️ تم نامعتبره.")
+        return redirect(url_for("seller_theme_page"))
+    if theme == "custom":
+        p = request.form.get("custom_p", "").strip()
+        if not re.match(r"^#[0-9a-fA-F]{6}$", p):
+            flash("⚠️ رنگ اصلی نامعتبره.")
+            return redirect(url_for("seller_theme_page"))
+        set_setting("seller_theme_custom", json.dumps({"p": p.lower(), "dark": request.form.get("custom_mode") == "dark"}))
+    set_setting("seller_theme", theme)
+    name = "سفارشی" if theme == "custom" else THEMES[theme]["name"]
+    flash(f"تم پنل فروشندگان روی «{name}» تنظیم شد؛ تا ~۲۰ ثانیه‌ی دیگه اعمال می‌شه.")
+    return redirect(url_for("seller_theme_page"))
 
 
 # ---------- پیام همگانی ----------

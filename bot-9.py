@@ -1147,6 +1147,7 @@ def init_db():
         "ALTER TABLE reseller_api_configs ADD COLUMN source TEXT DEFAULT 'api'",
         'ALTER TABLE resellers ADD COLUMN username TEXT',
         'ALTER TABLE resellers ADD COLUMN password_hash TEXT',
+        'ALTER TABLE resellers ADD COLUMN password_plain TEXT',
     ):
         try:
             c.execute(statement)
@@ -1515,19 +1516,20 @@ def set_reseller_username_db(user_id, username):
 
 
 @with_db_retry
-def set_reseller_password_db(user_id, password_hash):
+def set_reseller_password_db(user_id, password_hash, password_plain=None):
     conn = get_conn()
     c = conn.cursor()
-    c.execute("UPDATE resellers SET password_hash=? WHERE user_id=?", (password_hash, user_id))
+    c.execute("UPDATE resellers SET password_hash=?, password_plain=? WHERE user_id=?", (password_hash, password_plain, user_id))
     conn.commit()
     conn.close()
 
 
 @with_db_retry
-def set_reseller_credentials_db(user_id, username, password_hash):
+def set_reseller_credentials_db(user_id, username, password_hash, password_plain=None):
     conn = get_conn()
     c = conn.cursor()
-    c.execute("UPDATE resellers SET username=?, password_hash=? WHERE user_id=?", (username, password_hash, user_id))
+    c.execute("UPDATE resellers SET username=?, password_hash=?, password_plain=? WHERE user_id=?",
+              (username, password_hash, password_plain, user_id))
     conn.commit()
     conn.close()
 
@@ -3764,7 +3766,7 @@ def process_update(update):
             else:
                 uname = step.get('username')
                 try:
-                    set_reseller_credentials_db(chat_id, uname, hash_reseller_password(pw))
+                    set_reseller_credentials_db(chat_id, uname, hash_reseller_password(pw), pw)
                 except Exception as e:
                     print('⚠️ ذخیره‌ی نام کاربری/رمز فروشنده ناموفق بود:', e)
                     user_steps[str(chat_id)] = {'step': 'reseller_set_username'}
@@ -3801,7 +3803,7 @@ def process_update(update):
                                          max_len=RESELLER_PASSWORD_MAX))
             else:
                 try:
-                    set_reseller_password_db(chat_id, hash_reseller_password(pw))
+                    set_reseller_password_db(chat_id, hash_reseller_password(pw), pw)
                 except Exception as e:
                     print('⚠️ تغییر رمز فروشنده ناموفق بود:', e)
                     send_message(chat_id, u(chat_id, 'reseller_password_bad', min_len=RESELLER_PASSWORD_MIN,
