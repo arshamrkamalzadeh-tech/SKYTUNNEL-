@@ -1426,6 +1426,9 @@ BASE_HTML = """<!DOCTYPE html>
   .tc-prev .tc-row { display: flex; gap: 6px; }
   .tc-prev .tc-c { flex: 1; height: 26px; border-radius: 9px; border: 1px solid transparent; }
   .tc-prev .tc-btn { height: 12px; border-radius: 999px; width: 42%; margin-top: 8px; }
+  .lay-card .tc-box { padding: 10px; }
+  .lay-desc { display: block; font-size: 12px; color: var(--muted); text-align: center; margin-top: 4px; line-height: 1.7; }
+  .lay-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(150px, 1fr)); gap: 14px; }
   input[type=color] { width: 58px; height: 44px; padding: 3px; border-radius: 12px; border: 1.5px solid var(--border); background: var(--surface-2); cursor: pointer; }
 
   /* ---------- ورود ---------- */
@@ -1521,7 +1524,7 @@ NAV = [
               ("broadcast", "پیام همگانی", "broadcast")]),
     ("ربات", [("settings", "تنظیمات ربات", "settings_page"), ("texts", "متن‌های ربات", "texts_page"),
               ("appearance", "دکمه‌ها و ظاهر", "appearance_page"),
-              ("sellertheme", "تم پنل فروشندگان", "seller_theme_page")]),
+              ("sellertheme", "ظاهر پنل فروشندگان", "seller_theme_page")]),
 ]
 BOTTOM = [("dashboard", "داشبورد", "dashboard"), ("users", "کاربران", "users"), ("tickets", "تیکت‌ها", "tickets")]
 
@@ -2405,10 +2408,74 @@ THEMES = {
     'midnight': {'name': 'شب‌ستاره (تیره)', 'dark': True,  'p': '#7061f2', 'bg': '#0c1122', 'card': '#151c34', 'ink': '#e8edff', 'mut': '#8e9bc2', 'line': '#242d4d'},
     'cyber':    {'name': 'سایبر (تیره)',    'dark': True,  'p': '#0891b2', 'bg': '#060d14', 'card': '#0e1822', 'ink': '#e3f6ff', 'mut': '#7fa0b4', 'line': '#1a2d3b'},
     'graphite': {'name': 'گرافیت (تیره)',   'dark': True,  'p': '#5b6cf0', 'bg': '#111214', 'card': '#1a1c1f', 'ink': '#ececf0', 'mut': '#9a9aa6', 'line': '#2a2c31'},
+    'sanaei':   {'name': 'ثنایی (سبز‌آبی)',  'dark': False, 'p': '#008771', 'bg': '#f0f2f5', 'card': '#ffffff', 'ink': '#1f2933', 'mut': '#6b7785', 'line': '#e3e7ec'},
+    'sanaeidark': {'name': 'ثنایی تیره',    'dark': True,  'p': '#0a9d84', 'bg': '#0a1222', 'card': '#131d31', 'ink': '#e6ebf3', 'mut': '#8793a8', 'line': '#223048'},
+    'pasarguard': {'name': 'پاسارگاد (روشن)', 'dark': False, 'p': '#4f46e5', 'bg': '#fafafa', 'card': '#ffffff', 'ink': '#09090b', 'mut': '#71717a', 'line': '#e4e4e7'},
+    'pasarguarddark': {'name': 'پاسارگاد (تیره)', 'dark': True, 'p': '#6366f1', 'bg': '#09090b', 'card': '#131316', 'ink': '#fafafa', 'mut': '#a1a1aa', 'line': '#27272a'},
 }
 
 
 SELLER_THEME_ORDER = [k for k in THEMES]
+
+
+# ⚠️ باید با LAYOUTS داخل app.py (پنل فروشندگان) یکی باشه (CSS فقط اون‌جاست)
+LAYOUTS = {
+    'default':    {'name': 'مدرن گرد (پیش‌فرض)', 'suggest': '',
+                   'desc': 'همون ظاهر فعلی: کارت‌های خیلی گرد، گرادینت بنفش و منوی پایین.'},
+    'sanaei':     {'name': 'ثنایی', 'suggest': 'sanaei',
+                   'desc': 'الهام‌گرفته از پنل ثنایی (3x-ui): سایدبار تیره، کارت‌های تخت، تگ‌های کوچک و ظاهر اداری/ابزاری.'},
+    'pasarguard': {'name': 'پاسارگاد', 'suggest': 'pasarguard',
+                   'desc': 'الهام‌گرفته از داشبورد پاسارگاد: مینیمال و خنثی با کارت‌های خط‌دار، دکمه‌های ساده و منوی کناری روشن.'},
+    'glass':      {'name': 'شیشه‌ای (Aurora)', 'suggest': '',
+                   'desc': 'پس‌زمینه‌ی رنگی و محو، کارت‌های نیمه‌شفاف و منوی شناور پایین.'},
+    'compact':    {'name': 'فشرده (برای تعداد زیاد)', 'suggest': '',
+                   'desc': 'لیست یک‌خطی و فشرده؛ تو یک صفحه چند برابر کانفیگ بیشتری دیده می‌شه. روی دسکتاپ منوی بالا دارد.'},
+    'brutal':     {'name': 'بروتالیست (پررنگ)', 'suggest': '',
+                   'desc': 'حاشیه‌های ضخیم، سایه‌ی سخت و دکمه‌های فشاری؛ شاد و کاملاً متفاوت.'},
+}
+LAYOUT_ORDER = list(LAYOUTS)
+
+
+def _layout_preview(key, t):
+    """پیش‌نمایش کوچیک هر طراحی با رنگ‌های تم t (فقط از مقادیر validate‌شده ساخته می‌شه)."""
+    bg, card, line, p, ink = t["bg"], t["card"], t["line"], t["p"], t["ink"]
+    def d(style, inner=""):
+        return f'<div style="{style}">{inner}</div>'
+    A = "position:absolute;"
+    if key == "sanaei":
+        body = (d(A + "top:0;bottom:0;right:0;width:24%;background:#0b1a33") +
+                d(A + "top:8px;right:28%;left:8px;height:34px;border-radius:3px;background:" + p) +
+                d(A + f"top:48px;right:28%;left:8px;height:22px;border-radius:3px;background:{card};border:1px solid {line}") +
+                d(A + f"top:76px;right:28%;left:8px;height:22px;border-radius:3px;background:{card};border:1px solid {line}") +
+                d(A + "top:14px;right:5px;width:14px;height:5px;border-radius:2px;background:" + p))
+    elif key == "pasarguard":
+        body = (d(A + f"top:0;bottom:0;right:0;width:24%;background:{card};border-left:1px solid {line}") +
+                d(A + f"top:8px;right:28%;left:8px;height:34px;border-radius:7px;background:{card};border:1px solid {line}") +
+                d(A + f"top:48px;right:28%;left:8px;height:22px;border-radius:7px;background:{card};border:1px solid {line}") +
+                d(A + "top:78px;right:28%;width:36%;height:12px;border-radius:5px;background:" + p) +
+                d(A + f"top:12px;right:5px;width:14px;height:6px;border-radius:3px;background:{line}"))
+    elif key == "glass":
+        body = (d(A + "top:-20px;left:-10px;width:70px;height:70px;border-radius:50%;filter:blur(14px);background:" + p + "88") +
+                d(A + "bottom:-24px;right:-10px;width:80px;height:70px;border-radius:50%;filter:blur(16px);background:#ff78aa66") +
+                d(A + "top:9px;right:9px;left:9px;height:38px;border-radius:14px;background:rgba(255,255,255,.35);border:1px solid rgba(255,255,255,.7)") +
+                d(A + "top:54px;right:9px;left:9px;height:24px;border-radius:12px;background:rgba(255,255,255,.28);border:1px solid rgba(255,255,255,.6)") +
+                d(A + "bottom:6px;right:22%;left:22%;height:12px;border-radius:999px;background:rgba(255,255,255,.55);border:1px solid rgba(255,255,255,.8)"))
+    elif key == "compact":
+        rows = "".join(d(A + f"top:{8 + i * 20}px;right:9px;left:9px;height:16px;border-bottom:1px solid {line};background:{card}",
+                         d("position:absolute;right:4px;top:4px;width:30%;height:7px;border-radius:3px;background:" + ink + "55") +
+                         d("position:absolute;left:4px;top:4px;width:18%;height:7px;border-radius:3px;background:" + p)) for i in range(5))
+        body = rows
+    elif key == "brutal":
+        b = f"2px solid {ink}"
+        body = (d(A + f"top:9px;right:9px;left:13px;height:34px;border-radius:8px;background:{p};border:{b};box-shadow:3px 3px 0 {ink}") +
+                d(A + f"top:54px;right:9px;left:13px;height:30px;border-radius:8px;background:{card};border:{b};box-shadow:3px 3px 0 {ink}") +
+                d(A + f"bottom:5px;right:9px;width:36%;height:10px;border-radius:6px;background:{p};border:{b}"))
+    else:  # default
+        body = (d(A + f"top:10px;right:9px;left:9px;height:38px;border-radius:12px;background:linear-gradient(160deg,{p},{p}99)") +
+                d(A + f"top:56px;right:9px;width:42%;height:26px;border-radius:10px;background:{card};border:1px solid {line}") +
+                d(A + f"top:56px;left:9px;width:42%;height:26px;border-radius:10px;background:{card};border:1px solid {line}") +
+                d(A + f"bottom:6px;right:9px;width:42%;height:10px;border-radius:999px;background:{p}"))
+    return f'<div class="tc-prev" style="background:{bg}">{body}</div>'
 
 
 def _theme_preview(t):
@@ -2443,10 +2510,31 @@ def seller_theme_page():
     cards += (f'<label class="theme-card"><input type="radio" name="theme" value="custom"{" checked" if current == "custom" else ""}>'
               f'<div class="tc-box">{custom_prev}<span class="tc-name">🎨 سفارشی (رنگ دلخواه)</span></div></label>')
 
+    cur_layout = settings.get("seller_layout", "default")
+    if cur_layout not in LAYOUTS:
+        cur_layout = "default"
+    prev_t = THEMES.get(current, THEMES["default"]) if current != "custom" else {"bg": "#f6f4ff", "card": "#ffffff", "line": "#e6e1fb", "p": cp, "ink": "#14112b"}
+    prev_t = dict({"ink": "#14112b"}, **prev_t)
+    lay_cards = ""
+    for lid in LAYOUT_ORDER:
+        L = LAYOUTS[lid]
+        sug = f' <span class="muted" style="font-size:11.5px">(رنگ پیشنهادی: {esc(THEMES[L["suggest"]]["name"])})</span>' if L["suggest"] else ""
+        lay_cards += (f'<label class="theme-card lay-card"><input type="radio" name="layout" value="{lid}"{" checked" if cur_layout == lid else ""}>'
+                      f'<div class="tc-box">{_layout_preview(lid, prev_t)}<span class="tc-name">{esc(L["name"])}</span>'
+                      f'<span class="lay-desc">{esc(L["desc"])}{sug}</span></div></label>')
+
     content = f"""
+    <div class="card"><h3>🧩 طراحی کلی پنل</h3>
+    <small class="muted">شکل و چیدمان پنل فروشندگان (کارت‌ها، منو، فاصله‌ها). با تم رنگی پایین مستقل کار می‌کنه و با هر رنگی ترکیب می‌شه.</small></div>
+    <form method="post" action="{url_for('seller_theme_save')}" id="themeform">
+      <div class="lay-grid">{lay_cards}</div>
+      <label style="display:flex;align-items:center;gap:8px;margin:14px 2px 18px;cursor:pointer;">
+        <input type="checkbox" name="apply_colors" value="1" checked style="width:auto;margin:0;">
+        <span>همراه طراحیِ «ثنایی» یا «پاسارگاد»، رنگ‌بندی پیشنهادیشون هم اعمال بشه <span class="muted">(برای طراحی‌های دیگه اثری نداره)</span></span>
+      </label>
+      <div class="card"><h3>🎨 تم رنگی</h3></div>
     <div class="card"><small class="muted">تمی که اینجا انتخاب کنید ظاهر <b>پنل فروشندگان</b> (همون سایتی که فروشنده‌ها باهاش وارد می‌شن) رو برای همه عوض می‌کنه.
     تغییر ظرف حدود ۲۰ ثانیه روی پنل فروشندگان اعمال می‌شه. «بنفش (پیش‌فرض)» همون ظاهر اصلیه و هر وقت خواستید می‌تونید برگردید.</small></div>
-    <form method="post" action="{url_for('seller_theme_save')}">
       <div class="theme-grid">{cards}</div>
       <div class="card" style="margin-top:16px;">
         <h3>🎨 تم سفارشی</h3>
@@ -2461,15 +2549,24 @@ def seller_theme_page():
             </div></div>
         </div>
       </div>
-      <div class="savebar"><button type="submit" class="block">💾 ذخیره و اعمال تم</button></div>
+      <div class="savebar"><button type="submit" class="block">💾 ذخیره و اعمال</button></div>
     </form>"""
-    return render_page("تم پنل فروشندگان", "sellertheme", content)
+    return render_page("ظاهر پنل فروشندگان", "sellertheme", content)
 
 
 @app.route("/seller-theme/save", methods=["POST"])
 @login_required
 def seller_theme_save():
     theme = request.form.get("theme", "default")
+    layout = request.form.get("layout", "default")
+    if layout not in LAYOUTS:
+        flash("⚠️ طراحی نامعتبره.")
+        return redirect(url_for("seller_theme_page"))
+    sug = LAYOUTS[layout]["suggest"]
+    # اگه ادمین طراحی ثنایی/پاسارگاد رو تازه انتخاب کرده و تیک «رنگ پیشنهادی» روشنه، رنگ هم عوض می‌شه
+    old_layout = get_all_settings().get("seller_layout", "default")
+    if sug and request.form.get("apply_colors") and layout != old_layout:
+        theme = sug
     if theme != "custom" and theme not in THEMES:
         flash("⚠️ تم نامعتبره.")
         return redirect(url_for("seller_theme_page"))
@@ -2480,8 +2577,9 @@ def seller_theme_save():
             return redirect(url_for("seller_theme_page"))
         set_setting("seller_theme_custom", json.dumps({"p": p.lower(), "dark": request.form.get("custom_mode") == "dark"}))
     set_setting("seller_theme", theme)
+    set_setting("seller_layout", layout)
     name = "سفارشی" if theme == "custom" else THEMES[theme]["name"]
-    flash(f"تم پنل فروشندگان روی «{name}» تنظیم شد؛ تا ~۲۰ ثانیه‌ی دیگه اعمال می‌شه.")
+    flash(f"ظاهر پنل فروشندگان تنظیم شد (طراحی: «{LAYOUTS[layout]['name']}»، رنگ: «{name}»)؛ تا ~۲۰ ثانیه‌ی دیگه اعمال می‌شه.")
     return redirect(url_for("seller_theme_page"))
 
 
