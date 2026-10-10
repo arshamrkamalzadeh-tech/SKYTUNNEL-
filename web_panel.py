@@ -1511,6 +1511,7 @@ ICONS = {
     "texts": '<path d="M4 6h16M4 12h16M4 18h10"/>',
     "appearance": '<circle cx="13.5" cy="6.5" r="1.5"/><circle cx="17.5" cy="10.5" r="1.5"/><circle cx="8.5" cy="7.5" r="1.5"/><circle cx="6.5" cy="12.5" r="1.5"/><path d="M12 2a10 10 0 1 0 0 20c1.1 0 2-.9 2-2 0-.5-.2-1-.5-1.3-.3-.4-.5-.8-.5-1.3 0-1.1.9-2 2-2h2.4a4.6 4.6 0 0 0 4.6-4.6C22 6 17.5 2 12 2z"/>',
     "sellertheme": '<rect x="3" y="3" width="18" height="18" rx="4"/><path d="M3 9h18M9 21V9"/>',
+    "crypto": '<circle cx="12" cy="12" r="9"/><path d="M9.5 8.5h4a1.8 1.8 0 0 1 0 3.6H9.5m0 0h4.4a1.8 1.8 0 0 1 0 3.6H9.5M9.5 7v10M12 6v2m0 8v2"/>',
     "more": '<path d="M4 7h16M4 12h16M4 17h16"/>',
     "logout": '<path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4"/><path d="M16 17l5-5-5-5M21 12H9"/>',
 }
@@ -1525,7 +1526,7 @@ NAV = [
     ("نمای کلی", [("dashboard", "داشبورد", "dashboard")]),
     ("مشتریان", [("users", "کاربران", "users"), ("tickets", "تیکت‌ها", "tickets"), ("resellers", "فروشنده‌ها", "resellers_page")]),
     ("فروش", [("discounts", "کدهای تخفیف", "discount_codes"), ("topups", "شارژهای کیف پول", "topups_page"),
-              ("broadcast", "پیام همگانی", "broadcast")]),
+              ("crypto", "رمزارزها", "crypto_page"), ("broadcast", "پیام همگانی", "broadcast")]),
     ("ربات", [("settings", "تنظیمات ربات", "settings_page"), ("texts", "متن‌های ربات", "texts_page"),
               ("appearance", "دکمه‌ها و ظاهر", "appearance_page"),
               ("sellertheme", "ظاهر پنل فروشندگان", "seller_theme_page")]),
@@ -2045,6 +2046,224 @@ def topups_page():
     </table>
     <p><small class="muted">تایید یا رد رسیدها همچنان از طریق پیام ادمین داخل خود ربات انجام می‌شود (دکمه‌های تایید/رد)؛ این صفحه فقط برای مشاهده‌ی تاریخچه است.</small></p>"""
     return render_page("شارژهای کیف پول", "topups", content)
+
+
+# ---------- رمزارزها (شارژ کیف پول با رمزارز) ----------
+# لیست رمزارزها تو جدول settings (کلید crypto_coins) به‌صورت JSON ذخیره می‌شه و ربات همون رو می‌خونه:
+#   [{"id": "ab12cd", "label": "Gram", "symbol": "gram", "wallet": "UQ...", "enabled": true}, ...]
+#   label  = اسمی که کاربر تو ربات می‌بینه
+#   symbol = «نام درست» کوین تو نوبیتکس (برای گرفتن قیمت لحظه‌ای؛ جفت‌ارز symbol-rls)
+#   wallet = آدرسی که کاربر بهش واریز می‌کنه (کوینی که آدرس نداشته باشه تو ربات نشون داده نمی‌شه)
+# اگه این کلید هیچ‌وقت ثبت نشده باشه، گزینه‌ی رمزارز تو ربات نشون داده نمی‌شه.
+CRYPTO_DEFAULT_COINS = [{"id": "gram", "label": "Gram", "symbol": "gram", "wallet": "", "enabled": True}]
+CRYPTO_SYMBOL_RE = re.compile(r"^[a-z0-9]{2,15}$")
+
+
+def load_crypto_coins(all_settings=None):
+    """(coins, configured) — configured=False یعنی هنوز از پنل ذخیره نشده و پیش‌فرض (Gram) نشون داده می‌شه."""
+    if all_settings is None:
+        all_settings = get_all_settings()
+    raw = all_settings.get("crypto_coins")
+    if raw is None:
+        return [dict(c) for c in CRYPTO_DEFAULT_COINS], False
+    try:
+        data = json.loads(raw)
+    except Exception:
+        data = []
+    coins = []
+    for c in data if isinstance(data, list) else []:
+        if isinstance(c, dict) and c.get("symbol"):
+            coins.append({"id": str(c.get("id") or secrets.token_hex(3)), "label": str(c.get("label") or c["symbol"]),
+                          "symbol": str(c["symbol"]).lower(), "wallet": str(c.get("wallet") or ""),
+                          "enabled": bool(c.get("enabled", True))})
+    return coins, True
+
+
+def save_crypto_coins(coins):
+    set_setting("crypto_coins", json.dumps(coins, ensure_ascii=False))
+
+
+def check_coin_fields(label, symbol, wallet):
+    """(label, symbol, wallet, error)"""
+    label, symbol, wallet = label.strip(), symbol.strip().lower(), wallet.strip()
+    if not label or len(label) > 30:
+        return None, None, None, "اسم نمایشی باید بین ۱ تا ۳۰ کاراکتر باشه."
+    if not CRYPTO_SYMBOL_RE.match(symbol):
+        return None, None, None, "نام کوین تو نوبیتکس فقط حروف انگلیسی/عدد (۲ تا ۱۵ کاراکتر) باشه؛ مثل gram یا usdt."
+    if len(wallet) > 200 or re.search(r"\s", wallet):
+        return None, None, None, "آدرس ولت نباید فاصله داشته باشه و بیشتر از ۲۰۰ کاراکتر باشه."
+    return label, symbol, wallet, None
+
+
+def nobitex_price_toman(symbol):
+    """قیمت لحظه‌ای (تومان) از API عمومی نوبیتکس؛ (price, error)."""
+    try:
+        r = SESSION.post("https://api.nobitex.ir/market/stats",
+                         json={"srcCurrency": symbol, "dstCurrency": "rls"}, timeout=12)
+        st = (r.json().get("stats") or {}).get(f"{symbol}-rls") or {}
+        latest = float(st.get("latest") or 0)
+        if latest > 0:
+            return latest / 10.0, None
+        return None, "نوبیتکس برای این نام قیمتی برنگردوند (نام کوین درسته؟)"
+    except Exception as e:
+        return None, f"ارتباط با نوبیتکس ممکن نشد: {e}"
+
+
+@app.route("/crypto")
+@login_required
+def crypto_page():
+    ensure_settings_table()
+    all_settings = get_all_settings()
+    coins, configured = load_crypto_coins(all_settings)
+    master_on = all_settings.get("crypto_enabled", "1") == "1"
+
+    master = f"""
+    <div class="card">
+      <div class="switch-row" style="padding-top:0;">
+        <div><b>🪙 شارژ با رمزارز</b> <span class="badge {'on' if master_on else 'off'}">{'روشن' if master_on else 'خاموش'}</span><br>
+          <small class="muted">کاربر مبلغ تومانی رو می‌زنه، ربات قیمت لحظه‌ای رو از نوبیتکس می‌گیره و مقدار رمزارز + آدرس ولت رو نشون می‌ده؛ بعد کاربر رسید می‌فرسته و تایید/رد با خودته (همون دکمه‌های تایید شارژ تو ربات).
+          مبلغ شارژ دقیقاً همون مبلغ تومانی‌ه که کاربر وارد کرده.</small></div>
+        <form method="post" action="{url_for('crypto_master')}">
+          <button type="submit" class="{'danger' if master_on else ''} sm">{'خاموش کن' if master_on else 'روشن کن'}</button>
+        </form>
+      </div>
+    </div>"""
+
+    rows = ""
+    for c in coins:
+        cid = esc(c["id"])
+        rows += f"""
+        <div class="card">
+          <input type="hidden" name="ids" value="{cid}">
+          <h3>{esc(c['label'])} <span class="badge {'on' if c['enabled'] else 'off'}">{'فعال' if c['enabled'] else 'غیرفعال'}</span></h3>
+          <label for="l_{cid}">اسم نمایشی (چیزی که کاربر تو ربات می‌بینه)</label>
+          <input id="l_{cid}" name="label_{cid}" value="{esc(c['label'])}" maxlength="30">
+          <label for="s_{cid}">نام درست کوین تو نوبیتکس (برای گرفتن قیمت)</label>
+          <input id="s_{cid}" name="symbol_{cid}" value="{esc(c['symbol'])}" dir="ltr" autocapitalize="off" spellcheck="false" placeholder="gram">
+          <label for="w_{cid}">آدرس ولت (کاربر بهش واریز می‌کنه)</label>
+          <input id="w_{cid}" name="wallet_{cid}" value="{esc(c['wallet'])}" dir="ltr" autocapitalize="off" spellcheck="false" placeholder="آدرس ولت رو اینجا بنویس">
+          <div class="switch-row"><div><b>فعال</b></div>
+            <label style="display:flex;align-items:center;gap:8px;margin:0;"><input type="checkbox" name="enabled_{cid}" value="1" {'checked' if c['enabled'] else ''} style="width:auto;"> نمایش تو ربات</label></div>
+          <div class="flex" style="margin-top:8px;">
+            <button type="submit" class="secondary sm" formaction="{url_for('crypto_test', coin_id=c['id'])}" formnovalidate>🔎 تست قیمت (ذخیره نمی‌کنه)</button>
+            <button type="submit" class="danger sm" formaction="{url_for('crypto_delete', coin_id=c['id'])}" formnovalidate
+              onclick="return confirm('حذف شود؟');">🗑 حذف</button>
+          </div>
+        </div>"""
+
+    if not coins:
+        rows = '<div class="card"><p class="empty-note">هیچ رمزارزی ثبت نشده؛ تا وقتی یکی اضافه نکنید، گزینه‌ی رمزارز تو ربات نشون داده نمی‌شه.</p></div>'
+
+    note = ("" if configured else
+            '<div class="card"><small class="muted">هنوز رمزارزی ذخیره نشده و گزینه‌ی رمزارز تو ربات نشون داده نمی‌شه. '
+            'آدرس ولت «Gram» رو پایین بنویس و ذخیره کن (یا رمزارز دیگه‌ای اضافه کن). از اون به بعد آدرس رو هر وقت خواستی از همین صفحه عوض کن.</small></div>')
+
+    add_form = f"""
+    <div class="card">
+      <h3>➕ افزودن رمزارز جدید</h3>
+      <form method="post" action="{url_for('crypto_add')}">
+        <label for="n_label">اسم نمایشی</label>
+        <input id="n_label" name="label" maxlength="30" placeholder="مثلاً Tether" required>
+        <label for="n_symbol">نام درست کوین تو نوبیتکس (انگلیسی، مثل usdt)</label>
+        <input id="n_symbol" name="symbol" dir="ltr" autocapitalize="off" spellcheck="false" placeholder="usdt" required>
+        <label for="n_wallet">آدرس ولت</label>
+        <input id="n_wallet" name="wallet" dir="ltr" autocapitalize="off" spellcheck="false" placeholder="آدرس واریز" required>
+        <div style="margin-top:10px;"><button type="submit" class="block">➕ اضافه کن</button></div>
+      </form>
+    </div>"""
+
+    content = f"""
+    {master}
+    {note}
+    <form method="post" action="{url_for('crypto_save')}">
+      {rows}
+      {'<div class="savebar"><button type="submit" class="block">💾 ذخیره‌ی تغییرات</button></div>' if coins else ''}
+    </form>
+    {add_form}
+    <p><small class="muted">قیمت از نوبیتکس به‌صورت لحظه‌ای گرفته می‌شه (جفت‌ارز «نام کوین / ریال»)؛ دکمه‌ی «تست قیمت» کمک می‌کنه مطمئن بشی نام کوین درسته. تغییرات حداکثر ~۲۰ ثانیه بعد روی ربات اعمال می‌شه.</small></p>"""
+    return render_page("رمزارزها", "crypto", content)
+
+
+@app.route("/crypto/master", methods=["POST"])
+@login_required
+def crypto_master():
+    on = get_setting("crypto_enabled", "1") == "1"
+    set_setting("crypto_enabled", "0" if on else "1")
+    flash("شارژ با رمزارز خاموش شد." if on else "شارژ با رمزارز روشن شد.")
+    return redirect(url_for("crypto_page"))
+
+
+@app.route("/crypto/save", methods=["POST"])
+@login_required
+def crypto_save():
+    coins, _configured = load_crypto_coins()
+    by_id = {c["id"]: c for c in coins}
+    out, errors = [], 0
+    for cid in request.form.getlist("ids"):
+        old = by_id.get(cid)
+        if old is None:
+            continue
+        label, symbol, wallet, err = check_coin_fields(request.form.get(f"label_{cid}", ""),
+                                                       request.form.get(f"symbol_{cid}", ""),
+                                                       request.form.get(f"wallet_{cid}", ""))
+        if err:
+            flash(f"⚠️ «{old['label']}»: {err} — تغییراتش ذخیره نشد.")
+            out.append(old)
+            errors += 1
+            continue
+        out.append({"id": cid, "label": label, "symbol": symbol, "wallet": wallet,
+                    "enabled": request.form.get(f"enabled_{cid}") == "1"})
+    save_crypto_coins(out)
+    if not errors:
+        flash("رمزارزها ذخیره شد.")
+    return redirect(url_for("crypto_page"))
+
+
+@app.route("/crypto/add", methods=["POST"])
+@login_required
+def crypto_add():
+    label, symbol, wallet, err = check_coin_fields(request.form.get("label", ""), request.form.get("symbol", ""),
+                                                   request.form.get("wallet", ""))
+    if err:
+        flash(f"⚠️ {err}")
+        return redirect(url_for("crypto_page"))
+    if not wallet:
+        flash("⚠️ آدرس ولت رو وارد کنید.")
+        return redirect(url_for("crypto_page"))
+    coins, _configured = load_crypto_coins()
+    coins.append({"id": secrets.token_hex(3), "label": label, "symbol": symbol, "wallet": wallet, "enabled": True})
+    save_crypto_coins(coins)
+    price, perr = nobitex_price_toman(symbol)
+    if price:
+        flash(f"«{label}» اضافه شد. قیمت لحظه‌ای تست‌شده: {price:,.0f} تومان ✅")
+    else:
+        flash(f"«{label}» اضافه شد ولی ⚠️ قیمتش از نوبیتکس گرفته نشد: {perr}")
+    return redirect(url_for("crypto_page"))
+
+
+@app.route("/crypto/<coin_id>/delete", methods=["POST"])
+@login_required
+def crypto_delete(coin_id):
+    coins, _configured = load_crypto_coins()
+    save_crypto_coins([c for c in coins if c["id"] != coin_id])
+    flash("رمزارز حذف شد.")
+    return redirect(url_for("crypto_page"))
+
+
+@app.route("/crypto/<coin_id>/test", methods=["POST"])
+@login_required
+def crypto_test(coin_id):
+    """قیمت رو با نامی که الان تو فرم نوشته شده تست می‌کنه (بدون ذخیره)."""
+    coins, _configured = load_crypto_coins()
+    coin = next((c for c in coins if c["id"] == coin_id), None)
+    symbol = (request.form.get(f"symbol_{coin_id}") or (coin or {}).get("symbol") or "").strip().lower()
+    label = (request.form.get(f"label_{coin_id}") or (coin or {}).get("label") or symbol)
+    if not CRYPTO_SYMBOL_RE.match(symbol):
+        flash("⚠️ نام کوین معتبر نیست (فقط حروف انگلیسی/عدد).")
+    else:
+        price, err = nobitex_price_toman(symbol)
+        flash(f"✅ قیمت لحظه‌ای {label} ({symbol}): {price:,.0f} تومان" if price else f"⚠️ {label} ({symbol}): {err}")
+    return redirect(url_for("crypto_page"))
 
 
 # ---------- تنظیمات ربات ----------
