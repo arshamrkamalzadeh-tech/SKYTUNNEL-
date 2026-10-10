@@ -1145,7 +1145,7 @@ def csrf_token():
 
 @app.before_request
 def _before_request():
-    if request.endpoint == "static":
+    if request.endpoint in ("static", "panel_font"):
         return None
     try:
         ensure_schema()
@@ -1429,6 +1429,10 @@ BASE_HTML = """<!DOCTYPE html>
   .lay-card .tc-box { padding: 10px; }
   .lay-desc { display: block; font-size: 12px; color: var(--muted); text-align: center; margin-top: 4px; line-height: 1.7; }
   .lay-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(150px, 1fr)); gap: 14px; }
+  .font-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(190px, 1fr)); gap: 14px; margin-bottom: 18px; }
+  .font-prev { height: 88px; border-radius: 12px; background: var(--surface-2); border: 1px solid var(--border); display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 4px; padding: 8px; text-align: center; }
+  .font-prev b { font-size: 15.5px; font-weight: 700; line-height: 1.6; }
+  .font-prev span { font-size: 12.5px; color: var(--muted); line-height: 1.6; }
   input[type=color] { width: 58px; height: 44px; padding: 3px; border-radius: 12px; border: 1.5px solid var(--border); background: var(--surface-2); cursor: pointer; }
 
   /* ---------- ورود ---------- */
@@ -2437,6 +2441,68 @@ LAYOUT_ORDER = list(LAYOUTS)
 _LAYOUT_ALIAS = {'glass': 'bento', 'compact': 'console', 'brutal': 'poster'}   # اسم‌های نسخه‌ی قبل
 
 
+# ⚠️ باید با FONTS داخل app.py (پنل فروشندگان) یکی باشه.
+# فایل‌های فونت (woff2/woff/ttf/otf) رو با اسم «Family-Weight.woff2» (مثلاً Shabnam-Bold.woff2) بذار تو پوشه‌ی fonts کنار برنامه.
+# اگه فایل یه فونت نباشه، پنل خودکار با وزیرمتن/فونت سیستم نمایش داده می‌شه.
+FONTS = {
+    'vazirmatn': {'name': 'وزیرمتن (پیش‌فرض)', 'family': 'Vazirmatn'},
+    'estedad':   {'name': 'استعداد',           'family': 'Estedad'},
+    'shabnam':   {'name': 'شبنم',              'family': 'Shabnam'},
+    'sahel':     {'name': 'ساحل',              'family': 'Sahel'},
+    'samim':     {'name': 'صمیم',              'family': 'Samim'},
+    'tanha':     {'name': 'تنها',              'family': 'Tanha'},
+    'gandom':    {'name': 'گندم (سریف)',        'family': 'Gandom'},
+}
+FONT_ORDER = list(FONTS)
+
+FONT_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), os.getenv("PANEL_FONT_DIR", "fonts"))
+_FONT_EXT = {".woff2": "woff2", ".woff": "woff", ".ttf": "truetype", ".otf": "opentype"}
+_FONT_MIME = {".woff2": "font/woff2", ".woff": "font/woff", ".ttf": "font/ttf", ".otf": "font/otf"}
+_FONT_W = sorted([("thin", 100), ("extralight", 200), ("ultralight", 200), ("light", 300), ("regular", 400),
+                  ("medium", 500), ("semibold", 600), ("demibold", 600), ("extrabold", 800), ("ultrabold", 800),
+                  ("bold", 700), ("black", 900), ("heavy", 900)], key=lambda kv: -len(kv[0]))
+
+
+def _font_face_css():
+    """@font-face برای فونت‌هایی که فایلشون تو پوشه‌ی fonts هست (فقط برای پیش‌نمایش داخل پنل ادمین)."""
+    known = {F["family"].lower(): F["family"] for F in FONTS.values()}
+    faces = []
+    try:
+        names = sorted(os.listdir(FONT_DIR))
+    except OSError:
+        return ""
+    for fn in names:
+        ext = os.path.splitext(fn)[1].lower()
+        m = re.match(r"[A-Za-z]+", fn)
+        if ext not in _FONT_EXT or not m or m.group(0).lower() not in known:
+            continue
+        low = fn.lower()
+        if any(k in low for k in ("variable", "wght", "-vf", "_vf")):
+            w = "100 900"
+        else:
+            w = "400"
+            for k, v in _FONT_W:
+                if k in low:
+                    w = str(v)
+                    break
+        faces.append(f"@font-face{{font-family:'{known[m.group(0).lower()]}';src:url('{url_for('panel_font', name=fn)}') "
+                     f"format('{_FONT_EXT[ext]}');font-weight:{w};font-style:normal;font-display:swap}}")
+    return "\n".join(faces)
+
+
+@app.route("/_/font/<path:name>")
+def panel_font(name):
+    name = os.path.basename(name)
+    ext = os.path.splitext(name)[1].lower()
+    fp = os.path.join(FONT_DIR, name)
+    if ext not in _FONT_EXT or not os.path.isfile(fp):
+        abort(404)
+    from flask import send_file
+    resp = send_file(fp, mimetype=_FONT_MIME[ext], max_age=31536000)
+    resp.headers["Cache-Control"] = "public, max-age=31536000, immutable"
+    return resp
+
+
 def _layout_preview(key, t):
     """پیش‌نمایش کوچیک ساختار هر طراحی (فقط از مقادیر validate‌شده ساخته می‌شه)."""
     bg, card, line, p, ink = t["bg"], t["card"], t["line"], t["p"], t["ink"]
@@ -2527,7 +2593,19 @@ def seller_theme_page():
                       f'<div class="tc-box">{_layout_preview(lid, prev_t)}<span class="tc-name">{esc(L["name"])}</span>'
                       f'<span class="lay-desc">{esc(L["desc"])}{sug}</span></div></label>')
 
+    cur_font = settings.get("seller_font", "vazirmatn")
+    if cur_font not in FONTS:
+        cur_font = "vazirmatn"
+    font_cards = ""
+    for fid in FONT_ORDER:
+        F = FONTS[fid]
+        font_cards += (f'<label class="theme-card font-card"><input type="radio" name="font" value="{fid}"{" checked" if cur_font == fid else ""}>'
+                       f'<div class="tc-box"><div class="font-prev" style="font-family:\'{F["family"]}\',Vazirmatn,Tahoma,sans-serif">'
+                       f'<b>سلام، به پنل خوش اومدی</b><span>۱۲۳ GB · ۳۰ روز · Abc</span></div>'
+                       f'<span class="tc-name">{esc(F["name"])}</span></div></label>')
+
     content = f"""
+    <style>{_font_face_css()}</style>
     <div class="card"><h3>🧩 طراحی کلی پنل</h3>
     <small class="muted">شکل و چیدمان پنل فروشندگان (کارت‌ها، منو، فاصله‌ها). با تم رنگی پایین مستقل کار می‌کنه و با هر رنگی ترکیب می‌شه.</small></div>
     <form method="post" action="{url_for('seller_theme_save')}" id="themeform">
@@ -2536,6 +2614,9 @@ def seller_theme_page():
         <input type="checkbox" name="apply_colors" value="1" checked style="width:auto;margin:0;">
         <span>همراه طراحیِ «ثنایی» یا «پاسارگاد»، رنگ‌بندی پیشنهادیشون هم اعمال بشه <span class="muted">(برای طراحی‌های دیگه اثری نداره)</span></span>
       </label>
+      <div class="card"><h3>🔤 فونت متن‌ها</h3>
+      <small class="muted">فونتِ همه‌ی متن‌های پنل فروشندگان (با هر ۶ طراحی کار می‌کنه). اگه فایل فونت انتخابی کنار برنامه (پوشه‌ی fonts) نباشه، پنل با وزیرمتن نمایش داده می‌شه.</small></div>
+      <div class="font-grid">{font_cards}</div>
       <div class="card"><h3>🎨 تم رنگی</h3></div>
     <div class="card"><small class="muted">تمی که اینجا انتخاب کنید ظاهر <b>پنل فروشندگان</b> (همون سایتی که فروشنده‌ها باهاش وارد می‌شن) رو برای همه عوض می‌کنه.
     تغییر ظرف حدود ۲۰ ثانیه روی پنل فروشندگان اعمال می‌شه. «بنفش (پیش‌فرض)» همون ظاهر اصلیه و هر وقت خواستید می‌تونید برگردید.</small></div>
@@ -2580,10 +2661,15 @@ def seller_theme_save():
             flash("⚠️ رنگ اصلی نامعتبره.")
             return redirect(url_for("seller_theme_page"))
         set_setting("seller_theme_custom", json.dumps({"p": p.lower(), "dark": request.form.get("custom_mode") == "dark"}))
+    font = request.form.get("font") or get_all_settings().get("seller_font", "vazirmatn")
+    if font not in FONTS:
+        flash("⚠️ فونت نامعتبره.")
+        return redirect(url_for("seller_theme_page"))
     set_setting("seller_theme", theme)
     set_setting("seller_layout", layout)
+    set_setting("seller_font", font)
     name = "سفارشی" if theme == "custom" else THEMES[theme]["name"]
-    flash(f"ظاهر پنل فروشندگان تنظیم شد (طراحی: «{LAYOUTS[layout]['name']}»، رنگ: «{name}»)؛ تا ~۲۰ ثانیه‌ی دیگه اعمال می‌شه.")
+    flash(f"ظاهر پنل فروشندگان تنظیم شد (طراحی: «{LAYOUTS[layout]['name']}»، رنگ: «{name}»، فونت: «{FONTS[font]['name']}»)؛ تا ~۲۰ ثانیه‌ی دیگه اعمال می‌شه.")
     return redirect(url_for("seller_theme_page"))
 
 
