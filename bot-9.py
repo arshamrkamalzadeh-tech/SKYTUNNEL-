@@ -82,6 +82,13 @@ DEFAULT_CARD_NUMBER = os.getenv("CARD_NUMBER", "6219861957006504")
 DEFAULT_CARD_OWNER = os.getenv("CARD_OWNER", "کمالزاده")
 DEFAULT_MIN_TOPUP = os.getenv("MIN_TOPUP", "10000")
 
+# --- شارژ با رمزارز (دستی: کاربر رسید می‌فرسته، ادمین تایید/رد می‌کنه) ---
+# هیچ تنظیمی تو Environment لازم نیست. لیست رمزارزها، اسم نمایشی، نام کوین تو نوبیتکس، آدرس ولت هر کوین
+# و روشن/خاموش همه از پنل ادمین، صفحه‌ی «رمزارزها» (کلید crypto_coins تو جدول settings) کنترل می‌شه
+# و تغییرات حداکثر ~۲۰ ثانیه بعد روی ربات اعمال می‌شه. تا وقتی از پنل کوینی با آدرس ولت ثبت نشده،
+# گزینه‌ی رمزارز تو ربات نشون داده نمی‌شه.
+NOBITEX_API_BASE = "https://api.nobitex.ir"   # API عمومی قیمت (بدون کلید)
+
 # ---------------------------------------------------------------------------
 # Service types & per-GB pricing
 # ---------------------------------------------------------------------------
@@ -845,6 +852,39 @@ UI_TEXT['fa'].update({
     'admin_topup_rejected': '❌ درخواست #{req_id} رد شد.',
     'admin_already_reviewed': '⚠️ این درخواست قبلاً بررسی شده یا وجود ندارد.',
 })
+UI_TEXT['fa'].update({
+    'topup_choose_method': '💠 مبلغ شارژ: <b>{amount}</b> تومان\nروش پرداخت رو انتخاب کنید:',
+    'btn_topup_card': '💳 کارت به کارت',
+    'btn_topup_crypto': '🪙 پرداخت با رمزارز',
+    'topup_choose_coin': '🪙 با کدوم رمزارز پرداخت می‌کنید؟',
+    'topup_crypto_info': (
+        '🪙 <b>پرداخت با رمزارز</b>\n{divider}\n'
+        '💵 مبلغ شارژ: <b>{amount}</b> تومان\n'
+        '📈 قیمت لحظه‌ای {coin}: <b>{price}</b> تومان\n'
+        '🔢 مقدار قابل واریز: <b>{coin_amount} {coin}</b>\n\n'
+        '👛 آدرس ولت:\n<code>{wallet}</code>\n\n'
+        '⚠️ دقیقاً همین مقدار رو واریز کنید. قیمت لحظه‌ایه و ممکنه عوض بشه؛ پس زودتر واریز کنید.\n\n'
+        '📸 بعد از واریز، تصویر رسید (اسکرین‌شات تراکنش) رو بفرستید تا بررسی بشه.'
+    ),
+    'topup_crypto_price_error': '❌ الان نتونستم قیمت لحظه‌ای رو بگیرم. چند لحظه دیگه دوباره امتحان کنید یا کارت به کارت بزنید.',
+    'admin_topup_request_crypto': '🪙 <b>درخواست شارژ با رمزارز</b>\n{divider}\n👤 کاربر: <code>{user_id}</code>\n💵 مبلغ: <b>{amount}</b> تومان\n🔢 باید واریز شده باشه: <b>{coin_amount} {coin}</b>\n📈 قیمت زمان درخواست: {price} تومان\n🎫 شناسه درخواست: <b>{req_id}</b>',
+})
+UI_TEXT['en'].update({
+    'topup_choose_method': '💠 Top-up amount: <b>{amount}</b> Toman\nChoose a payment method:',
+    'btn_topup_card': '💳 Card to card',
+    'btn_topup_crypto': '🪙 Pay with crypto',
+    'topup_choose_coin': '🪙 Which cryptocurrency do you want to pay with?',
+    'topup_crypto_info': (
+        '🪙 <b>Pay with crypto</b>\n{divider}\n'
+        '💵 Top-up amount: <b>{amount}</b> Toman\n'
+        '📈 Live {coin} price: <b>{price}</b> Toman\n'
+        '🔢 Amount to send: <b>{coin_amount} {coin}</b>\n\n'
+        '👛 Wallet address:\n<code>{wallet}</code>\n\n'
+        '⚠️ Send exactly this amount. The price is live and may change, so please send soon.\n\n'
+        '📸 After sending, upload a screenshot of the transaction for review.'
+    ),
+    'topup_crypto_price_error': '❌ Could not fetch the live price right now. Try again in a moment or use card to card.',
+})
 UI_TEXT['en'].update({
     'disabled_feature': '⛔ This feature is currently disabled by the administrator.',
     'price_unit_suffix': ' Toman/GB',
@@ -1125,6 +1165,11 @@ def init_db():
         status TEXT DEFAULT "pending",
         created_at TEXT
     )''')
+    for _col in ("method TEXT DEFAULT 'card'", "crypto_amount TEXT", "crypto_price TEXT"):
+        try:
+            c.execute('ALTER TABLE topup_requests ADD COLUMN ' + _col)
+        except Exception:
+            pass  # ستون از قبل هست
     c.execute('CREATE TABLE IF NOT EXISTS settings (key TEXT PRIMARY KEY, value TEXT)')
     c.execute('''CREATE TABLE IF NOT EXISTS discount_codes (
         code TEXT PRIMARY KEY,
@@ -1813,11 +1858,16 @@ def set_free_trial(user_id):
 
 
 @with_db_retry
-def create_topup_request(user_id, amount):
+def create_topup_request(user_id, amount, method='card', crypto_amount=None, crypto_price=None):
     conn = get_conn()
     c = conn.cursor()
-    c.execute('INSERT INTO topup_requests (user_id, amount, created_at) VALUES (?, ?, ?)',
-               (user_id, amount, datetime.now().isoformat()))
+    if method == 'card':
+        c.execute('INSERT INTO topup_requests (user_id, amount, created_at) VALUES (?, ?, ?)',
+                   (user_id, amount, datetime.now().isoformat()))
+    else:
+        c.execute('INSERT INTO topup_requests (user_id, amount, created_at, method, crypto_amount, crypto_price) '
+                  'VALUES (?, ?, ?, ?, ?, ?)',
+                  (user_id, amount, datetime.now().isoformat(), method, str(crypto_amount), str(crypto_price)))
     conn.commit()
     req_id = c.lastrowid
     conn.close()
@@ -1832,6 +1882,19 @@ def get_topup_request(req_id):
     res = c.fetchone()
     conn.close()
     return res
+
+
+def get_topup_method(req_id):
+    """'card' یا 'crypto' (اگه ستون نبود/خطا شد، card)."""
+    try:
+        conn = get_conn()
+        c = conn.cursor()
+        c.execute('SELECT method FROM topup_requests WHERE id=?', (req_id,))
+        row = c.fetchone()
+        conn.close()
+        return (row[0] if row and row[0] else 'card')
+    except Exception:
+        return 'card'
 
 
 @with_db_retry
@@ -2557,6 +2620,143 @@ def action_buy_menu(chat_id):
             divider=DIVIDER,
         )
     send_message(chat_id, text, reply_markup=type_kb)
+
+
+# ---------------------------------------------------------------------------
+# شارژ با رمزارز (دستی) — لیست کوین‌ها از پنل، قیمت لحظه‌ای از نوبیتکس
+# ---------------------------------------------------------------------------
+def get_crypto_coins():
+    """رمزارزهای فعال و قابل‌استفاده از پنل: [{'id','label','symbol','wallet'}].
+    کوینی که آدرس ولت نداشته باشه نشون داده نمی‌شه."""
+    raw = get_setting('crypto_coins', None)
+    if raw is None:
+        data = []
+    else:
+        try:
+            data = json.loads(raw)
+        except Exception:
+            data = []
+    coins = []
+    for c in data if isinstance(data, list) else []:
+        if not isinstance(c, dict) or not c.get('enabled', True):
+            continue
+        symbol = str(c.get('symbol') or '').strip().lower()
+        wallet = str(c.get('wallet') or '').strip()
+        if symbol and wallet:
+            coins.append({'id': str(c.get('id') or symbol), 'label': str(c.get('label') or symbol),
+                          'symbol': symbol, 'wallet': wallet})
+    return coins
+
+
+def crypto_enabled():
+    return get_setting('crypto_enabled', '1') == '1' and bool(get_crypto_coins())
+
+
+_crypto_price_cache = {}
+_CRYPTO_PRICE_TTL = 5   # ثانیه: کش خیلی کوتاه، تا قیمت قدیمی به کاربر داده نشه
+
+# --- حفاظت از ضرر ---
+# قیمتی که به کاربر نشون داده می‌شه «محافظه‌کارانه» حساب می‌شه:
+#  ۱) از بین «آخرین معامله» و «بهترین قیمت خرید» (قیمتی که واقعاً می‌تونی کوین رو باهاش بفروشی) کمترش انتخاب می‌شه
+#  ۲) یه درصد حاشیه‌ی اطمینان از قیمت کم می‌شه (پیش‌فرض ۱٪) تا اگه قیمت تا لحظه‌ی واریز افت کرد، ضرر نکنی
+# هرچی قیمت کمتر باشه، مقدار کوین قابل واریز بیشتره. درصد حاشیه از جدول settings
+# با کلید crypto_margin_percent قابل تغییره (مثلا 0 = بدون حاشیه، 2 = دو درصد).
+# اگه نوبیتکس جواب نده، عمداً از قیمت قدیمی استفاده نمی‌شه و به کاربر خطا نشون داده می‌شه.
+_CRYPTO_DEFAULT_MARGIN_PERCENT = 1.0
+
+
+def get_crypto_margin_percent():
+    try:
+        v = float(str(get_setting('crypto_margin_percent', str(_CRYPTO_DEFAULT_MARGIN_PERCENT))).replace(',', '.'))
+    except Exception:
+        v = _CRYPTO_DEFAULT_MARGIN_PERCENT
+    return min(max(v, 0.0), 20.0)
+
+
+def get_crypto_price_toman(symbol):
+    """قیمت محافظه‌کارانه‌ی هر واحد کوین به تومان (جفت‌ارز symbol-rls تو نوبیتکس) یا None.
+    مینیمم «آخرین معامله» و «بهترین قیمت خرید» منهای حاشیه‌ی اطمینان. ۵ ثانیه کش می‌شه."""
+    symbol = str(symbol or '').strip().lower()
+    if not symbol:
+        return None
+    now = time.time()
+    hit = _crypto_price_cache.get(symbol)
+    if hit and now - hit[0] < _CRYPTO_PRICE_TTL:
+        return hit[1]
+    try:
+        # طبق مستندات نوبیتکس این endpoint متد POST با بدنه‌ی JSON هست
+        r = SESSION.post(NOBITEX_API_BASE + '/market/stats',
+                         json={'srcCurrency': symbol, 'dstCurrency': 'rls'}, timeout=12)
+        if r.status_code != 200:
+            raise RuntimeError(f'HTTP {r.status_code}: {r.text[:200]}')
+        data = r.json()
+        if data.get('status') != 'ok':
+            raise RuntimeError(f'status={data.get("status")} {str(data)[:200]}')
+        st = (data.get('stats') or {}).get(f'{symbol}-rls') or {}
+        latest = float(st.get('latest') or 0)
+        best_buy = float(st.get('bestBuy') or 0)
+        candidates = [x for x in (latest, best_buy) if x > 0]
+        if candidates:
+            base_rial = min(candidates)
+            margin = get_crypto_margin_percent()
+            val = base_rial / 10.0 * (1.0 - margin / 100.0)      # ریال → تومان، منهای حاشیه
+            if val > 0:
+                _crypto_price_cache[symbol] = (now, val)
+                return val
+        print(f'⚠️ قیمت {symbol} تو پاسخ نوبیتکس نبود:', str(st)[:200])
+    except Exception as e:
+        print(f'⚠️ قیمت {symbol} از نوبیتکس گرفته نشد:', e)
+    return None
+
+
+def send_card_topup_info(chat_id, amount):
+    user_steps[str(chat_id)] = {'step': 'waiting_receipt', 'amount': amount}
+    if get_user_lang(chat_id) == 'en':
+        card_text = u(
+            chat_id, 'topup_card_info', amount=f'{amount:,}',
+            card_number=get_card_number(), card_owner=get_card_owner(), divider=DIVIDER,
+        )
+    else:
+        card_text = get_bot_text_fmt(
+            'topup_card_info', DEFAULT_TOPUP_CARD_INFO,
+            amount=f'{amount:,}',
+            card_number=get_card_number(),
+            card_owner=get_card_owner(),
+            divider=DIVIDER,
+        )
+    send_message(chat_id, card_text)
+
+
+def fmt_coin_amount(x):
+    return ('%.8f' % float(x)).rstrip('0').rstrip('.')
+
+
+def send_crypto_topup_info(chat_id, amount, coin):
+    price = get_crypto_price_toman(coin['symbol'])
+    if not price:
+        send_message(chat_id, u(chat_id, 'topup_crypto_price_error'), reply_markup=cancel_kb(chat_id))
+        return
+    # مقدار کوین = مبلغ شارژ (تومان) ÷ قیمت هر واحد (تومان). مثلا ۱۰۰٬۰۰۰ ÷ ۴۰۰٬۰۰۰ = 0.25
+    # به بالا گرد می‌شه تا کاربر کمتر از مبلغ واریز نکنه. تعداد اعشار بسته به قیمت کوین تنظیم می‌شه
+    # (حداقل ۴ و حداکثر ۸ رقم) تا برای کوین‌های گرون مثل بیت‌کوین مبلغ واریزی چند برابر نشه.
+    decimals = max(4, min(8, math.ceil(math.log10(max(price, 1) / 100.0))))
+    factor = 10 ** decimals
+    coin_amount = math.ceil(round(amount / price * factor, 6)) / factor
+    user_steps[str(chat_id)] = {'step': 'waiting_receipt', 'amount': amount, 'method': 'crypto',
+                                'coin_label': coin['label'], 'coin_amount': coin_amount, 'price': price}
+    send_message(chat_id, u(chat_id, 'topup_crypto_info', divider=DIVIDER, amount=f'{amount:,}',
+                            price=f'{price:,.0f}', coin=_html.escape(coin['label']),
+                            coin_amount=fmt_coin_amount(coin_amount), wallet=_html.escape(coin['wallet'])))
+
+
+def show_topup_method_choice(chat_id, amount):
+    user_steps[str(chat_id)] = {'step': 'choose_topup_method', 'amount': amount}
+    send_message(chat_id, u(chat_id, 'topup_choose_method', amount=f'{amount:,}'), reply_markup={
+        'inline_keyboard': [
+            [{'text': u(chat_id, 'btn_topup_card'), 'callback_data': 'tpm_card'}],
+            [{'text': u(chat_id, 'btn_topup_crypto'), 'callback_data': 'tpm_crypto'}],
+            [{'text': u(chat_id, 'btn_cancel'), 'callback_data': 'menu'}],
+        ]})
 
 
 def action_topup_menu(chat_id):
@@ -3652,11 +3852,34 @@ def process_update(update):
             update_ticket_status(tid, 'closed')
             send_message(chat_id, u('fa', 'admin_ticket_closed', tid=str(tid)))
 
+        elif data in ('tpm_card', 'tpm_crypto') or data.startswith('tpc_'):
+            s_ = user_steps.get(str(chat_id), {})
+            coins = get_crypto_coins() if crypto_enabled() else []
+            if s_.get('step') != 'choose_topup_method':
+                main_menu(chat_id)
+            elif data == 'tpm_card':
+                send_card_topup_info(chat_id, s_['amount'])
+            elif not coins:
+                send_message(chat_id, u(chat_id, 'disabled_feature'))
+            elif data == 'tpm_crypto' and len(coins) == 1:
+                send_crypto_topup_info(chat_id, s_['amount'], coins[0])
+            elif data == 'tpm_crypto':
+                send_message(chat_id, u(chat_id, 'topup_choose_coin'), reply_markup={'inline_keyboard': (
+                    [[{'text': c['label'], 'callback_data': 'tpc_' + c['id']}] for c in coins]
+                    + [[{'text': u(chat_id, 'btn_cancel'), 'callback_data': 'menu'}]])})
+            else:
+                coin = next((c for c in coins if 'tpc_' + c['id'] == data), None)
+                if coin:
+                    send_crypto_topup_info(chat_id, s_['amount'], coin)
+                else:
+                    main_menu(chat_id)
+
         elif data.startswith('topup_acc_'):
             req_id = int(data.split('_')[2])
             req = get_topup_request(req_id)
             if req and req[3] == 'pending':
-                multiplier = get_topup_multiplier()
+                # شارژ رمزارزی دقیقاً همون مبلغی‌ه که کاربر وارد کرده (ضریب واریزی فقط برای کارت‌به‌کارت)
+                multiplier = 1.0 if get_topup_method(req_id) == 'crypto' else get_topup_multiplier()
                 credited = int(round(req[2] * multiplier))
                 update_topup_status(req_id, 'approved')
                 update_wallet_db(req[1], credited)
@@ -3963,36 +4186,38 @@ def process_update(update):
                 if amount < get_min_topup():
                     send_message(chat_id, u(chat_id, 'topup_min_error', min_topup=get_min_topup()))
                 else:
-                    user_steps[str(chat_id)] = {'step': 'waiting_receipt', 'amount': amount}
-                    if get_user_lang(chat_id) == 'en':
-                        card_text = u(
-                            chat_id, 'topup_card_info', amount=f'{amount:,}',
-                            card_number=get_card_number(), card_owner=get_card_owner(), divider=DIVIDER,
-                        )
+                    if crypto_enabled():
+                        show_topup_method_choice(chat_id, amount)
                     else:
-                        card_text = get_bot_text_fmt(
-                            'topup_card_info', DEFAULT_TOPUP_CARD_INFO,
-                            amount=f'{amount:,}',
-                            card_number=get_card_number(),
-                            card_owner=get_card_owner(),
-                            divider=DIVIDER,
-                        )
-                    send_message(chat_id, card_text)
+                        send_card_topup_info(chat_id, amount)
             except ValueError:
                 send_message(chat_id, u(chat_id, 'topup_amount_error'))
 
         elif step.get('step') == 'waiting_receipt' and 'photo' in message:
             photo_id = message['photo'][-1]['file_id']
             amount = step.get('amount')
-            req_id = create_topup_request(chat_id, amount)
+            is_crypto = step.get('method') == 'crypto'
+            if is_crypto:
+                req_id = create_topup_request(chat_id, amount, 'crypto',
+                                              f"{fmt_coin_amount(step.get('coin_amount'))} {step.get('coin_label')}",
+                                              step.get('price'))
+            else:
+                req_id = create_topup_request(chat_id, amount)
 
             send_message(chat_id, u(chat_id, 'topup_receipt_ok') if get_user_lang(chat_id) == 'en'
                           else get_bot_text('topup_receipt_ok', DEFAULT_TOPUP_RECEIPT_OK))
             user_steps[str(chat_id)] = {}
             # پیام «رسید دریافت شد» همین بالا رفت؛ دیگه نیازی به تکرار منو نیست.
 
-            admin_caption = u('fa', 'admin_topup_request', divider=DIVIDER, user_id=str(chat_id),
-                              amount=f'{amount:,}', req_id=str(req_id))
+            if is_crypto:
+                admin_caption = u('fa', 'admin_topup_request_crypto', divider=DIVIDER, user_id=str(chat_id),
+                                  amount=f'{amount:,}', req_id=str(req_id),
+                                  coin_amount=fmt_coin_amount(step.get('coin_amount')),
+                                  coin=_html.escape(str(step.get('coin_label'))),
+                                  price=f"{step.get('price'):,.0f}")
+            else:
+                admin_caption = u('fa', 'admin_topup_request', divider=DIVIDER, user_id=str(chat_id),
+                                  amount=f'{amount:,}', req_id=str(req_id))
             admin_kb = {
                 'inline_keyboard': [[
                     {'text': u('fa', 'admin_btn_accept'), 'callback_data': 'topup_acc_' + str(req_id)},
