@@ -87,7 +87,13 @@ DEFAULT_MIN_TOPUP = os.getenv("MIN_TOPUP", "10000")
 # و روشن/خاموش همه از پنل ادمین، صفحه‌ی «رمزارزها» (کلید crypto_coins تو جدول settings) کنترل می‌شه
 # و تغییرات حداکثر ~۲۰ ثانیه بعد روی ربات اعمال می‌شه. تا وقتی از پنل کوینی با آدرس ولت ثبت نشده،
 # گزینه‌ی رمزارز تو ربات نشون داده نمی‌شه.
-NOBITEX_API_BASE = "https://api.nobitex.ir"   # API عمومی قیمت (بدون کلید)
+# API عمومی قیمت (بدون کلید). تو مستندات جدید نوبیتکس آدرس رسمی apiv2.nobitex.ir هست؛
+# api.nobitex.ir آدرس قدیمیه و از سرور خارج از ایران (مثل Railway) ممکنه DNS اش جواب نده.
+# ربات به ترتیب هر دو رو امتحان می‌کنه. اگه خواستی دستی عوض کنی: Environment با اسم NOBITEX_API_BASE
+# (یک یا چند آدرس با کاما جدا شده).
+NOBITEX_API_BASES = [x.strip().rstrip('/') for x in os.getenv(
+    "NOBITEX_API_BASE", "https://apiv2.nobitex.ir,https://api.nobitex.ir").split(',') if x.strip()]
+NOBITEX_API_BASE = NOBITEX_API_BASES[0]
 
 # ---------------------------------------------------------------------------
 # Service types & per-GB pricing
@@ -2685,8 +2691,18 @@ def get_crypto_price_toman(symbol):
         return hit[1]
     try:
         # طبق مستندات نوبیتکس این endpoint متد POST با بدنه‌ی JSON هست
-        r = SESSION.post(NOBITEX_API_BASE + '/market/stats',
-                         json={'srcCurrency': symbol, 'dstCurrency': 'rls'}, timeout=12)
+        r = None
+        last_err = None
+        for base in NOBITEX_API_BASES:
+            try:
+                r = SESSION.post(base + '/market/stats',
+                                 json={'srcCurrency': symbol, 'dstCurrency': 'rls'}, timeout=12)
+                break
+            except requests.exceptions.RequestException as ce:   # DNS/اتصال: آدرس بعدی
+                last_err = ce
+                print(f'⚠️ اتصال به {base} ممکن نشد:', ce)
+        if r is None:
+            raise last_err or RuntimeError('no Nobitex base URL configured')
         if r.status_code != 200:
             raise RuntimeError(f'HTTP {r.status_code}: {r.text[:200]}')
         data = r.json()
