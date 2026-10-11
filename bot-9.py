@@ -868,7 +868,7 @@ UI_TEXT['fa'].update({
         '💵 مبلغ شارژ: <b>{amount}</b> تومان\n'
         '📈 قیمت لحظه‌ای {coin}: <b>{price}</b> تومان\n'
         '🔢 مقدار قابل واریز: <code>{coin_amount}</code> <b>{coin}</b>\n\n'
-        '👛 آدرس ولت:\n<code>{wallet}</code>\n\n'
+        '👛 آدرس ولت:\n<code>{wallet}</code>\n{memo_line}\n'
         '⚠️ دقیقاً همین مقدار رو واریز کنید. قیمت لحظه‌ایه و ممکنه عوض بشه؛ پس زودتر واریز کنید.\n\n'
         '📸 بعد از واریز، تصویر رسید (اسکرین‌شات تراکنش) رو بفرستید تا بررسی بشه.'
     ),
@@ -885,7 +885,7 @@ UI_TEXT['en'].update({
         '💵 Top-up amount: <b>{amount}</b> Toman\n'
         '📈 Live {coin} price: <b>{price}</b> Toman\n'
         '🔢 Amount to send: <code>{coin_amount}</code> <b>{coin}</b>\n\n'
-        '👛 Wallet address:\n<code>{wallet}</code>\n\n'
+        '👛 Wallet address:\n<code>{wallet}</code>\n{memo_line}\n'
         '⚠️ Send exactly this amount. The price is live and may change, so please send soon.\n\n'
         '📸 After sending, upload a screenshot of the transaction for review.'
     ),
@@ -2650,12 +2650,18 @@ def get_crypto_coins():
         wallet = str(c.get('wallet') or '').strip()
         if symbol and wallet:
             coins.append({'id': str(c.get('id') or symbol), 'label': str(c.get('label') or symbol),
-                          'symbol': symbol, 'wallet': wallet})
+                          'symbol': symbol, 'wallet': wallet,
+                          'memo': str(c.get('memo') or '').strip()})
     return coins
 
 
 def crypto_enabled():
     return get_setting('crypto_enabled', '1') == '1' and bool(get_crypto_coins())
+
+
+def card_topup_enabled():
+    """شارژ کارت‌به‌کارت (ریالی) — از پنل ادمین، صفحه‌ی «رمزارزها» روشن/خاموش می‌شه (کلید card_topup_enabled)."""
+    return get_setting('card_topup_enabled', '1') == '1'
 
 
 _crypto_price_cache = {}
@@ -2744,7 +2750,31 @@ def send_card_topup_info(chat_id, amount):
 
 
 def fmt_coin_amount(x):
-    return ('%.8f' % float(x)).rstrip('0').rstrip('.')
+    """مقدار کوین با حداقل ۲ رقم اعشار (مثلا 0.30)؛ صفرهای اضافه‌ی آخر حذف می‌شه."""
+    t = ('%.8f' % float(x)).rstrip('0')
+    ip, _, fp = t.partition('.')
+    return (ip or '0') + '.' + fp.ljust(2, '0')
+
+
+def round_coin_amount(amount, price):
+    """مقدار کوین قابل واریز = amount ÷ price که همیشه «به بالا» و با حداکثر ۲ رقم اعشار گرد می‌شه
+    (مثلا 0.2965 → 0.30). اگه گرد کردن به ۲ رقم باعث بشه کاربر بیشتر از «حداکثر اضافه‌پرداخت» (پیش‌فرض ۵٪،
+    کلید crypto_round_max_over_percent تو settings) بده — مثل کوین‌های گرون مثل بیت‌کوین — خودکار
+    اعشار بیشتری (تا ۸ رقم) استفاده می‌شه تا کاربر چند برابر مبلغ رو نده."""
+    try:
+        max_over = float(str(get_setting('crypto_round_max_over_percent', '5')).replace(',', '.'))
+    except Exception:
+        max_over = 5.0
+    max_over = min(max(max_over, 0.0), 100.0)
+    exact = amount / price
+    limit = amount * (1.0 + max_over / 100.0)
+    coin_amount = exact
+    for d in range(2, 9):
+        factor = 10 ** d
+        coin_amount = math.ceil(round(exact * factor, 6)) / factor
+        if coin_amount * price <= limit:
+            break
+    return coin_amount
 
 
 def send_crypto_topup_info(chat_id, amount, coin):
@@ -2755,14 +2785,21 @@ def send_crypto_topup_info(chat_id, amount, coin):
     # مقدار کوین = مبلغ شارژ (تومان) ÷ قیمت هر واحد (تومان). مثلا ۱۰۰٬۰۰۰ ÷ ۴۰۰٬۰۰۰ = 0.25
     # به بالا گرد می‌شه تا کاربر کمتر از مبلغ واریز نکنه. تعداد اعشار بسته به قیمت کوین تنظیم می‌شه
     # (حداقل ۴ و حداکثر ۸ رقم) تا برای کوین‌های گرون مثل بیت‌کوین مبلغ واریزی چند برابر نشه.
-    decimals = max(4, min(8, math.ceil(math.log10(max(price, 1) / 100.0))))
-    factor = 10 ** decimals
-    coin_amount = math.ceil(round(amount / price * factor, 6)) / factor
+    coin_amount = round_coin_amount(amount, price)
+    # Memo/Comment فقط وقتی تو پنل پر شده باشه نشون داده می‌شه؛ خالی باشه هیچی نمایش داده نمی‌شه
+    memo = str(coin.get('memo') or '').strip()
+    if memo:
+        memo_line = ('\n📝 Memo / Comment:\n<code>%s</code>\n\n⚠️ حتماً Memo رو هم دقیقاً بنویسید، وگرنه واریزی شناسایی نمی‌شه.\n'
+                     if get_user_lang(chat_id) != 'en' else
+                     '\n📝 Memo / Comment:\n<code>%s</code>\n\n⚠️ You must include this memo, otherwise the deposit cannot be identified.\n') % _html.escape(memo)
+    else:
+        memo_line = ''
     user_steps[str(chat_id)] = {'step': 'waiting_receipt', 'amount': amount, 'method': 'crypto',
                                 'coin_label': coin['label'], 'coin_amount': coin_amount, 'price': price}
     send_message(chat_id, u(chat_id, 'topup_crypto_info', divider=DIVIDER, amount=f'{amount:,}',
                             price=f'{price:,.0f}', coin=_html.escape(coin['label']),
-                            coin_amount=fmt_coin_amount(coin_amount), wallet=_html.escape(coin['wallet'])))
+                            coin_amount=fmt_coin_amount(coin_amount), wallet=_html.escape(coin['wallet']),
+                            memo_line=memo_line))
 
 
 def show_topup_method_choice(chat_id, amount):
@@ -2775,8 +2812,33 @@ def show_topup_method_choice(chat_id, amount):
         ]})
 
 
+def show_coin_choice(chat_id, amount, coins):
+    """اگه فقط یه رمزارز فعاله مستقیم اطلاعات واریز، وگرنه لیست انتخاب رمزارز."""
+    if len(coins) == 1:
+        send_crypto_topup_info(chat_id, amount, coins[0])
+        return
+    user_steps[str(chat_id)] = {'step': 'choose_topup_method', 'amount': amount}
+    send_message(chat_id, u(chat_id, 'topup_choose_coin'), reply_markup={'inline_keyboard': (
+        [[{'text': c['label'], 'callback_data': 'tpc_' + c['id']}] for c in coins]
+        + [[{'text': u(chat_id, 'btn_cancel'), 'callback_data': 'menu'}]])})
+
+
+def start_topup_payment(chat_id, amount):
+    """بعد از وارد کردن مبلغ: بر اساس روشن/خاموش بودن کارت‌به‌کارت و رمزارز مسیر رو انتخاب می‌کنه."""
+    card_on, crypto_on = card_topup_enabled(), crypto_enabled()
+    if card_on and crypto_on:
+        show_topup_method_choice(chat_id, amount)
+    elif card_on:
+        send_card_topup_info(chat_id, amount)
+    elif crypto_on:
+        show_coin_choice(chat_id, amount, get_crypto_coins())
+    else:
+        user_steps[str(chat_id)] = {}
+        send_message(chat_id, u(chat_id, 'disabled_feature'))
+
+
 def action_topup_menu(chat_id):
-    if not is_feature_enabled('topup'):
+    if not is_feature_enabled('topup') or not (card_topup_enabled() or crypto_enabled()):
         send_message(chat_id, u(chat_id, 'disabled_feature'))
         return
     user_steps[str(chat_id)] = {'step': 'ask_topup_amount'}
@@ -3874,7 +3936,10 @@ def process_update(update):
             if s_.get('step') != 'choose_topup_method':
                 main_menu(chat_id)
             elif data == 'tpm_card':
-                send_card_topup_info(chat_id, s_['amount'])
+                if card_topup_enabled():
+                    send_card_topup_info(chat_id, s_['amount'])
+                else:
+                    send_message(chat_id, u(chat_id, 'disabled_feature'))
             elif not coins:
                 send_message(chat_id, u(chat_id, 'disabled_feature'))
             elif data == 'tpm_crypto' and len(coins) == 1:
@@ -4202,10 +4267,7 @@ def process_update(update):
                 if amount < get_min_topup():
                     send_message(chat_id, u(chat_id, 'topup_min_error', min_topup=get_min_topup()))
                 else:
-                    if crypto_enabled():
-                        show_topup_method_choice(chat_id, amount)
-                    else:
-                        send_card_topup_info(chat_id, amount)
+                    start_topup_payment(chat_id, amount)
             except ValueError:
                 send_message(chat_id, u(chat_id, 'topup_amount_error'))
 
