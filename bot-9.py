@@ -884,10 +884,31 @@ UI_TEXT['fa'].update({
         '🔢 مقدار قابل واریز: <code>{coin_amount}</code> <b>{coin}</b>\n\n'
         '{network_line}👛 آدرس ولت:\n<code>{wallet}</code>\n{memo_line}\n'
         '⚠️ دقیقاً همین مقدار رو واریز کنید. قیمت لحظه‌ایه و ممکنه عوض بشه؛ پس زودتر واریز کنید.\n\n'
-        '📸 بعد از واریز، تصویر رسید (اسکرین‌شات تراکنش) رو بفرستید، یا اگه خواستید «هش تراکنش (Hash)» رو به‌صورت متن بفرستید تا بررسی بشه.'
+        '🔎 بعد از واریز، فقط «هش تراکنش (Hash)» رو به‌صورت متن بفرستید (نیازی به عکس نیست). بات خودش واریز رو تو نوبیتکس پیدا و بررسی می‌کنه.'
     ),
-    'topup_crypto_need_proof': '📸 لطفاً تصویر رسید یا هش تراکنش (Hash) رو بفرستید. هش باید یه متن پیوسته و بدون فاصله باشه.',
+    'topup_crypto_need_proof': '🔎 لطفاً فقط هش تراکنش (Hash) رو به‌صورت متن بفرستید (عکس لازم نیست). هش باید یه متن پیوسته و بدون فاصله باشه.',
+    'btn_send_hash': '🔎 ارسال هش تراکنش',
+    'topup_receipt_ok_crypto_hint': '\n\n⏳ اگه واریزتون خودکار تأیید نشد، هر زمان خواستید می‌تونید هش رو دوباره (یا اصلاح‌شده) بفرستید تا دوباره بررسی بشه.',
+    'topup_hash_prompt': '🔎 هش تراکنش (Hash) واریزتون رو بفرستید (یه متن پیوسته و بدون فاصله).',
+    'topup_hash_received': '✅ هش دریافت شد و در حال بررسیه. اگه با واریز خودتون بخونه خودکار تأیید می‌شه، وگرنه ادمین دستی بررسی می‌کنه.',
+    'topup_hash_no_pending': '⚠️ درخواست شارژ رمزارزیِ در انتظاری ندارید.',
     'topup_crypto_price_error': '❌ الان نتونستم قیمت لحظه‌ای رو بگیرم. چند لحظه دیگه دوباره امتحان کنید یا کارت به کارت بزنید.',
+    'topup_crypto_info2': (
+        '🪙 <b>پرداخت با رمزارز</b>\n{divider}\n'
+        '{network_line}👛 آدرس ولت ({coin}):\n<code>{wallet}</code>\n{memo_line}\n'
+        '💵 حداقل شارژ: <b>{min_topup}</b> تومان\n\n'
+        '✅ هر مقداری که می‌خوای شارژ کنی رو واریز کن (لازم نیست مبلغ خاصی باشه).\n\n'
+        '🔢 بعد از واریز، «مقداری که فرستادی» رو دقیقاً همین‌جا برای بات بنویس؛ مثلاً:\n<code>0.2 {symbol}</code>\n\n'
+        'بات معادل تقریبی تومانی رو نشون می‌ده و واریز رو تو نوبیتکس چک می‌کنه.'
+    ),
+    'topup_crypto_bad_amount': '⚠️ مقدار رو درست نفهمیدم. فقط عدد (و در صورت دلخواه اسم ارز) بنویسید؛ مثلاً: <code>0.2 {symbol}</code>',
+    'topup_crypto_coin_mismatch': '⚠️ شما ارز <b>{coin}</b> رو انتخاب کردید ولی تو پیامتون ارز دیگه‌ای نوشتید. فقط مقدار {coin} رو بفرستید؛ مثلاً: <code>0.2 {symbol}</code>',
+    'topup_crypto_below_min': '⚠️ این مقدار معادل حدود <b>{amount}</b> تومانه که کمتر از حداقل شارژ (<b>{min_topup}</b> تومان) هست و شارژ نمی‌شه. اگه قبلاً واریز کردید با پشتیبانی تماس بگیرید.',
+    'topup_crypto_declared': '✅ دریافت شد: <code>{coin_amount}</code> {coin}\n💵 معادل تقریبی: حدود <b>{amount}</b> تومان\n📈 (قیمت لحظه‌ای {price} تومان)\n\n🔎 در حال بررسی واریز تو نوبیتکس...',
+    'topup_crypto_ask_hash': '⏳ هنوز این واریز تو نوبیتکس پیدا نشد (ممکنه تأییدیه شبکه کامل نشده باشه).\n\n🔎 لطفاً «هش تراکنش (Hash)» رو همین‌جا به‌صورت متن بفرستید تا با هش چک کنم. تا چند ساعت هم خودکار دوباره چک می‌شه.',
+    'topup_crypto_unconfirmed': '⏳ واریزتون تو نوبیتکس پیدا شد ولی هنوز تأیید نهایی شبکه رو نگرفته. به محض تأیید، کیف پولتون خودکار شارژ می‌شه.',
+    'topup_crypto_found_wait_admin': '✅ واریزتون تو نوبیتکس پیدا شد. منتظر تأیید ادمین باشید؛ بعد از تأیید کیف پولتون شارژ می‌شه.',
+    'topup_crypto_not_found_admin': '❌ با این هش هم واریزی پیدا نشد.\n\n🕐 منتظر تأیید دستی ادمین باشید. اگه واریز کردید، بعد از بررسی شارژ می‌شه. (تا چند ساعت هم خودکار دوباره چک می‌شه.)',
     'admin_topup_request_crypto': '🪙 <b>درخواست شارژ با رمزارز</b>\n{divider}\n👤 کاربر: <code>{user_id}</code>\n💵 مبلغ: <b>{amount}</b> تومان\n🔢 باید واریز شده باشه: <b>{coin_amount} {coin}</b>\n📈 قیمت زمان درخواست: {price} تومان\n🎫 شناسه درخواست: <b>{req_id}</b>',
 })
 UI_TEXT['en'].update({
@@ -903,10 +924,31 @@ UI_TEXT['en'].update({
         '🔢 Amount to send: <code>{coin_amount}</code> <b>{coin}</b>\n\n'
         '{network_line}👛 Wallet address:\n<code>{wallet}</code>\n{memo_line}\n'
         '⚠️ Send exactly this amount. The price is live and may change, so please send soon.\n\n'
-        '📸 After sending, upload a screenshot of the transaction, or send the transaction hash as text, for review.'
+        '🔎 After sending, just send the transaction hash as text (no screenshot needed). The bot will find and verify the deposit automatically.'
     ),
-    'topup_crypto_need_proof': '📸 Please send a photo of the receipt or the transaction hash. The hash must be a single continuous text with no spaces.',
+    'topup_crypto_need_proof': '🔎 Please send only the transaction hash as text (no photo needed). The hash must be a single continuous text with no spaces.',
+    'btn_send_hash': '🔎 Send transaction hash',
+    'topup_receipt_ok_crypto_hint': '\n\n⏳ If your deposit is not confirmed automatically, you can send the transaction hash at any time and it will be checked again.',
+    'topup_hash_prompt': '🔎 Send the transaction hash of your deposit (a single continuous text with no spaces).',
+    'topup_hash_received': '✅ Hash received and being checked. If it matches your deposit it will be confirmed automatically; otherwise the admin will review it manually.',
+    'topup_hash_no_pending': "⚠️ You don't have a pending crypto top-up request.",
     'topup_crypto_price_error': '❌ Could not fetch the live price right now. Try again in a moment or use card to card.',
+    'topup_crypto_info2': (
+        '🪙 <b>Pay with crypto</b>\n{divider}\n'
+        '{network_line}👛 Wallet address ({coin}):\n<code>{wallet}</code>\n{memo_line}\n'
+        '💵 Minimum top-up: <b>{min_topup}</b> Toman\n\n'
+        '✅ Send any amount you like (it does not have to be a specific number).\n\n'
+        '🔢 After sending, write the exact amount you sent here, for example:\n<code>0.2 {symbol}</code>\n\n'
+        'The bot shows the approximate Toman value and checks the deposit on Nobitex.'
+    ),
+    'topup_crypto_bad_amount': '⚠️ I could not read that amount. Send just a number (optionally with the coin name), e.g. <code>0.2 {symbol}</code>',
+    'topup_crypto_coin_mismatch': '⚠️ You selected <b>{coin}</b> but wrote a different coin. Send only the {coin} amount, e.g. <code>0.2 {symbol}</code>',
+    'topup_crypto_below_min': '⚠️ This amount is about <b>{amount}</b> Toman, below the minimum top-up (<b>{min_topup}</b> Toman), so it cannot be credited. If you already sent it, please contact support.',
+    'topup_crypto_declared': '✅ Received: <code>{coin_amount}</code> {coin}\n💵 Approximate value: about <b>{amount}</b> Toman\n📈 (live price {price} Toman)\n\n🔎 Checking the deposit on Nobitex...',
+    'topup_crypto_ask_hash': '⏳ This deposit has not shown up on Nobitex yet (network confirmations may still be pending).\n\n🔎 Please send the transaction hash here as text so I can check it by hash. It will also be re-checked automatically for a few hours.',
+    'topup_crypto_unconfirmed': '⏳ Your deposit was found on Nobitex but is not finally confirmed by the network yet. Your wallet will be topped up automatically once it is.',
+    'topup_crypto_found_wait_admin': '✅ Your deposit was found on Nobitex. Please wait for admin approval; your wallet will be topped up afterwards.',
+    'topup_crypto_not_found_admin': '❌ No deposit was found with this hash either.\n\n🕐 Please wait for manual admin approval. If you sent the funds, your wallet will be topped up after review. (It is also re-checked automatically for a few hours.)',
 })
 UI_TEXT['en'].update({
     'disabled_feature': '⛔ This feature is currently disabled by the administrator.',
@@ -1774,7 +1816,7 @@ def crypto_match_tolerance():
 def get_crypto_request_row(req_id):
     conn = get_conn()
     c = conn.cursor()
-    c.execute('SELECT id, user_id, amount, status, created_at, coin_symbol, coin_qty, tx_hash, req_ts, matched_tx '
+    c.execute('SELECT id, user_id, amount, status, created_at, coin_symbol, coin_qty, tx_hash, req_ts, matched_tx, crypto_price '
               'FROM topup_requests WHERE id=?', (req_id,))
     row = c.fetchone()
     conn.close()
@@ -1826,6 +1868,83 @@ def set_request_matched_tx(req_id, tx):
     conn.close()
 
 
+@with_db_retry
+def get_latest_pending_crypto_request(user_id):
+    """آخرین درخواست شارژ رمزارزیِ در انتظارِ این کاربر (یا None)."""
+    conn = get_conn()
+    c = conn.cursor()
+    c.execute("SELECT id FROM topup_requests WHERE user_id=? AND status='pending' AND method='crypto' "
+              "AND coin_symbol IS NOT NULL ORDER BY id DESC LIMIT 1", (user_id,))
+    row = c.fetchone()
+    conn.close()
+    return row[0] if row else None
+
+
+@with_db_retry
+def set_request_tx_hash(req_id, tx_hash):
+    conn = get_conn()
+    c = conn.cursor()
+    c.execute('UPDATE topup_requests SET tx_hash=? WHERE id=?', (tx_hash, req_id))
+    conn.commit()
+    conn.close()
+
+
+def attach_hash_to_pending_request(chat_id, req_id, tx_hash):
+    """هش رو به درخواست معلق وصل می‌کنه، به ادمین خبر می‌ده و فوراً با نوبیتکس تطبیق می‌ده
+    (اگه هنوز نخوره، watcher هم تا ۴۸ ساعت دوباره چک می‌کنه)."""
+    prev = get_crypto_request_row(req_id)
+    same = bool(prev and (prev[7] or '').strip() == tx_hash.strip())
+    set_request_tx_hash(req_id, tx_hash)
+    send_message(chat_id, u(chat_id, 'topup_hash_received'))
+    if not same:
+        send_message(ADMIN_ID, f'🔗 کاربر <code>{chat_id}</code> برای درخواست #{req_id} هش تراکنش فرستاد:\n'
+                               f'<code>{_html.escape(tx_hash)}</code>')
+    _crypto_notified.difference_update({k for k in _crypto_notified if k[0] == req_id})   # نتیجه‌ی جدید دوباره به ادمین برسه
+    check_crypto_for_user_async(chat_id, req_id, 'hash')
+
+
+def crypto_shortfall_toman():
+    """حداکثر کسریِ مجاز (تومان) نسبت به مقدار مورد انتظار؛ از پنل با کلید crypto_max_shortfall_toman (پیش‌فرض ۶۰۰۰)."""
+    try:
+        return max(0.0, float(str(get_setting('crypto_max_shortfall_toman', '6000')).replace(',', '')))
+    except Exception:
+        return 6000.0
+
+
+def crypto_amount_ok(amount, expected, price):
+    """مقدار واریزی بیشتر یا مساوی مقدار مورد انتظار باشه، یا حداکثر چند هزار تومان (بر اساس قیمت لحظه‌ی درخواست) کمتر."""
+    if amount >= expected - 1e-9:
+        return True
+    try:
+        price = float(price)
+    except Exception:
+        return False
+    if price <= 0:
+        return False
+    return (expected - amount) * price <= crypto_shortfall_toman()
+
+
+@with_db_retry
+def count_competing_crypto_requests(req_id, user_id, symbol, qty, tol, hours=48):
+    """تعداد درخواست‌های معلقِ «کاربران دیگه» با همون کوین و مقدار تقریباً برابر.
+    اگه باشه، تطبیق بدون هش خودکار تأیید نمی‌شه (معلوم نیست واریز مال کدوم کاربره؛ هش یا ادمین تصمیم می‌گیره)."""
+    cutoff = (datetime.now() - timedelta(hours=hours)).isoformat()
+    conn = get_conn()
+    c = conn.cursor()
+    c.execute("SELECT coin_qty FROM topup_requests WHERE status='pending' AND method='crypto' AND coin_symbol=? "
+              "AND id<>? AND user_id<>? AND created_at>=?", (symbol, req_id, user_id, cutoff))
+    rows = c.fetchall()
+    conn.close()
+    n = 0
+    for (q,) in rows:
+        try:
+            if abs(float(q) - qty) <= max(qty * tol * 2, 1e-9):
+                n += 1
+        except Exception:
+            pass
+    return n
+
+
 def evaluate_crypto_request(req_id):
     """نتیجه‌ی تطبیق یه درخواست رمزارزی با واریزهای نوبیتکس: دیکشنری {state, deposit, note}.
     state: matched | mismatch | hash_mismatch | ambiguous | unconfirmed | not_found | error"""
@@ -1840,6 +1959,7 @@ def evaluate_crypto_request(req_id):
             req_ts = datetime.fromisoformat(row[4]).timestamp()
         except Exception:
             req_ts = time.time() - 6 * 3600
+    price = row[10] if len(row) > 10 else None
     tol = crypto_match_tolerance()
     try:
         deps = nobitex_fetch_deposits()
@@ -1850,7 +1970,14 @@ def evaluate_crypto_request(req_id):
     # تطبیق با هش: فقط خودِ هش مهمه (طول حداقل ۱۶ تا هش‌های کوتاه اتفاقی نخورن)
     hash_hits = [d for d in unused if user_hash and len(d['tx']) >= 16 and d['tx'].lower() in user_hash]
     if hash_hits:
-        return {'state': 'hash_ok', 'deposit': hash_hits[0], 'expected': expected}
+        d = hash_hits[0]
+        # هش خوردن به‌تنهایی کافی نیست (هش هر تراکنش روی بلاک‌چین عمومیه): کوین و مقدار هم باید بخونه
+        fresh = d['ts'] is None or d['ts'] >= req_ts - 600     # واریز باید بعد از درخواست باشه، نه یه واریز قدیمی
+        if d['currency'] == symbol and fresh and crypto_amount_ok(d['amount'], expected, price):
+            if d['confirmed']:
+                return {'state': 'hash_ok', 'deposit': d, 'expected': expected}
+            return {'state': 'unconfirmed', 'deposit': d, 'expected': expected, 'by_hash': True}
+        return {'state': 'mismatch', 'deposit': d, 'expected': expected, 'by_hash': True}
     pool = [d for d in unused if d['currency'] == symbol]
     by_hash = []
     by_time = [d for d in pool if d['ts'] is not None and d['ts'] >= req_ts - 600]
@@ -1863,13 +1990,20 @@ def evaluate_crypto_request(req_id):
     if not base:
         return {'state': 'hash_mismatch' if hash_note else 'not_found',
                 'note': 'هش وارد‌شده با هیچ واریزی تو نوبیتکس نخورد' if hash_note else ''}
-    within = [d for d in base if abs(d['amount'] - expected) <= expected * tol]
-    if hash_note:     # هش داده شده ولی نخورده: خودکار تأیید نمی‌شه، فقط نشون می‌دیم
+    if hash_note:
+        # هش داده شده ولی با هیچ واریزی نخورده: هیچ‌وقت خودکار تأیید نمی‌شه (ممکنه واریز یه نفر دیگه باشه)؛
+        # فقط نزدیک‌ترین واریز به ادمین نشون داده می‌شه. اگه واریز بعداً تو نوبیتکس بیاد، watcher با هش دوباره چک می‌کنه.
         best = min(base, key=lambda d: abs(d['amount'] - expected))
         return {'state': 'hash_mismatch', 'deposit': best, 'expected': expected,
                 'note': 'هش وارد‌شده با واریزی نخورد، نزدیک‌ترین واریز نشون داده شد'}
+    # مسیر بدون هش (درخواست‌های قدیمی): سقف بالا هم داره تا واریز بزرگ یه نفر دیگه اشتباهاً مچ نشه
+    within = [d for d in base if crypto_amount_ok(d['amount'], expected, price)
+              and d['amount'] <= expected * (1 + tol)]
     ok = [d for d in within if d['confirmed']]
     if len(ok) == 1:
+        if count_competing_crypto_requests(req_id, row[1], symbol, expected, tol) > 0:
+            return {'state': 'ambiguous', 'deposit': ok[0], 'expected': expected,
+                    'note': 'چند کاربر مقدار هم‌اندازه اعلام کردن؛ با هش یا دستی مشخص بشه'}
         return {'state': 'matched', 'deposit': ok[0], 'expected': expected}
     if len(ok) > 1:
         return {'state': 'ambiguous', 'deposit': ok[0], 'expected': expected, 'note': f'{len(ok)} واریز هم‌مقدار پیدا شد'}
@@ -1897,14 +2031,15 @@ def format_crypto_eval(req_id, res, coin_label=''):
     lines = {
         'hash_ok': '✅ هش تراکنش با یه واریز تو نوبیتکس خورد.',
         'matched': '✅ واریز هم‌مقدار پیدا شد (کاربر هش نفرستاده؛ تأیید با خودته).',
-        'mismatch': '⚠️ واریزی پیدا شد ولی مقدارش با مقدار مورد انتظار فرق داره؛ دستی تصمیم بگیرید.',
+        'mismatch': '⚠️ واریزی پیدا شد ولی کوین/مقدار/زمانش با درخواست نمی‌خونه؛ دستی تصمیم بگیرید.',
         'hash_mismatch': '⚠️ ' + _html.escape(res.get('note', '')) + '.',
         'ambiguous': '⚠️ ' + _html.escape(res.get('note', '')) + '؛ دستی تأیید کنید.',
         'unconfirmed': '⏳ واریز پیدا شد ولی هنوز تأیید نهایی شبکه رو نگرفته.',
     }
     msg = head + lines.get(st, '') + '\n'
     if dep:
-        msg += (f'💰 مقدار واریز: <code>{fmt_coin_amount(dep["amount"])}</code> {_html.escape(coin_label)}{diff}\n'
+        dep_coin = str(dep.get('currency') or '').upper() or coin_label
+        msg += (f'💰 مقدار واریز: <code>{fmt_coin_amount(dep["amount"])}</code> {_html.escape(dep_coin)}{diff}\n'
                 f'🎯 مقدار مورد انتظار: <code>{fmt_coin_amount(exp)}</code>\n')
         if dep.get('tx'):
             msg += '🔗 هش: <code>' + _html.escape(dep['tx']) + '</code>\n'
@@ -1922,11 +2057,25 @@ def approve_topup_request(req_id, auto=False, reason='hash_ok'):
         req = get_topup_request(req_id)
         if not (req and req[3] == 'pending'):
             return False
+        if auto:
+            try:
+                _r = get_crypto_request_row(req_id)
+                if _r and _r[9] and is_deposit_used(_r[9]):
+                    return False       # همین واریز همین الان برای درخواست دیگه‌ای استفاده شده
+            except Exception as e:
+                print('⚠️ چک واریز مصرف‌شده ناموفق بود:', e)
+                return False
         # شارژ رمزارزی دقیقاً همون مبلغی‌ه که کاربر وارد کرده (ضریب واریزی فقط برای کارت‌به‌کارت)
         multiplier = 1.0 if get_topup_method(req_id) == 'crypto' else get_topup_multiplier()
         credited = int(round(req[2] * multiplier))
         update_topup_status(req_id, 'approved')
         update_wallet_db(req[1], credited)
+        try:
+            _st = user_steps.get(str(req[1])) or {}
+            if _st.get('step') == 'crypto_send_hash' and _st.get('req_id') == req_id:
+                user_steps[str(req[1])] = {}
+        except Exception:
+            pass
         try:
             row = get_crypto_request_row(req_id)
             if row and row[9]:
@@ -1952,7 +2101,14 @@ def handle_crypto_eval(req_id, res, force_notify=False):
     """نتیجه‌ی تطبیق رو اعمال می‌کنه: تأیید خودکار (اگه روشن باشه) یا پیام اطلاعاتی به ادمین (هر حالت فقط یک‌بار)."""
     st = res.get('state')
     row = get_crypto_request_row(req_id)
+    if not row or row[3] != 'pending':
+        return          # قبلاً با یکی از راه‌ها (خودکار / هش کاربر / تأیید دستی ادمین) بسته شده؛ دوباره شارژ نمی‌شه
     label = str(row[5]).upper() if row and row[5] else ''
+    if res.get('by_hash') and res.get('deposit'):
+        try:
+            set_request_matched_tx(req_id, res['deposit'].get('tx') or None)   # اگه ادمین دستی تأیید کنه، همین واریز دیگه مصرف‌شده حساب می‌شه
+        except Exception as e:
+            print('⚠️ ثبت matched_tx ناموفق:', e)
     if st in ('hash_ok', 'matched'):
         try:
             set_request_matched_tx(req_id, res['deposit'].get('tx') or None)
@@ -1968,11 +2124,9 @@ def handle_crypto_eval(req_id, res, force_notify=False):
     if key in _crypto_notified or (st == 'not_found' and not force_notify):
         return
     _crypto_notified.add(key)
-    kb = None
-    if st in ('hash_ok', 'matched', 'mismatch', 'hash_mismatch', 'ambiguous', 'unconfirmed'):
-        kb = {'inline_keyboard': [[
-            {'text': u('fa', 'admin_btn_accept'), 'callback_data': 'topup_acc_' + str(req_id)},
-            {'text': u('fa', 'admin_btn_reject'), 'callback_data': 'topup_rej_' + str(req_id)}]]}
+    kb = {'inline_keyboard': [[      # ادمین همیشه می‌تونه دستی تأیید/رد کنه (حتی وقتی واریز پیدا نشده)
+        {'text': u('fa', 'admin_btn_accept'), 'callback_data': 'topup_acc_' + str(req_id)},
+        {'text': u('fa', 'admin_btn_reject'), 'callback_data': 'topup_rej_' + str(req_id)}]]}
     send_message(ADMIN_ID, format_crypto_eval(req_id, res, label), reply_markup=kb)
 
 
@@ -1992,7 +2146,7 @@ def crypto_deposit_watcher():
     while True:
         try:
             if nobitex_keys_configured():
-                for rid in list_pending_crypto_requests(hours=12):
+                for rid in list_pending_crypto_requests(hours=48):
                     handle_crypto_eval(rid, evaluate_crypto_request(rid))
         except Exception as e:
             print('⚠️ crypto_deposit_watcher:', e)
@@ -3477,7 +3631,7 @@ def send_card_topup_info(chat_id, amount):
 def _looks_like_tx_hash(text):
     """هش تراکنش / لینک اکسپلورر: یه متن پیوسته (بدون فاصله) بین ۱۶ تا ۳۰۰ کاراکتر."""
     t = (text or '').strip()
-    return bool(re.fullmatch(r'\S{16,300}', t))
+    return (not t.startswith('/')) and bool(re.fullmatch(r'\S{16,300}', t))
 
 
 def fmt_coin_amount(x):
@@ -3540,6 +3694,164 @@ def send_crypto_topup_info(chat_id, amount, coin):
                             memo_line=memo_line, network_line=network_line))
 
 
+_PERSIAN_DIGITS = str.maketrans('۰۱۲۳۴۵۶۷۸۹٠١٢٣٤٥٦٧٨٩', '01234567890123456789')
+
+
+def parse_coin_amount_text(text):
+    """«0.2 ton» / «۰٫۲» / «0,2 TON» → (مقدار, نماد یا None)؛ اگه قابل‌فهم نبود None."""
+    t = (text or '').strip().translate(_PERSIAN_DIGITS).replace('٫', '.').replace('٬', '')
+    if ',' in t and '.' in t:
+        t = t.replace(',', '')
+    elif ',' in t:
+        t = t.replace(',', '.')
+    m = re.fullmatch(r'([0-9]*\.?[0-9]+)\s*([A-Za-z]{2,10})?', t)
+    if not m:
+        return None
+    try:
+        qty = float(m.group(1))
+    except Exception:
+        return None
+    if not (0 < qty < 1e9):
+        return None
+    return qty, ((m.group(2) or '').lower() or None)
+
+
+def _crypto_memo_network_lines(chat_id, coin):
+    en = get_user_lang(chat_id) == 'en'
+    memo = str(coin.get('memo') or '').strip()
+    if memo:
+        memo_line = (('\n📝 Memo / Comment:\n<code>%s</code>\n\n⚠️ You must include this memo, otherwise the deposit cannot be identified.\n' if en else
+                      '\n📝 Memo / Comment:\n<code>%s</code>\n\n⚠️ حتماً Memo رو هم دقیقاً بنویسید، وگرنه واریزی شناسایی نمی‌شه.\n')
+                     % _html.escape(memo))
+    else:
+        memo_line = ''
+    network = str(coin.get('network') or '').strip()
+    if network:
+        network_line = (('🌐 Network: <b>%s</b>\n(send only on this network)\n\n' if en else
+                         '🌐 شبکه: <b>%s</b>\n(حتماً از همین شبکه واریز کنید)\n\n') % _html.escape(network))
+    else:
+        network_line = ''
+    return memo_line, network_line
+
+
+def send_crypto_deposit_info(chat_id, coin):
+    """جریان جدید: آدرس/شبکه/Memo رو نشون می‌ده و منتظر می‌مونه کاربر «مقدار واریزی» رو بنویسه (مثلاً 0.2 TON)."""
+    memo_line, network_line = _crypto_memo_network_lines(chat_id, coin)
+    user_steps[str(chat_id)] = {'step': 'crypto_declare_amount', 'method': 'crypto', 'requested_at': time.time(),
+                                'coin_symbol': coin['symbol'], 'coin_label': coin['label']}
+    send_message(chat_id, u(chat_id, 'topup_crypto_info2', divider=DIVIDER, coin=_html.escape(coin['label']),
+                            symbol=_html.escape(coin['symbol'].upper()), wallet=_html.escape(coin['wallet']),
+                            memo_line=memo_line, network_line=network_line,
+                            min_topup=f'{get_min_topup_crypto():,}'),
+                 reply_markup=cancel_kb(chat_id))
+
+
+def start_crypto_topup(chat_id):
+    coins = get_crypto_coins() if crypto_enabled() else []
+    if not coins:
+        user_steps[str(chat_id)] = {}
+        send_message(chat_id, u(chat_id, 'disabled_feature'))
+    elif len(coins) == 1:
+        send_crypto_deposit_info(chat_id, coins[0])
+    else:
+        user_steps[str(chat_id)] = {'step': 'choose_topup_coin'}
+        send_message(chat_id, u(chat_id, 'topup_choose_coin'), reply_markup={'inline_keyboard': (
+            [[{'text': c['label'], 'callback_data': 'tpc_' + c['id']}] for c in coins]
+            + [[{'text': u(chat_id, 'btn_cancel'), 'callback_data': 'menu'}]])})
+
+
+def handle_crypto_declared_amount(chat_id, step, text):
+    """کاربر نوشته چقدر واریز کرده (مثلاً «0.2 ton»): معادل تومانی رو نشون می‌دیم، درخواست می‌سازیم
+    و همون لحظه تو نوبیتکس چک می‌کنیم."""
+    coins = get_crypto_coins() if crypto_enabled() else []
+    coin = next((c for c in coins if c['symbol'] == step.get('coin_symbol')), None)
+    if not coin:
+        user_steps[str(chat_id)] = {}
+        send_message(chat_id, u(chat_id, 'disabled_feature'))
+        return
+    symbol_up = _html.escape(coin['symbol'].upper())
+    parsed = parse_coin_amount_text(text)
+    if not parsed:
+        send_message(chat_id, u(chat_id, 'topup_crypto_bad_amount', symbol=symbol_up), reply_markup=cancel_kb(chat_id))
+        return
+    qty, sym = parsed
+    if sym and sym not in (coin['symbol'].lower(), str(coin['label']).strip().lower()):
+        send_message(chat_id, u(chat_id, 'topup_crypto_coin_mismatch', coin=_html.escape(coin['label']), symbol=symbol_up),
+                     reply_markup=cancel_kb(chat_id))
+        return
+    price = get_crypto_price_toman(coin['symbol'])
+    if not price:
+        send_message(chat_id, u(chat_id, 'topup_crypto_price_error'), reply_markup=cancel_kb(chat_id))
+        return
+    amount = int(qty * price)         # قیمت محافظه‌کارانه (با حاشیه‌ی اطمینان) → مبلغ شارژ تومانی
+    if amount < get_min_topup_crypto():
+        send_message(chat_id, u(chat_id, 'topup_crypto_below_min', amount=f'{amount:,}',
+                                min_topup=f'{get_min_topup_crypto():,}'), reply_markup=cancel_kb(chat_id))
+        return
+    req_id = None
+    prev_id = get_latest_pending_crypto_request(chat_id)      # همون مقدار دوباره فرستاده شد: درخواست تکراری نساز
+    if prev_id:
+        prev = get_crypto_request_row(prev_id)
+        try:
+            if prev and str(prev[5]).lower() == coin['symbol'] and abs(float(prev[6]) - qty) < 1e-12:
+                req_id = prev_id
+        except Exception:
+            pass
+    if req_id is None:
+        req_id = create_topup_request(chat_id, amount, 'crypto', f"{fmt_coin_amount(qty)} {coin['label']}", price,
+                                      coin_symbol=coin['symbol'], coin_qty=qty, tx_hash=None,
+                                      req_ts=step.get('requested_at') or time.time())
+    user_steps[str(chat_id)] = {'step': 'crypto_send_hash', 'req_id': req_id}     # پیام بعدی (هش) مستقیم به همین درخواست وصل می‌شه
+    send_message(chat_id, u(chat_id, 'topup_crypto_declared', coin_amount=fmt_coin_amount(qty), coin=symbol_up,
+                            amount=f'{amount:,}', price=f'{price:,.0f}'))
+    check_crypto_for_user_async(chat_id, req_id, 'declared')
+
+
+def check_crypto_for_user_async(chat_id, req_id, stage):
+    """چک فوری نوبیتکس + اطلاع‌رسانی به کاربر. stage: 'declared' (بعد از اعلام مقدار) یا 'hash' (بعد از ارسال هش).
+    تأیید خودکار فقط وقتی انجام می‌شه که crypto_auto_confirm تو پنل روشن باشه."""
+    def _run():
+        try:
+            res = {'state': 'error', 'note': 'کلید API نوبیتکس تنظیم نشده'}
+            if nobitex_keys_configured():
+                try:
+                    nobitex_fetch_deposits(force=True)          # کش رد بشه تا واریز لحظه‌ای هم دیده بشه
+                except Exception as e:
+                    print('⚠️ نوبیتکس:', e)
+                res = evaluate_crypto_request(req_id)
+                handle_crypto_eval(req_id, res, force_notify=(stage == 'hash'))
+            row = get_crypto_request_row(req_id)
+            if not row or row[3] != 'pending':
+                return                      # تأیید شد (پیام شارژ از approve_topup_request رفته) یا ادمین بسته
+            st = res.get('state')
+            if stage == 'declared' and st in ('not_found', 'error'):
+                try:
+                    price_txt = f"{float(row[10]):,.0f}"
+                except Exception:
+                    price_txt = str(row[10])
+                send_message(ADMIN_ID, u('fa', 'admin_topup_request_crypto', divider=DIVIDER, user_id=str(row[1]),
+                                         amount=f'{row[2]:,}', req_id=str(req_id),
+                                         coin_amount=fmt_coin_amount(row[6]), coin=_html.escape(str(row[5]).upper()),
+                                         price=price_txt),
+                             reply_markup={'inline_keyboard': [[
+                                 {'text': u('fa', 'admin_btn_accept'), 'callback_data': 'topup_acc_' + str(req_id)},
+                                 {'text': u('fa', 'admin_btn_reject'), 'callback_data': 'topup_rej_' + str(req_id)}]]})
+            if st in ('hash_ok', 'matched'):
+                user_steps[str(chat_id)] = {}
+                send_message(chat_id, u(chat_id, 'topup_crypto_found_wait_admin'))
+            elif st == 'unconfirmed':
+                user_steps[str(chat_id)] = {}
+                send_message(chat_id, u(chat_id, 'topup_crypto_unconfirmed'))
+            elif stage == 'declared':
+                send_message(chat_id, u(chat_id, 'topup_crypto_ask_hash'), reply_markup={'inline_keyboard': [[
+                    {'text': u(chat_id, 'btn_send_hash'), 'callback_data': 'sendhash'}]]})
+            else:
+                send_message(chat_id, u(chat_id, 'topup_crypto_not_found_admin'))
+        except Exception as e:
+            print('⚠️ check_crypto_for_user_async:', e)
+    threading.Thread(target=_run, daemon=True).start()
+
+
 def show_topup_method_choice(chat_id):
     """مرحله‌ی اول شارژ: انتخاب روش پرداخت (قبل از پرسیدن مبلغ)."""
     user_steps[str(chat_id)] = {'step': 'choose_topup_method'}
@@ -3598,7 +3910,7 @@ def action_topup_menu(chat_id):
     elif card_on:
         ask_topup_amount_for(chat_id, 'card')      # فقط یه روش فعاله: مستقیم مبلغ
     elif crypto_on:
-        ask_topup_amount_for(chat_id, 'crypto')
+        start_crypto_topup(chat_id)
     else:
         send_message(chat_id, u(chat_id, 'disabled_feature'))
 
@@ -4722,7 +5034,7 @@ def process_update(update):
                     send_message(chat_id, u(chat_id, 'disabled_feature'))
             else:
                 if crypto_enabled():
-                    ask_topup_amount_for(chat_id, 'crypto')
+                    start_crypto_topup(chat_id)
                 else:
                     send_message(chat_id, u(chat_id, 'disabled_feature'))
 
@@ -4733,14 +5045,22 @@ def process_update(update):
             if s_.get('step') != 'choose_topup_coin' or not coin:
                 main_menu(chat_id)
             else:
-                send_crypto_topup_info(chat_id, s_['amount'], coin)
+                send_crypto_deposit_info(chat_id, coin)
 
-        elif data.startswith('topup_acc_'):
+        elif data == 'sendhash':
+            req_id = get_latest_pending_crypto_request(chat_id)
+            if not req_id:
+                send_message(chat_id, u(chat_id, 'topup_hash_no_pending'))
+            else:
+                user_steps[str(chat_id)] = {'step': 'crypto_send_hash', 'req_id': req_id}
+                send_message(chat_id, u(chat_id, 'topup_hash_prompt'), reply_markup=cancel_kb(chat_id))
+
+        elif data.startswith('topup_acc_') and chat_id == ADMIN_ID:
             req_id = int(data.split('_')[2])
             if not approve_topup_request(req_id):
                 send_message(ADMIN_ID, u('fa', 'admin_already_reviewed'))
 
-        elif data.startswith('topup_rej_'):
+        elif data.startswith('topup_rej_') and chat_id == ADMIN_ID:     # رد کردن فقط با خود ادمینه، بات هیچ‌وقت خودش رد نمی‌کنه
             req_id = int(data.split('_')[2])
             req = get_topup_request(req_id)
             if req and req[3] == 'pending':
@@ -5043,7 +5363,9 @@ def process_update(update):
                 send_message(chat_id, u(chat_id, 'topup_amount_error'))
 
         elif step.get('step') == 'waiting_receipt' and (
-                'photo' in message or (step.get('method') == 'crypto' and _looks_like_tx_hash(text))):
+                (step.get('method') != 'crypto' and 'photo' in message)
+                or (step.get('method') == 'crypto' and _looks_like_tx_hash(text))):
+            # رمزارز: فقط هش تراکنش (متن) قبول می‌شه و عکس لازم نیست؛ کارت‌به‌کارت: فقط عکس رسید
             # رسید کارت‌به‌کارت فقط عکسه؛ رمزارز هم عکس رسید و هم هش تراکنش (متن) رو قبول می‌کنه
             photo_id = message['photo'][-1]['file_id'] if 'photo' in message else None
             tx_hash = None if photo_id else text.strip()
@@ -5059,8 +5381,15 @@ def process_update(update):
                 req_id = create_topup_request(chat_id, amount)
 
             paid_at = time.time()
-            send_message(chat_id, u(chat_id, 'topup_receipt_ok') if get_user_lang(chat_id) == 'en'
-                          else get_bot_text('topup_receipt_ok', DEFAULT_TOPUP_RECEIPT_OK))
+            receipt_ok_text = (u(chat_id, 'topup_receipt_ok') if get_user_lang(chat_id) == 'en'
+                               else get_bot_text('topup_receipt_ok', DEFAULT_TOPUP_RECEIPT_OK))
+            if is_crypto:
+                # اگه خودکار تأیید نشد، کاربر هر لحظه می‌تونه با این دکمه (یا فرستادن مستقیم هش) هش رو بفرسته
+                send_message(chat_id, receipt_ok_text + u(chat_id, 'topup_receipt_ok_crypto_hint'),
+                             reply_markup={'inline_keyboard': [[
+                                 {'text': u(chat_id, 'btn_send_hash'), 'callback_data': 'sendhash'}]]})
+            else:
+                send_message(chat_id, receipt_ok_text)
             user_steps[str(chat_id)] = {}
             # پیام «رسید دریافت شد» همین بالا رفت؛ دیگه نیازی به تکرار منو نیست.
 
@@ -5089,6 +5418,20 @@ def process_update(update):
             if is_crypto:
                 check_crypto_request_async(req_id)    # تطبیق با واریزهای نوبیتکس (نتیجه جدا برای ادمین می‌آد)
 
+        elif step.get('step') == 'crypto_declare_amount':
+            handle_crypto_declared_amount(chat_id, step, text)
+
+        elif step.get('step') == 'crypto_send_hash':
+            if not _looks_like_tx_hash(text):
+                send_message(chat_id, u(chat_id, 'topup_crypto_need_proof'), reply_markup=cancel_kb(chat_id))
+            else:
+                req_id = get_latest_pending_crypto_request(chat_id) or step.get('req_id')
+                user_steps[str(chat_id)] = {}
+                if req_id and get_topup_request(req_id) and get_topup_request(req_id)[3] == 'pending':
+                    attach_hash_to_pending_request(chat_id, req_id, text.strip())
+                else:
+                    send_message(chat_id, u(chat_id, 'topup_hash_no_pending'))
+
         elif step.get('step') == 'waiting_receipt' and step.get('method') == 'crypto':
             send_message(chat_id, u(chat_id, 'topup_crypto_need_proof'))
 
@@ -5114,6 +5457,12 @@ def process_update(update):
             else:
                 send_message(chat_id, u('fa', 'admin_ticket_not_found'))
             user_steps[str(chat_id)] = {}
+
+        elif not step.get('step') and text and _looks_like_tx_hash(text) and chat_id != ADMIN_ID:
+            # کاربر بدون زدن هیچ دکمه‌ای مستقیم هش فرستاده: اگه درخواست رمزارزیِ معلق داره بهش وصل می‌شه
+            pending_id = get_latest_pending_crypto_request(chat_id)
+            if pending_id:
+                attach_hash_to_pending_request(chat_id, pending_id, text.strip())
 
 
 # ---------------------------------------------------------------------------
