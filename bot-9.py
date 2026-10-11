@@ -893,6 +893,14 @@ UI_TEXT['fa'].update({
     'topup_hash_received': '✅ هش دریافت شد و در حال بررسیه. اگه با واریز خودتون بخونه خودکار تأیید می‌شه، وگرنه ادمین دستی بررسی می‌کنه.',
     'topup_hash_no_pending': '⚠️ درخواست شارژ رمزارزیِ در انتظاری ندارید.',
     'topup_crypto_price_error': '❌ الان نتونستم قیمت لحظه‌ای رو بگیرم. چند لحظه دیگه دوباره امتحان کنید یا کارت به کارت بزنید.',
+    'btn_exchange': '💱 صرافی',
+    'exchange_prompt': '💱 <b>صرافی</b>\n{divider}\nمبلغ مورد نظرت رو به <b>تومان</b> بنویس (مثلاً <code>100000</code>) تا بگم با اون مبلغ از هر ارز چقدر می‌شه خرید.',
+    'exchange_bad_amount': '⚠️ مبلغ رو فقط با عدد و به تومان بنویس؛ مثلاً <code>100000</code>',
+    'exchange_result': '💱 <b>با {amount} تومان می‌تونی بخری:</b>\n{divider}\n{lines}\n{divider}\n📈 بر اساس قیمت لحظه‌ای نوبیتکس؛ مقدارها تقریبی‌ان و ممکنه با قیمت لحظه‌ی خرید کمی فرق کنه.',
+    'exchange_line': '🪙 <b>{coin}</b>: <code>{qty}</code>\n      (قیمت هر واحد: {price} تومان)',
+    'exchange_line_err': '🪙 <b>{coin}</b>: ⚠️ الان قیمت در دسترس نیست',
+    'exchange_no_price': '❌ الان نتونستم قیمت‌ها رو از نوبیتکس بگیرم. چند لحظه دیگه دوباره امتحان کن.',
+    'btn_exchange_again': '🔄 مبلغ دیگه',
     'topup_crypto_info2': (
         '🪙 <b>پرداخت با رمزارز</b>\n{divider}\n'
         '{network_line}👛 آدرس ولت ({coin}):\n<code>{wallet}</code>\n{memo_line}\n'
@@ -933,6 +941,14 @@ UI_TEXT['en'].update({
     'topup_hash_received': '✅ Hash received and being checked. If it matches your deposit it will be confirmed automatically; otherwise the admin will review it manually.',
     'topup_hash_no_pending': "⚠️ You don't have a pending crypto top-up request.",
     'topup_crypto_price_error': '❌ Could not fetch the live price right now. Try again in a moment or use card to card.',
+    'btn_exchange': '💱 Exchange',
+    'exchange_prompt': '💱 <b>Exchange</b>\n{divider}\nType the amount in <b>Toman</b> (e.g. <code>100000</code>) and I will show how much of each coin it can buy.',
+    'exchange_bad_amount': '⚠️ Send the amount as a number in Toman, e.g. <code>100000</code>',
+    'exchange_result': '💱 <b>With {amount} Toman you can buy:</b>\n{divider}\n{lines}\n{divider}\n📈 Based on the live Nobitex price; amounts are approximate and may differ slightly at purchase time.',
+    'exchange_line': '🪙 <b>{coin}</b>: <code>{qty}</code>\n      (price per unit: {price} Toman)',
+    'exchange_line_err': '🪙 <b>{coin}</b>: ⚠️ price unavailable right now',
+    'exchange_no_price': '❌ Could not fetch prices from Nobitex right now. Please try again in a moment.',
+    'btn_exchange_again': '🔄 Another amount',
     'topup_crypto_info2': (
         '🪙 <b>Pay with crypto</b>\n{divider}\n'
         '{network_line}👛 Wallet address ({coin}):\n<code>{wallet}</code>\n{memo_line}\n'
@@ -3564,14 +3580,15 @@ def get_crypto_margin_percent():
     return min(max(v, 0.0), 20.0)
 
 
-def get_crypto_price_toman(symbol):
+def get_crypto_price_toman(symbol, raw=False):
     """قیمت محافظه‌کارانه‌ی هر واحد کوین به تومان (جفت‌ارز symbol-rls تو نوبیتکس) یا None.
     مینیمم «آخرین معامله» و «بهترین قیمت خرید» منهای حاشیه‌ی اطمینان. ۵ ثانیه کش می‌شه."""
     symbol = str(symbol or '').strip().lower()
     if not symbol:
         return None
     now = time.time()
-    hit = _crypto_price_cache.get(symbol)
+    cache_key = symbol + ('|raw' if raw else '')
+    hit = _crypto_price_cache.get(cache_key)
     if hit and now - hit[0] < _CRYPTO_PRICE_TTL:
         return hit[1]
     try:
@@ -3596,13 +3613,18 @@ def get_crypto_price_toman(symbol):
         st = (data.get('stats') or {}).get(f'{symbol}-rls') or {}
         latest = float(st.get('latest') or 0)
         best_buy = float(st.get('bestBuy') or 0)
+        if raw and (latest > 0 or best_buy > 0):
+            # قیمت خام بازار (بدون حاشیه‌ی اطمینان) فقط برای نمایش تقریبی تو «صرافی»
+            val = (latest if latest > 0 else best_buy) / 10.0
+            _crypto_price_cache[cache_key] = (now, val)
+            return val
         candidates = [x for x in (latest, best_buy) if x > 0]
         if candidates:
             base_rial = min(candidates)
             margin = get_crypto_margin_percent()
             val = base_rial / 10.0 * (1.0 - margin / 100.0)      # ریال → تومان، منهای حاشیه
             if val > 0:
-                _crypto_price_cache[symbol] = (now, val)
+                _crypto_price_cache[cache_key] = (now, val)
                 return val
         print(f'⚠️ قیمت {symbol} تو پاسخ نوبیتکس نبود:', str(st)[:200])
     except Exception as e:
@@ -4243,11 +4265,65 @@ def action_referral(chat_id):
                             earned=f'{earned:,}'))
 
 
+def fmt_exchange_qty(qty):
+    """مقدار قابل‌خرید: به پایین گرد می‌شه (کاربر بیشتر از واقعیت نشنوه)؛ تعداد اعشار بسته به بزرگی عدد."""
+    if qty >= 1000:
+        return f'{math.floor(qty):,}'
+    d = 4 if qty >= 1 else 6
+    f = 10 ** d
+    t = ('%.*f' % (d, math.floor(qty * f) / f)).rstrip('0').rstrip('.')
+    return t or '0'
+
+
+def action_exchange_start(chat_id):
+    if not is_feature_enabled('exchange'):
+        send_message(chat_id, u(chat_id, 'disabled_feature'))
+        return
+    if not get_crypto_coins():
+        send_message(chat_id, u(chat_id, 'disabled_feature'))
+        return
+    user_steps[str(chat_id)] = {'step': 'exchange_amount'}
+    send_message(chat_id, u(chat_id, 'exchange_prompt', divider=DIVIDER), reply_markup=cancel_kb(chat_id))
+
+
+def handle_exchange_amount(chat_id, text):
+    """مبلغ تومانی → مقدار تقریبی هر رمزارز فعال (قیمت لحظه‌ای نوبیتکس)."""
+    t = (text or '').strip().translate(_PERSIAN_DIGITS).replace(',', '').replace('٬', '').replace(' ', '')
+    if not re.fullmatch(r'\d{1,13}', t) or int(t) <= 0:
+        send_message(chat_id, u(chat_id, 'exchange_bad_amount'), reply_markup=cancel_kb(chat_id))
+        return
+    amount = int(t)
+    coins = get_crypto_coins()
+    if not coins:
+        user_steps[str(chat_id)] = {}
+        send_message(chat_id, u(chat_id, 'disabled_feature'))
+        return
+    lines, ok = [], 0
+    for coin in coins:
+        price = get_crypto_price_toman(coin['symbol'], raw=True)
+        name = _html.escape(coin['label'])
+        if price:
+            ok += 1
+            lines.append(u(chat_id, 'exchange_line', coin=name, qty=fmt_exchange_qty(amount / price),
+                           price=f'{price:,.0f}'))
+        else:
+            lines.append(u(chat_id, 'exchange_line_err', coin=name))
+    user_steps[str(chat_id)] = {}
+    if not ok:
+        send_message(chat_id, u(chat_id, 'exchange_no_price'))
+        return
+    send_message(chat_id, u(chat_id, 'exchange_result', amount=f'{amount:,}', divider=DIVIDER,
+                            lines='\n\n'.join(lines)),
+                 reply_markup={'inline_keyboard': [[
+                     {'text': u(chat_id, 'btn_exchange_again'), 'callback_data': 'menu_exchange'}]]})
+
+
 # هر آیتم: (کلید داخلی ثابت, متن پیش‌فرض دکمه, تابع اجراکننده)
 BUTTON_ACTIONS = [
     ('buy', '🛍 خرید کانفیگ', action_buy_menu),
     ('trial', '🧪 تست رایگان', action_trial),
     ('topup', '💠 شارژ کیف پول', action_topup_menu),
+    ('exchange', '💱 صرافی', action_exchange_start),
     ('account', '👤 حساب من', action_account),
     ('myconfigs', '🗂 کانفیگ‌های من', action_my_configs),
     ('delete', '🗑 حذف کانفیگ', action_delete_config_start),
@@ -4296,6 +4372,10 @@ def get_label_to_action_key():
 
 MAIN_MENU_DEFAULT_ORDER = [key for key, _label, _fn in BUTTON_ACTIONS]
 
+# کلید دکمه‌ی منو -> کلید روشن/خاموش بودنش تو پنل (دکمه‌هایی که اینجا نیستن همیشه نمایش داده می‌شن)
+MENU_BUTTON_FEATURE = {'buy': 'buy', 'trial': 'trial', 'topup': 'topup', 'exchange': 'exchange',
+                       'delete': 'delete_config', 'support': 'support', 'reseller': 'reseller', 'guide': 'guide'}
+
 
 def _chunk_pairs(items):
     return [items[i:i + 2] for i in range(0, len(items), 2)]
@@ -4307,6 +4387,8 @@ def main_menu(chat_id, note=None):
     order = get_ordered_keys('menu_order_main', MAIN_MENU_DEFAULT_ORDER)
     if not referral_enabled():
         order = [k for k in order if k != 'referral']   # دکمه‌ی دعوت دوستان تا وقتی از پنل روشن نشده نمایش داده نمی‌شه
+    # دکمه‌ای که قابلیتش از پنل خاموش شده کلاً از منو حذف می‌شه؛ با روشن‌کردن دوباره برمی‌گرده
+    order = [k for k in order if k not in MENU_BUTTON_FEATURE or is_feature_enabled(MENU_BUTTON_FEATURE[k])]
     style = get_keyboard_style()
 
     # تلگرام کیبورد ثابت (reply keyboard) رو یه لایه‌ی جدا از دکمه‌های شیشه‌ای
@@ -5417,6 +5499,9 @@ def process_update(update):
                 send_message(ADMIN_ID, admin_caption, reply_markup=admin_kb)
             if is_crypto:
                 check_crypto_request_async(req_id)    # تطبیق با واریزهای نوبیتکس (نتیجه جدا برای ادمین می‌آد)
+
+        elif step.get('step') == 'exchange_amount':
+            handle_exchange_amount(chat_id, text)
 
         elif step.get('step') == 'crypto_declare_amount':
             handle_crypto_declared_amount(chat_id, step, text)

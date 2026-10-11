@@ -65,7 +65,7 @@ CONFIG_GROUPS = [
         ("card_owner", "نام صاحب کارت", DEFAULT_CARD_OWNER, "text"),
         ("min_topup", "حداقل مبلغ شارژ کارت‌به‌کارت — ریالی (تومان)", DEFAULT_MIN_TOPUP, "number"),
         ("min_topup_crypto", "حداقل مبلغ شارژ با رمزارز (تومان) — روی معادل تومانیِ مقداری که کاربر اعلام می‌کنه چک می‌شه", DEFAULT_MIN_TOPUP, "number"),
-        ("crypto_auto_confirm", "تأیید خودکار واریز رمزارز (1 = روشن، 0 = خاموش). روشن باشه: کاربر مقدار واریزی (مثلاً 0.2 TON) رو تو بات می‌نویسه؛ اگه همون مقدار (با اختلاف خیلی کم) تو حساب نوبیتکس خودت پیدا بشه، یا هشی که کاربر می‌فرسته با یه واریز بخوره و کوین/مقدارش درست باشه، شارژ خودکار تأیید می‌شه. اگه چند کاربر مقدار هم‌اندازه اعلام کنن، فقط با هش یا تأیید دستی ادمین. بات هیچ‌وقت خودش رد نمی‌کنه؛ رد کردن فقط با ادمینه", "0", "number"),
+        ("crypto_auto_confirm", "تأیید خودکار واریز رمزارز||روشن باشه: کاربر مقدار واریزی (مثلاً 0.2 TON) رو تو بات می‌نویسه؛ اگه همون مقدار (با اختلاف خیلی کم) تو حساب نوبیتکس خودت پیدا بشه، یا هشی که کاربر می‌فرسته با یه واریز بخوره و کوین/مقدارش درست باشه، شارژ خودکار تأیید می‌شه. اگه چند کاربر مقدار هم‌اندازه اعلام کنن، فقط با هش یا تأیید دستی ادمین. بات هیچ‌وقت خودش رد نمی‌کنه؛ رد کردن فقط با ادمینه", "0", "toggle"),
         ("crypto_max_shortfall_toman", "حداکثر کسریِ مجاز واریز رمزارز نسبت به مقدار مورد انتظار (تومان). مثلاً 6000 یعنی تا ۶ هزار تومان کمتر هم خودکار تأیید می‌شه", "6000", "number"),
         ("topup_multiplier", "ضریب واریزی (مثلاً 2 یعنی دو برابر مبلغ واریزی به کیف پول اضافه شود)", "1", "float"),
     ]),
@@ -86,10 +86,10 @@ CONFIG_GROUPS = [
         ("reseller_panel_url", "آدرس پنلی که به فروشنده‌ها نشون داده می‌شه", DEFAULT_RESELLER_PANEL_URL, "url"),
     ]),
     ("🎁 دعوت دوستان (رفرال)", [
-        ("referral_enabled", "سیستم دعوت دوستان (1 = روشن، 0 = خاموش)", "0", "number"),
+        ("referral_enabled", "سیستم دعوت دوستان", "0", "toggle"),
         ("referral_reward_inviter", "پاداش دعوت‌کننده — به کیف پولش اضافه می‌شه (تومان)", "10000", "number"),
         ("referral_reward_invitee", "هدیه‌ی کاربر دعوت‌شده — به کیف پول خودش اضافه می‌شه (تومان؛ 0 = بدون هدیه)", "0", "number"),
-        ("referral_on_join", "زمان پرداخت پاداش (0 = بعد از اولین خرید کاربر دعوت‌شده، 1 = به‌محض ورود به ربات)", "0", "number"),
+        ("referral_on_join", "پرداخت پاداش به‌محض ورود کاربر دعوت‌شده||خاموش = بعد از اولین خرید کاربر دعوت‌شده؛ روشن = به‌محض ورود به ربات", "0", "toggle"),
     ]),
     ("📲 لینک‌های دانلود اپ", [
         ("app_link_android", "لینک اندروید", os.getenv("APP_LINK_ANDROID", "https://play.google.com/store/apps/details?id=com.v2pro.client"), "url"),
@@ -117,6 +117,7 @@ CONFIG_GROUPS = [
     ]),
 ]
 # نسخه‌ی تخت برای اعتبارسنجی/ذخیره
+TOGGLE_DEFAULTS = {k: default for _title, items in CONFIG_GROUPS for k, _l, default, kind in items if kind == "toggle"}
 CONFIG_SETTINGS = [(k, label, default, kind) for _title, items in CONFIG_GROUPS for k, label, default, kind in items]
 
 # (متن‌های ربات از «رجیستری» که خود bot.py موقع استارت تو دیتابیس می‌نویسه خونده می‌شن؛ صفحه‌ی /texts)
@@ -126,6 +127,7 @@ BOT_BUTTONS = [
     ("buy", "دکمه‌ی خرید کانفیگ", "🛍 خرید کانفیگ"),
     ("trial", "دکمه‌ی تست رایگان", "🧪 تست رایگان"),
     ("topup", "دکمه‌ی شارژ کیف پول", "💠 شارژ کیف پول"),
+    ("exchange", "دکمه‌ی صرافی", "💱 صرافی"),
     ("account", "دکمه‌ی حساب من", "👤 حساب من"),
     ("myconfigs", "دکمه‌ی کانفیگ‌های من", "🗂 کانفیگ‌های من"),
     ("delete", "دکمه‌ی حذف کانفیگ", "🗑 حذف کانفیگ"),
@@ -176,6 +178,7 @@ FEATURES = {
     "buy": "🛍 خرید کانفیگ",
     "trial": "🧪 تست رایگان",
     "topup": "💠 شارژ کیف پول",
+    "exchange": "💱 صرافی (محاسبه‌ی خرید ارز)",
     "delete_config": "🗑 حذف کانفیگ",
     "support": "🎧 پشتیبانی",
     "reseller": "🧑‍💼 فروشنده شو",
@@ -729,7 +732,16 @@ STEP_LABELS = {
     "ask_label": "در حال انتخاب اسم کانفیگ", "confirm_buy": "در صفحه‌ی تایید خرید",
     "buy_enter_discount": "در حال وارد کردن کد تخفیف", "waiting_receipt": "در حال ارسال رسید شارژ",
     "admin_reply": "در حال پاسخ به تیکت",
+    "crypto_declare_amount": "در حال نوشتن مقدار واریز رمزارزی", "crypto_send_hash": "در حال ارسال هش تراکنش",
+    "exchange_amount": "در صفحه‌ی صرافی",
 }
+
+
+def tgl_btn(on, formaction=None):
+    """دکمه‌ی روشن/خاموش: وضعیت فعلی رو روی خودش می‌نویسه («روشن است» / «خاموش است») و با هر بار زدن عوض می‌شه."""
+    fa = f' formaction="{formaction}" formnovalidate' if formaction else ''
+    return (f'<button type="submit" class="tgl {"on" if on else "off"}"{fa}>'
+            f'{"✅ روشن است" if on else "⛔ خاموش است"}</button>')
 
 
 def action_label(raw):
@@ -1386,6 +1398,10 @@ BASE_HTML = """<!DOCTYPE html>
   .badge.off, .badge.rejected { background: var(--danger-dim); color: var(--danger); }
   .badge.open, .badge.pending { background: var(--warn-dim); color: var(--warn); }
   .badge.closed { background: var(--surface-2); color: var(--muted); }
+  button.tgl { min-width: 112px; padding: 6px 14px; font-size: 13px; border-radius: 999px; box-shadow: none; white-space: nowrap; }
+  button.tgl.on { background: var(--ok-dim); color: var(--ok); border-color: var(--ok); }
+  button.tgl.off { background: var(--danger-dim); color: var(--danger); border-color: transparent; }
+  button.tgl:hover { filter: brightness(1.1); }
   .flash { background: var(--ok-dim); color: var(--ok); padding: 11px 16px; border-radius: 14px; margin-bottom: 12px; font-size: 14px; font-weight: 600; border: 1px solid rgba(61,220,151,.25); animation: fadeUp .35s both; }
   .flash.error { background: var(--danger-dim); color: var(--danger); border-color: rgba(255,123,147,.3); }
   .flex { display: flex; gap: 10px; align-items: center; flex-wrap: wrap; }
@@ -1738,9 +1754,6 @@ def dashboard():
         recent_html = '<p class="empty-note">هنوز کاربری ثبت نشده.</p>'
 
     warn = ""
-    if INSECURE_DEFAULTS:
-        warn = ('<div class="alert">⚠️ هنوز رمز پیش‌فرض پنل (<code>PANEL_PASSWORD</code>) یا کلید نشست (<code>SECRET_KEY</code>) '
-                'رو تو Environment عوض نکردید. حتماً مقدار امن بذارید.</div>')
     if not BOT_TOKEN:
         warn += '<div class="alert">⚠️ متغیر <code>BOT_TOKEN</code> تنظیم نشده؛ ارسال پیام (پاسخ تیکت، پیام همگانی) کار نمی‌کنه.</div>'
 
@@ -2161,11 +2174,11 @@ def crypto_page():
     card_master = f"""
     <div class="card">
       <div class="switch-row" style="padding-top:0;">
-        <div><b>💳 شارژ کارت‌به‌کارت (ریالی)</b> <span class="badge {'on' if card_on else 'off'}">{'روشن' if card_on else 'خاموش'}</span><br>
+        <div><b>💳 شارژ کارت‌به‌کارت (ریالی)</b><br>
           <small class="muted">خاموش باشه، گزینه‌ی کارت‌به‌کارت تو شارژ کیف پول به کاربر نشون داده نمی‌شه. اگه رمزارز روشن باشه کاربر مستقیم میره سراغ پرداخت با رمزارز؛
           اگه هر دو خاموش باشن، شارژ کیف پول برای کاربر غیرفعال می‌شه. (تنظیمات شماره کارت و صاحب کارت همچنان از صفحه‌ی تنظیمات عوض می‌شه.)</small></div>
         <form method="post" action="{url_for('card_topup_master')}">
-          <button type="submit" class="{'danger' if card_on else ''} sm">{'خاموش کن' if card_on else 'روشن کن'}</button>
+          {tgl_btn(card_on)}
         </form>
       </div>
     </div>"""
@@ -2173,11 +2186,11 @@ def crypto_page():
     master = f"""
     <div class="card">
       <div class="switch-row" style="padding-top:0;">
-        <div><b>🪙 شارژ با رمزارز</b> <span class="badge {'on' if master_on else 'off'}">{'روشن' if master_on else 'خاموش'}</span><br>
-          <small class="muted">کاربر مبلغ تومانی رو می‌زنه، ربات قیمت لحظه‌ای رو از نوبیتکس می‌گیره و مقدار رمزارز + آدرس ولت رو نشون می‌ده؛ بعد کاربر رسید می‌فرسته و تایید/رد با خودته (همون دکمه‌های تایید شارژ تو ربات).
-          مبلغ شارژ دقیقاً همون مبلغ تومانی‌ه که کاربر وارد کرده.</small></div>
+        <div><b>🪙 شارژ با رمزارز</b><br>
+          <small class="muted">کاربر ارز رو انتخاب می‌کنه، آدرس ولت رو می‌بینه و بعد از واریز مقدار دقیق رو می‌نویسه (مثلاً 0.2 TON). ربات معادل تومانی رو نشون می‌ده و همون لحظه واریز رو تو نوبیتکس چک می‌کنه؛ اگه پیدا نشد هش می‌خواد و در نهایت منتظر تأیید دستی تو می‌مونه.
+          تأیید خودکار از صفحه‌ی «تنظیمات ربات» (کلید «تأیید خودکار واریز رمزارز») روشن/خاموش می‌شه.</small></div>
         <form method="post" action="{url_for('crypto_master')}">
-          <button type="submit" class="{'danger' if master_on else ''} sm">{'خاموش کن' if master_on else 'روشن کن'}</button>
+          {tgl_btn(master_on)}
         </form>
       </div>
     </div>"""
@@ -2199,8 +2212,9 @@ def crypto_page():
           <input id="nw_{cid}" name="network_{cid}" value="{esc(c.get('network', ''))}" dir="ltr" autocapitalize="off" spellcheck="false" maxlength="50" placeholder="خالی بذار تا تو ربات نشون داده نشه">
           <label for="m_{cid}">Memo / Comment (اختیاری)</label>
           <input id="m_{cid}" name="memo_{cid}" value="{esc(c.get('memo', ''))}" dir="ltr" autocapitalize="off" spellcheck="false" maxlength="100" placeholder="خالی بذار تا تو ربات نشون داده نشه">
-          <div class="switch-row"><div><b>فعال</b></div>
-            <label style="display:flex;align-items:center;gap:8px;margin:0;"><input type="checkbox" name="enabled_{cid}" value="1" {'checked' if c['enabled'] else ''} style="width:auto;"> نمایش تو ربات</label></div>
+          <div class="switch-row"><div><b>نمایش تو ربات</b></div>
+            <input type="hidden" name="enabled_{cid}" value="{'1' if c['enabled'] else '0'}">
+            {tgl_btn(c['enabled'], url_for('crypto_coin_toggle', coin_id=c['id']))}</div>
           <div class="flex" style="margin-top:8px;">
             <button type="submit" class="secondary sm" formaction="{url_for('crypto_test', coin_id=c['id'])}" formnovalidate>🔎 تست قیمت (ذخیره نمی‌کنه)</button>
             <button type="submit" class="danger sm" formaction="{url_for('crypto_delete', coin_id=c['id'])}" formnovalidate
@@ -2261,6 +2275,18 @@ def crypto_master():
     on = get_setting("crypto_enabled", "1") == "1"
     set_setting("crypto_enabled", "0" if on else "1")
     flash("شارژ با رمزارز خاموش شد." if on else "شارژ با رمزارز روشن شد.")
+    return redirect(url_for("crypto_page"))
+
+
+@app.route("/crypto/<coin_id>/toggle", methods=["POST"])
+@login_required
+def crypto_coin_toggle(coin_id):
+    coins, _configured = load_crypto_coins()
+    for c in coins:
+        if c["id"] == coin_id:
+            c["enabled"] = not c["enabled"]
+            flash(f"«{c['label']}» " + ("روشن شد." if c["enabled"] else "خاموش شد."))
+    save_crypto_coins(coins)
     return redirect(url_for("crypto_page"))
 
 
@@ -2367,7 +2393,7 @@ def settings_page():
       <div class="switch-row" style="padding-top:0;">
         <div><b>🛠 حالت تعمیر ربات</b><br><small class="muted">وقتی روشن باشه ربات به همه‌ی کاربران (جز ادمین) فقط پیام تعمیر نشون می‌ده. متن پیام رو پایین‌تر، بخش «مدیریت و نگهداری» عوض کنید.</small></div>
         <form method="post" action="{url_for('toggle_maintenance')}">
-          <button type="submit" class="{'danger' if maint_on else ''}">{'خاموش کن' if maint_on else 'روشن کن'}</button>
+          {tgl_btn(maint_on)}
         </form>
       </div>
       <div><span class="badge {'off' if maint_on else 'on'}">{'ربات در حالت تعمیر است' if maint_on else 'ربات عادی کار می‌کند'}</span></div>
@@ -2378,6 +2404,12 @@ def settings_page():
         rows = ""
         for key, label, default, kind in items:
             value = all_settings.get(key, default)
+            if kind == "toggle":
+                t_title, _sep, t_desc = label.partition("||")
+                t_desc_html = f'<br><small class="muted">{esc(t_desc)}</small>' if t_desc else ""
+                rows += (f'<div class="switch-row"><div><b>{esc(t_title)}</b>{t_desc_html}</div>'
+                         f'{tgl_btn(str(value) == "1", url_for("toggle_config", key=key))}</div>')
+                continue
             attrs = ' type="text"'
             if kind == "number":
                 attrs = ' type="number" min="0" step="1" inputmode="numeric"'
@@ -2395,12 +2427,9 @@ def settings_page():
     rows_html = ""
     for key, label in FEATURES.items():
         enabled = all_settings.get(key, "1") == "1"
-        badge = '<span class="badge on">روشن</span>' if enabled else '<span class="badge off">خاموش</span>'
         rows_html += f"""
-        <div class="switch-row"><div><b>{label}</b> {badge}</div>
-          <form method="post" action="{url_for('toggle_setting', key=key)}">
-            <button type="submit" class="{'danger' if enabled else ''} sm">{'خاموش کن' if enabled else 'روشن کن'}</button>
-          </form></div>"""
+        <div class="switch-row"><div><b>{label}</b></div>
+          <form method="post" action="{url_for('toggle_setting', key=key)}">{tgl_btn(enabled)}</form></div>"""
 
     content = f"""
     {bot_card}
@@ -3041,6 +3070,16 @@ def save_config():
             saved += 1
 
     flash(f"تنظیمات ذخیره شد ({saved} تغییر، {reset} برگشت به پیش‌فرض).")
+    return redirect(url_for("settings_page"))
+
+
+@app.route("/settings/toggle-config/<key>", methods=["POST"])
+@login_required
+def toggle_config(key):
+    if key in TOGGLE_DEFAULTS:
+        current = get_setting(key, TOGGLE_DEFAULTS[key])
+        set_setting(key, "0" if current == "1" else "1")
+        flash("وضعیت تغییر کرد: " + ("روشن شد." if current != "1" else "خاموش شد."))
     return redirect(url_for("settings_page"))
 
 
