@@ -2054,9 +2054,10 @@ def topups_page():
 #   label  = اسمی که کاربر تو ربات می‌بینه
 #   symbol = «نام درست» کوین تو نوبیتکس (برای گرفتن قیمت لحظه‌ای؛ جفت‌ارز symbol-rls)
 #   wallet = آدرسی که کاربر بهش واریز می‌کنه (کوینی که آدرس نداشته باشه تو ربات نشون داده نمی‌شه)
+#   network = شبکه‌ی بلاکچین واریز (مثل TON یا TRC20؛ اختیاری، خالی باشه تو ربات نشون داده نمی‌شه)
 #   memo   = Memo/Comment/Tag واریز (اختیاری؛ خالی باشه تو ربات هیچی نشون داده نمی‌شه)
 # اگه این کلید هیچ‌وقت ثبت نشده باشه، گزینه‌ی رمزارز تو ربات نشون داده نمی‌شه.
-CRYPTO_DEFAULT_COINS = [{"id": "gram", "label": "Gram", "symbol": "gram", "wallet": "", "memo": "", "enabled": True}]
+CRYPTO_DEFAULT_COINS = [{"id": "gram", "label": "Gram", "symbol": "gram", "wallet": "", "memo": "", "network": "", "enabled": True}]
 CRYPTO_SYMBOL_RE = re.compile(r"^[a-z0-9]{2,15}$")
 
 
@@ -2076,7 +2077,7 @@ def load_crypto_coins(all_settings=None):
         if isinstance(c, dict) and c.get("symbol"):
             coins.append({"id": str(c.get("id") or secrets.token_hex(3)), "label": str(c.get("label") or c["symbol"]),
                           "symbol": str(c["symbol"]).lower(), "wallet": str(c.get("wallet") or ""),
-                          "memo": str(c.get("memo") or ""),
+                          "memo": str(c.get("memo") or ""), "network": str(c.get("network") or ""),
                           "enabled": bool(c.get("enabled", True))})
     return coins, True
 
@@ -2085,18 +2086,21 @@ def save_crypto_coins(coins):
     set_setting("crypto_coins", json.dumps(coins, ensure_ascii=False))
 
 
-def check_coin_fields(label, symbol, wallet, memo=""):
-    """(label, symbol, wallet, memo, error) — memo اختیاریه؛ خالی بمونه تو ربات نشون داده نمی‌شه."""
+def check_coin_fields(label, symbol, wallet, memo="", network=""):
+    """(label, symbol, wallet, memo, network, error) — memo و network اختیارین؛ خالی بمونن تو ربات نشون داده نمی‌شن."""
     label, symbol, wallet, memo = label.strip(), symbol.strip().lower(), wallet.strip(), (memo or "").strip()
+    network = (network or "").strip()
     if not label or len(label) > 30:
-        return None, None, None, None, "اسم نمایشی باید بین ۱ تا ۳۰ کاراکتر باشه."
+        return None, None, None, None, None, "اسم نمایشی باید بین ۱ تا ۳۰ کاراکتر باشه."
     if not CRYPTO_SYMBOL_RE.match(symbol):
-        return None, None, None, None, "نام کوین تو نوبیتکس فقط حروف انگلیسی/عدد (۲ تا ۱۵ کاراکتر) باشه؛ مثل gram یا usdt."
+        return None, None, None, None, None, "نام کوین تو نوبیتکس فقط حروف انگلیسی/عدد (۲ تا ۱۵ کاراکتر) باشه؛ مثل gram یا usdt."
     if len(wallet) > 200 or re.search(r"\s", wallet):
-        return None, None, None, None, "آدرس ولت نباید فاصله داشته باشه و بیشتر از ۲۰۰ کاراکتر باشه."
+        return None, None, None, None, None, "آدرس ولت نباید فاصله داشته باشه و بیشتر از ۲۰۰ کاراکتر باشه."
     if len(memo) > 100 or re.search(r"[\r\n]", memo):
-        return None, None, None, None, "Memo/Comment حداکثر ۱۰۰ کاراکتر و تک‌خطی باشه."
-    return label, symbol, wallet, memo, None
+        return None, None, None, None, None, "Memo/Comment حداکثر ۱۰۰ کاراکتر و تک‌خطی باشه."
+    if len(network) > 50 or re.search(r"[\r\n]", network):
+        return None, None, None, None, None, "اسم شبکه حداکثر ۵۰ کاراکتر و تک‌خطی باشه."
+    return label, symbol, wallet, memo, network, None
 
 
 # آدرس رسمی تو مستندات جدید نوبیتکس apiv2.nobitex.ir هست؛ api.nobitex.ir آدرس قدیمیه و از سرور خارج از ایران
@@ -2182,6 +2186,8 @@ def crypto_page():
           <input id="s_{cid}" name="symbol_{cid}" value="{esc(c['symbol'])}" dir="ltr" autocapitalize="off" spellcheck="false" placeholder="gram">
           <label for="w_{cid}">آدرس ولت (کاربر بهش واریز می‌کنه)</label>
           <input id="w_{cid}" name="wallet_{cid}" value="{esc(c['wallet'])}" dir="ltr" autocapitalize="off" spellcheck="false" placeholder="آدرس ولت رو اینجا بنویس">
+          <label for="nw_{cid}">شبکه‌ی بلاکچین (اختیاری؛ مثل TON یا TRC20)</label>
+          <input id="nw_{cid}" name="network_{cid}" value="{esc(c.get('network', ''))}" dir="ltr" autocapitalize="off" spellcheck="false" maxlength="50" placeholder="خالی بذار تا تو ربات نشون داده نشه">
           <label for="m_{cid}">Memo / Comment (اختیاری)</label>
           <input id="m_{cid}" name="memo_{cid}" value="{esc(c.get('memo', ''))}" dir="ltr" autocapitalize="off" spellcheck="false" maxlength="100" placeholder="خالی بذار تا تو ربات نشون داده نشه">
           <div class="switch-row"><div><b>فعال</b></div>
@@ -2210,6 +2216,8 @@ def crypto_page():
         <input id="n_symbol" name="symbol" dir="ltr" autocapitalize="off" spellcheck="false" placeholder="usdt" required>
         <label for="n_wallet">آدرس ولت</label>
         <input id="n_wallet" name="wallet" dir="ltr" autocapitalize="off" spellcheck="false" placeholder="آدرس واریز" required>
+        <label for="n_network">شبکه‌ی بلاکچین (اختیاری؛ مثل TON یا TRC20)</label>
+        <input id="n_network" name="network" dir="ltr" autocapitalize="off" spellcheck="false" maxlength="50" placeholder="خالی بذار تا تو ربات نشون داده نشه">
         <label for="n_memo">Memo / Comment (اختیاری)</label>
         <input id="n_memo" name="memo" dir="ltr" autocapitalize="off" spellcheck="false" maxlength="100" placeholder="خالی بذار تا تو ربات نشون داده نشه">
         <div style="margin-top:10px;"><button type="submit" class="block">➕ اضافه کن</button></div>
@@ -2257,16 +2265,17 @@ def crypto_save():
         old = by_id.get(cid)
         if old is None:
             continue
-        label, symbol, wallet, memo, err = check_coin_fields(request.form.get(f"label_{cid}", ""),
-                                                             request.form.get(f"symbol_{cid}", ""),
-                                                             request.form.get(f"wallet_{cid}", ""),
-                                                             request.form.get(f"memo_{cid}", ""))
+        label, symbol, wallet, memo, network, err = check_coin_fields(request.form.get(f"label_{cid}", ""),
+                                                                      request.form.get(f"symbol_{cid}", ""),
+                                                                      request.form.get(f"wallet_{cid}", ""),
+                                                                      request.form.get(f"memo_{cid}", ""),
+                                                                      request.form.get(f"network_{cid}", ""))
         if err:
             flash(f"⚠️ «{old['label']}»: {err} — تغییراتش ذخیره نشد.")
             out.append(old)
             errors += 1
             continue
-        out.append({"id": cid, "label": label, "symbol": symbol, "wallet": wallet, "memo": memo,
+        out.append({"id": cid, "label": label, "symbol": symbol, "wallet": wallet, "memo": memo, "network": network,
                     "enabled": request.form.get(f"enabled_{cid}") == "1"})
     save_crypto_coins(out)
     if not errors:
@@ -2277,8 +2286,9 @@ def crypto_save():
 @app.route("/crypto/add", methods=["POST"])
 @login_required
 def crypto_add():
-    label, symbol, wallet, memo, err = check_coin_fields(request.form.get("label", ""), request.form.get("symbol", ""),
-                                                         request.form.get("wallet", ""), request.form.get("memo", ""))
+    label, symbol, wallet, memo, network, err = check_coin_fields(request.form.get("label", ""), request.form.get("symbol", ""),
+                                                                  request.form.get("wallet", ""), request.form.get("memo", ""),
+                                                                  request.form.get("network", ""))
     if err:
         flash(f"⚠️ {err}")
         return redirect(url_for("crypto_page"))
@@ -2286,7 +2296,7 @@ def crypto_add():
         flash("⚠️ آدرس ولت رو وارد کنید.")
         return redirect(url_for("crypto_page"))
     coins, _configured = load_crypto_coins()
-    coins.append({"id": secrets.token_hex(3), "label": label, "symbol": symbol, "wallet": wallet, "memo": memo, "enabled": True})
+    coins.append({"id": secrets.token_hex(3), "label": label, "symbol": symbol, "wallet": wallet, "memo": memo, "network": network, "enabled": True})
     save_crypto_coins(coins)
     price, perr = nobitex_price_toman(symbol)
     if price:

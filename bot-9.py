@@ -868,7 +868,7 @@ UI_TEXT['fa'].update({
         '💵 مبلغ شارژ: <b>{amount}</b> تومان\n'
         '📈 قیمت لحظه‌ای {coin}: <b>{price}</b> تومان\n'
         '🔢 مقدار قابل واریز: <code>{coin_amount}</code> <b>{coin}</b>\n\n'
-        '👛 آدرس ولت:\n<code>{wallet}</code>\n{memo_line}\n'
+        '{network_line}👛 آدرس ولت:\n<code>{wallet}</code>\n{memo_line}\n'
         '⚠️ دقیقاً همین مقدار رو واریز کنید. قیمت لحظه‌ایه و ممکنه عوض بشه؛ پس زودتر واریز کنید.\n\n'
         '📸 بعد از واریز، تصویر رسید (اسکرین‌شات تراکنش) رو بفرستید تا بررسی بشه.'
     ),
@@ -885,7 +885,7 @@ UI_TEXT['en'].update({
         '💵 Top-up amount: <b>{amount}</b> Toman\n'
         '📈 Live {coin} price: <b>{price}</b> Toman\n'
         '🔢 Amount to send: <code>{coin_amount}</code> <b>{coin}</b>\n\n'
-        '👛 Wallet address:\n<code>{wallet}</code>\n{memo_line}\n'
+        '{network_line}👛 Wallet address:\n<code>{wallet}</code>\n{memo_line}\n'
         '⚠️ Send exactly this amount. The price is live and may change, so please send soon.\n\n'
         '📸 After sending, upload a screenshot of the transaction for review.'
     ),
@@ -2651,7 +2651,8 @@ def get_crypto_coins():
         if symbol and wallet:
             coins.append({'id': str(c.get('id') or symbol), 'label': str(c.get('label') or symbol),
                           'symbol': symbol, 'wallet': wallet,
-                          'memo': str(c.get('memo') or '').strip()})
+                          'memo': str(c.get('memo') or '').strip(),
+                          'network': str(c.get('network') or '').strip()})
     return coins
 
 
@@ -2794,12 +2795,18 @@ def send_crypto_topup_info(chat_id, amount, coin):
                      '\n📝 Memo / Comment:\n<code>%s</code>\n\n⚠️ You must include this memo, otherwise the deposit cannot be identified.\n') % _html.escape(memo)
     else:
         memo_line = ''
+    network = str(coin.get('network') or '').strip()
+    if network:
+        network_line = (('🌐 شبکه: <b>%s</b>\n(حتماً از همین شبکه واریز کنید)\n\n' if get_user_lang(chat_id) != 'en'
+                         else '🌐 Network: <b>%s</b>\n(send only on this network)\n\n') % _html.escape(network))
+    else:
+        network_line = ''
     user_steps[str(chat_id)] = {'step': 'waiting_receipt', 'amount': amount, 'method': 'crypto',
                                 'coin_label': coin['label'], 'coin_amount': coin_amount, 'price': price}
     send_message(chat_id, u(chat_id, 'topup_crypto_info', divider=DIVIDER, amount=f'{amount:,}',
                             price=f'{price:,.0f}', coin=_html.escape(coin['label']),
                             coin_amount=fmt_coin_amount(coin_amount), wallet=_html.escape(coin['wallet']),
-                            memo_line=memo_line))
+                            memo_line=memo_line, network_line=network_line))
 
 
 def show_topup_method_choice(chat_id, amount):
