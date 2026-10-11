@@ -150,7 +150,20 @@ def get_card_owner():
 
 
 def get_min_topup():
+    """حداقل شارژ کارت‌به‌کارت (ریالی)."""
     return int(get_setting('min_topup', DEFAULT_MIN_TOPUP))
+
+
+def get_min_topup_crypto():
+    """حداقل شارژ با رمزارز (جدا از کارت‌به‌کارت؛ اگه از پنل ثبت نشده باشه همون حداقل کارت‌به‌کارته)."""
+    try:
+        return int(get_setting('min_topup_crypto', str(get_min_topup())))
+    except Exception:
+        return get_min_topup()
+
+
+def get_min_topup_for(method):
+    return get_min_topup_crypto() if method == 'crypto' else get_min_topup()
 
 
 def get_topup_multiplier():
@@ -863,6 +876,7 @@ UI_TEXT['fa'].update({
     'btn_topup_card': '💳 کارت به کارت',
     'btn_topup_crypto': '🪙 پرداخت با رمزارز',
     'topup_choose_coin': '🪙 با کدوم رمزارز پرداخت می‌کنید؟',
+    'topup_choose_method_first': '💠 شارژ کیف پول\nروش پرداخت رو انتخاب کنید:',
     'topup_crypto_info': (
         '🪙 <b>پرداخت با رمزارز</b>\n{divider}\n'
         '💵 مبلغ شارژ: <b>{amount}</b> تومان\n'
@@ -880,6 +894,7 @@ UI_TEXT['en'].update({
     'btn_topup_card': '💳 Card to card',
     'btn_topup_crypto': '🪙 Pay with crypto',
     'topup_choose_coin': '🪙 Which cryptocurrency do you want to pay with?',
+    'topup_choose_method_first': '💠 Wallet top-up\nChoose a payment method:',
     'topup_crypto_info': (
         '🪙 <b>Pay with crypto</b>\n{divider}\n'
         '💵 Top-up amount: <b>{amount}</b> Toman\n'
@@ -2809,9 +2824,10 @@ def send_crypto_topup_info(chat_id, amount, coin):
                             memo_line=memo_line, network_line=network_line))
 
 
-def show_topup_method_choice(chat_id, amount):
-    user_steps[str(chat_id)] = {'step': 'choose_topup_method', 'amount': amount}
-    send_message(chat_id, u(chat_id, 'topup_choose_method', amount=f'{amount:,}'), reply_markup={
+def show_topup_method_choice(chat_id):
+    """مرحله‌ی اول شارژ: انتخاب روش پرداخت (قبل از پرسیدن مبلغ)."""
+    user_steps[str(chat_id)] = {'step': 'choose_topup_method'}
+    send_message(chat_id, u(chat_id, 'topup_choose_method_first'), reply_markup={
         'inline_keyboard': [
             [{'text': u(chat_id, 'btn_topup_card'), 'callback_data': 'tpm_card'}],
             [{'text': u(chat_id, 'btn_topup_crypto'), 'callback_data': 'tpm_crypto'}],
@@ -2819,39 +2835,56 @@ def show_topup_method_choice(chat_id, amount):
         ]})
 
 
+def ask_topup_amount_for(chat_id, method):
+    """بعد از انتخاب روش، مبلغ رو می‌پرسه (حداقل شارژ هر روش جدا حساب می‌شه)."""
+    user_steps[str(chat_id)] = {'step': 'ask_topup_amount', 'method': method}
+    min_txt = f'{get_min_topup_for(method):,}'
+    text = (u(chat_id, 'topup_prompt', min_topup=min_txt) if get_user_lang(chat_id) == 'en'
+            else get_bot_text_fmt('topup_prompt', DEFAULT_TOPUP_PROMPT, min_topup=min_txt))
+    send_message(chat_id, text, reply_markup=cancel_kb(chat_id))
+
+
 def show_coin_choice(chat_id, amount, coins):
     """اگه فقط یه رمزارز فعاله مستقیم اطلاعات واریز، وگرنه لیست انتخاب رمزارز."""
     if len(coins) == 1:
         send_crypto_topup_info(chat_id, amount, coins[0])
         return
-    user_steps[str(chat_id)] = {'step': 'choose_topup_method', 'amount': amount}
+    user_steps[str(chat_id)] = {'step': 'choose_topup_coin', 'amount': amount}
     send_message(chat_id, u(chat_id, 'topup_choose_coin'), reply_markup={'inline_keyboard': (
         [[{'text': c['label'], 'callback_data': 'tpc_' + c['id']}] for c in coins]
         + [[{'text': u(chat_id, 'btn_cancel'), 'callback_data': 'menu'}]])})
 
 
-def start_topup_payment(chat_id, amount):
-    """بعد از وارد کردن مبلغ: بر اساس روشن/خاموش بودن کارت‌به‌کارت و رمزارز مسیر رو انتخاب می‌کنه."""
-    card_on, crypto_on = card_topup_enabled(), crypto_enabled()
-    if card_on and crypto_on:
-        show_topup_method_choice(chat_id, amount)
-    elif card_on:
-        send_card_topup_info(chat_id, amount)
-    elif crypto_on:
-        show_coin_choice(chat_id, amount, get_crypto_coins())
+def proceed_after_topup_amount(chat_id, amount, method):
+    """مبلغ وارد شده و معتبره: کارت‌به‌کارت → اطلاعات کارت؛ رمزارز → انتخاب کوین/اطلاعات ولت."""
+    if method == 'crypto':
+        coins = get_crypto_coins() if crypto_enabled() else []
+        if not coins:
+            user_steps[str(chat_id)] = {}
+            send_message(chat_id, u(chat_id, 'disabled_feature'))
+        else:
+            show_coin_choice(chat_id, amount, coins)
     else:
-        user_steps[str(chat_id)] = {}
-        send_message(chat_id, u(chat_id, 'disabled_feature'))
+        if card_topup_enabled():
+            send_card_topup_info(chat_id, amount)
+        else:
+            user_steps[str(chat_id)] = {}
+            send_message(chat_id, u(chat_id, 'disabled_feature'))
 
 
 def action_topup_menu(chat_id):
-    if not is_feature_enabled('topup') or not (card_topup_enabled() or crypto_enabled()):
+    if not is_feature_enabled('topup'):
         send_message(chat_id, u(chat_id, 'disabled_feature'))
         return
-    user_steps[str(chat_id)] = {'step': 'ask_topup_amount'}
-    text = (u(chat_id, 'topup_prompt', min_topup=f'{get_min_topup():,}') if get_user_lang(chat_id) == 'en'
-            else get_bot_text_fmt('topup_prompt', DEFAULT_TOPUP_PROMPT, min_topup=f'{get_min_topup():,}'))
-    send_message(chat_id, text, reply_markup=cancel_kb(chat_id))
+    card_on, crypto_on = card_topup_enabled(), crypto_enabled()
+    if card_on and crypto_on:
+        show_topup_method_choice(chat_id)          # اول روش پرداخت رو می‌پرسه
+    elif card_on:
+        ask_topup_amount_for(chat_id, 'card')      # فقط یه روش فعاله: مستقیم مبلغ
+    elif crypto_on:
+        ask_topup_amount_for(chat_id, 'crypto')
+    else:
+        send_message(chat_id, u(chat_id, 'disabled_feature'))
 
 
 def action_trial(chat_id):
@@ -3165,7 +3198,6 @@ def action_language_menu(chat_id):
 
 # هر آیتم: (کلید داخلی ثابت, متن پیش‌فرض دکمه, تابع اجراکننده)
 BUTTON_ACTIONS = [
-    ('recentorders', '🧾 سفارشات اخیر من', action_recent_orders),
     ('buy', '🛍 خرید کانفیگ', action_buy_menu),
     ('trial', '🧪 تست رایگان', action_trial),
     ('topup', '💠 شارژ کیف پول', action_topup_menu),
@@ -3191,7 +3223,6 @@ COMMAND_TO_ACTION_KEY = {
     '/support': 'support',
     '/guide': 'guide',
     '/app': 'guide',
-    '/recentorders': 'recentorders',
     '/language': 'language',
 }
 
@@ -3937,30 +3968,29 @@ def process_update(update):
             update_ticket_status(tid, 'closed')
             send_message(chat_id, u('fa', 'admin_ticket_closed', tid=str(tid)))
 
-        elif data in ('tpm_card', 'tpm_crypto') or data.startswith('tpc_'):
+        elif data in ('tpm_card', 'tpm_crypto'):
             s_ = user_steps.get(str(chat_id), {})
-            coins = get_crypto_coins() if crypto_enabled() else []
             if s_.get('step') != 'choose_topup_method':
                 main_menu(chat_id)
             elif data == 'tpm_card':
                 if card_topup_enabled():
-                    send_card_topup_info(chat_id, s_['amount'])
+                    ask_topup_amount_for(chat_id, 'card')
                 else:
                     send_message(chat_id, u(chat_id, 'disabled_feature'))
-            elif not coins:
-                send_message(chat_id, u(chat_id, 'disabled_feature'))
-            elif data == 'tpm_crypto' and len(coins) == 1:
-                send_crypto_topup_info(chat_id, s_['amount'], coins[0])
-            elif data == 'tpm_crypto':
-                send_message(chat_id, u(chat_id, 'topup_choose_coin'), reply_markup={'inline_keyboard': (
-                    [[{'text': c['label'], 'callback_data': 'tpc_' + c['id']}] for c in coins]
-                    + [[{'text': u(chat_id, 'btn_cancel'), 'callback_data': 'menu'}]])})
             else:
-                coin = next((c for c in coins if 'tpc_' + c['id'] == data), None)
-                if coin:
-                    send_crypto_topup_info(chat_id, s_['amount'], coin)
+                if crypto_enabled():
+                    ask_topup_amount_for(chat_id, 'crypto')
                 else:
-                    main_menu(chat_id)
+                    send_message(chat_id, u(chat_id, 'disabled_feature'))
+
+        elif data.startswith('tpc_'):
+            s_ = user_steps.get(str(chat_id), {})
+            coins = get_crypto_coins() if crypto_enabled() else []
+            coin = next((c for c in coins if 'tpc_' + c['id'] == data), None)
+            if s_.get('step') != 'choose_topup_coin' or not coin:
+                main_menu(chat_id)
+            else:
+                send_crypto_topup_info(chat_id, s_['amount'], coin)
 
         elif data.startswith('topup_acc_'):
             req_id = int(data.split('_')[2])
@@ -4271,10 +4301,11 @@ def process_update(update):
         elif step.get('step') == 'ask_topup_amount':
             try:
                 amount = int(text)
-                if amount < get_min_topup():
-                    send_message(chat_id, u(chat_id, 'topup_min_error', min_topup=get_min_topup()))
+                method = step.get('method', 'card')
+                if amount < get_min_topup_for(method):
+                    send_message(chat_id, u(chat_id, 'topup_min_error', min_topup=get_min_topup_for(method)))
                 else:
-                    start_topup_payment(chat_id, amount)
+                    proceed_after_topup_amount(chat_id, amount, method)
             except ValueError:
                 send_message(chat_id, u(chat_id, 'topup_amount_error'))
 

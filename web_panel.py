@@ -63,7 +63,8 @@ CONFIG_GROUPS = [
         ("price_dns", "قیمت هر گیگ — فقط DNS بازی (تومان)", DEFAULT_PRICE_PER_GB_DNS, "number"),
         ("card_number", "شماره کارت", DEFAULT_CARD_NUMBER, "text"),
         ("card_owner", "نام صاحب کارت", DEFAULT_CARD_OWNER, "text"),
-        ("min_topup", "حداقل مبلغ شارژ کیف پول (تومان)", DEFAULT_MIN_TOPUP, "number"),
+        ("min_topup", "حداقل مبلغ شارژ کارت‌به‌کارت — ریالی (تومان)", DEFAULT_MIN_TOPUP, "number"),
+        ("min_topup_crypto", "حداقل مبلغ شارژ با رمزارز (تومان)", DEFAULT_MIN_TOPUP, "number"),
         ("topup_multiplier", "ضریب واریزی (مثلاً 2 یعنی دو برابر مبلغ واریزی به کیف پول اضافه شود)", "1", "float"),
     ]),
     ("🧪 تست رایگان و خرید", [
@@ -113,7 +114,6 @@ CONFIG_SETTINGS = [(k, label, default, kind) for _title, items in CONFIG_GROUPS 
 
 # متن دکمه‌های منوی اصلی: (کلید داخلی ثابت, عنوان تو پنل, متن پیش‌فرض دکمه)
 BOT_BUTTONS = [
-    ("recentorders", "دکمه‌ی سفارشات اخیر من", "🧾 سفارشات اخیر من"),
     ("buy", "دکمه‌ی خرید کانفیگ", "🛍 خرید کانفیگ"),
     ("trial", "دکمه‌ی تست رایگان", "🧪 تست رایگان"),
     ("topup", "دکمه‌ی شارژ کیف پول", "💠 شارژ کیف پول"),
@@ -170,7 +170,6 @@ FEATURES = {
     "support": "🎧 پشتیبانی",
     "reseller": "🧑‍💼 فروشنده شو",
     "guide": "📲 اپ مخصوص کانفیگ‌ها",
-    "recentorders": "🧾 سفارشات اخیر من",
 }
 
 USERS_PAGE_SIZE = 20
