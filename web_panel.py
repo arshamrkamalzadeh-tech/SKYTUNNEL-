@@ -83,6 +83,12 @@ CONFIG_GROUPS = [
          "10:3500,20:3000,30:2500,*:2000", "tiers"),
         ("reseller_panel_url", "آدرس پنلی که به فروشنده‌ها نشون داده می‌شه", DEFAULT_RESELLER_PANEL_URL, "url"),
     ]),
+    ("🎁 دعوت دوستان (رفرال)", [
+        ("referral_enabled", "سیستم دعوت دوستان (1 = روشن، 0 = خاموش)", "0", "number"),
+        ("referral_reward_inviter", "پاداش دعوت‌کننده — به کیف پولش اضافه می‌شه (تومان)", "10000", "number"),
+        ("referral_reward_invitee", "هدیه‌ی کاربر دعوت‌شده — به کیف پول خودش اضافه می‌شه (تومان؛ 0 = بدون هدیه)", "0", "number"),
+        ("referral_on_join", "زمان پرداخت پاداش (0 = بعد از اولین خرید کاربر دعوت‌شده، 1 = به‌محض ورود به ربات)", "0", "number"),
+    ]),
     ("📲 لینک‌های دانلود اپ", [
         ("app_link_android", "لینک اندروید", os.getenv("APP_LINK_ANDROID", "https://play.google.com/store/apps/details?id=com.v2pro.client"), "url"),
         ("app_link_ios", "لینک iOS", os.getenv("APP_LINK_IOS", "https://apps.apple.com/us/app/v2pro/id6801607092"), "url"),
@@ -105,6 +111,7 @@ CONFIG_GROUPS = [
         ("cmd_account", "/account", "👤 حساب من", "text"),
         ("cmd_support", "/support", "🎧 پشتیبانی", "text"),
         ("cmd_guide", "/guide", "📲 اپ مخصوص کانفیگ‌ها", "text"),
+        ("cmd_invite", "/invite", "🎁 دعوت دوستان", "text"),
     ]),
 ]
 # نسخه‌ی تخت برای اعتبارسنجی/ذخیره
@@ -124,6 +131,7 @@ BOT_BUTTONS = [
     ("guide", "دکمه‌ی اپ مخصوص کانفیگ‌ها", "📲 اپ مخصوص کانفیگ‌ها"),
     ("language", "دکمه‌ی تغییر زبان", "🌐 تغییر زبان"),
     ("reseller", "دکمه‌ی فروشنده شو", "🧑‍💼 فروشنده شو"),
+    ("referral", "دکمه‌ی دعوت دوستان", "🎁 دعوت دوستان"),
 ]
 MAIN_MENU_KEYS = [key for key, _label, _default in BOT_BUTTONS]
 
