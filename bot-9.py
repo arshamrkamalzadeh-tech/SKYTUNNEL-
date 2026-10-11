@@ -282,7 +282,6 @@ DIVIDER = "┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄"
 # دکمه‌ی «انصراف» که زیر پیام‌های «فقط عدد/متن ارسال کنید» گذاشته می‌شه، تا تو
 # سبک کیبورد اینلاین هم کاربر یه راه برگشت به منو داشته باشه (قبلاً فقط با
 # تایپ‌کردن یه چیزی یا رفتن به /start می‌شد از این مرحله‌ها خارج شد).
-CANCEL_KB = {'inline_keyboard': [[{'text': '❌ انصراف', 'callback_data': 'menu'}]]}
 
 # ---------------------------------------------------------------------------
 # چندزبانه (فارسی/انگلیسی)
@@ -1045,6 +1044,67 @@ UI_TEXT['en'].update({
 
 
 
+
+# ---------------------------------------------------------------------------
+# متن‌ها/دکمه‌هایی که قبلاً مستقیم تو کد بودن و از پنل قابل تغییر نبودن؛ حالا همه
+# تو همین جدول‌ان و از صفحه‌ی «متن‌های ربات» پنل قابل ویرایش‌ان.
+# ---------------------------------------------------------------------------
+UI_TEXT['fa'].update({
+    'btn_qty_minus': '➖',
+    'btn_qty_plus': '➕',
+    'kb_removed_note': '⌨️',
+    'crypto_memo_line': '📝 Memo / Comment:\n<code>{memo}</code>\n\n⚠️ حتماً Memo رو هم دقیقاً بنویسید، وگرنه واریزی شناسایی نمی‌شه.',
+    'crypto_network_line': '🌐 شبکه: <b>{network}</b>\n(حتماً از همین شبکه واریز کنید)',
+    'reseller_creds_line': '👤 نام کاربری پنل: <code>{username}</code>',
+    # --- پیام‌های ادمین ---
+    'admin_btn_add_channel': '➕ اضافه کردن کانال',
+    'admin_btn_send_number': '📱 ارسال شماره من',
+    'admin_btn_channel_add': '➕ افزودن کانال جدید',
+    'admin_btn_channel_del': '🗑 حذف {i}{name}',
+    'admin_hash_sent': '🔗 کاربر <code>{user_id}</code> برای درخواست #{req_id} هش تراکنش فرستاد:\n<code>{tx_hash}</code>',
+    'admin_topup_hash_line': '🔗 هش تراکنش (Hash):\n<code>{tx_hash}</code>',
+    'admin_timing_title': '⏱ <b>زمان‌بندی</b>',
+    'admin_timing_requested': '🕐 درخواست مبلغ واریزی: <code>{time}</code>',
+    'admin_timing_requested_unknown': '🕐 درخواست مبلغ واریزی: نامشخص',
+    'admin_timing_paid': '🕑 ارسال رسید/هش: <code>{time}</code>',
+    'admin_timing_elapsed': '⌛️ مدت از درخواست تا واریز: <b>{duration}</b>',
+    'admin_dur_hour': '{n} ساعت',
+    'admin_dur_minute': '{n} دقیقه',
+    'admin_dur_second': '{n} ثانیه',
+    'admin_dur_and': 'و',
+    'admin_auto_approved_hash': '🤖 تأیید خودکار: هش تراکنش با واریز نوبیتکس خورد',
+    'admin_auto_approved_amount': '🤖 تأیید خودکار: مقدار و زمان واریز با واریز نوبیتکس خورد (بدون هش)',
+    'admin_ce_head': '🔎 <b>بررسی نوبیتکس</b> — درخواست #{req_id}',
+    'admin_ce_error': '⚠️ بررسی انجام نشد: {note}\nدستی بررسی کنید.',
+    'admin_ce_not_found': '⏳ هنوز واریز مطابقی پیدا نشد (ممکنه تأییدیه شبکه کامل نشده باشه). تا چند ساعت خودکار دوباره چک می‌شه.',
+    'admin_ce_hash_mismatch_nodep': '⚠️ {note}\nدستی بررسی کنید.',
+    'admin_ce_diff': '({pct}٪ نسبت به مقدار مورد انتظار)',
+    'admin_ce_coin_suffix': '— کوین: {coin}',
+    'admin_ce_hash_ok': '✅ هش تراکنش با یه واریز تو نوبیتکس خورد.',
+    'admin_ce_matched': '✅ واریز هم‌مقدار پیدا شد (کاربر هش نفرستاده؛ تأیید با خودته).',
+    'admin_ce_mismatch': '⚠️ واریزی پیدا شد ولی کوین/مقدار/زمانش با درخواست نمی‌خونه؛ دستی تصمیم بگیرید.',
+    'admin_ce_hash_mismatch': '⚠️ {note}.',
+    'admin_ce_ambiguous': '⚠️ {note}؛ دستی تأیید کنید.',
+    'admin_ce_unconfirmed': '⏳ واریز پیدا شد ولی هنوز تأیید نهایی شبکه رو نگرفته.',
+    'admin_ce_amount_line': '💰 مقدار واریز: <code>{amount}</code> {coin}{diff}\n🎯 مقدار مورد انتظار: <code>{expected}</code>',
+    'admin_ce_hash_line': '🔗 هش: <code>{tx}</code>',
+    'admin_ce_time_line': '🕐 زمان واریز: <code>{time}</code>',
+    'admin_ce_note_no_coin': 'اطلاعات کوین این درخواست ثبت نشده',
+    'admin_ce_note_hash_no_match': 'هش وارد‌شده با هیچ واریزی تو نوبیتکس نخورد',
+    'admin_ce_note_hash_nearest': 'هش وارد‌شده با واریزی نخورد، نزدیک‌ترین واریز نشون داده شد',
+    'admin_ce_note_competing': 'چند کاربر مقدار هم‌اندازه اعلام کردن؛ با هش یا دستی مشخص بشه',
+    'admin_ce_note_multi': '{n} واریز هم‌مقدار پیدا شد',
+})
+UI_TEXT['en'].update({
+    'btn_qty_minus': '➖',
+    'btn_qty_plus': '➕',
+    'kb_removed_note': '⌨️',
+    'crypto_memo_line': '📝 Memo / Comment:\n<code>{memo}</code>\n\n⚠️ You must include this memo, otherwise the deposit cannot be identified.',
+    'crypto_network_line': '🌐 Network: <b>{network}</b>\n(send only on this network)',
+    'reseller_creds_line': '👤 Panel username: <code>{username}</code>',
+})
+
+
 # بعضی متن‌های فارسی از قبل تو پنل زیر کلیدهای قدیمی (text_*, ctype_label_*)
 # ذخیره می‌شدن؛ برای اینکه سفارشی‌سازی‌های قبلی ادمین از بین نره، همون کلیدها
 # رو نگه می‌داریم. بقیه‌ی متن‌ها: ui_<زبان>_<کلید>.
@@ -1100,6 +1160,10 @@ def u(chat_id_or_lang, key, **kwargs):
         except Exception:
             return s
     return s
+
+
+def admin_add_channel_label():
+    return u('fa', 'admin_btn_add_channel')
 
 
 def cancel_kb(chat_id):
@@ -1913,8 +1977,8 @@ def attach_hash_to_pending_request(chat_id, req_id, tx_hash):
     set_request_tx_hash(req_id, tx_hash)
     send_message(chat_id, u(chat_id, 'topup_hash_received'))
     if not same:
-        send_message(ADMIN_ID, f'🔗 کاربر <code>{chat_id}</code> برای درخواست #{req_id} هش تراکنش فرستاد:\n'
-                               f'<code>{_html.escape(tx_hash)}</code>')
+        send_message(ADMIN_ID, u('fa', 'admin_hash_sent', user_id=str(chat_id), req_id=str(req_id),
+                                 tx_hash=_html.escape(tx_hash)))
     _crypto_notified.difference_update({k for k in _crypto_notified if k[0] == req_id})   # نتیجه‌ی جدید دوباره به ادمین برسه
     check_crypto_for_user_async(chat_id, req_id, 'hash')
 
@@ -1966,7 +2030,7 @@ def evaluate_crypto_request(req_id):
     state: matched | mismatch | hash_mismatch | ambiguous | unconfirmed | not_found | error"""
     row = get_crypto_request_row(req_id)
     if not row or not row[5] or not row[6]:
-        return {'state': 'error', 'note': 'اطلاعات کوین این درخواست ثبت نشده'}
+        return {'state': 'error', 'note': u('fa', 'admin_ce_note_no_coin')}
     symbol, expected = str(row[5]).lower(), float(row[6])
     user_hash = (row[7] or '').strip().lower()
     req_ts = row[8]
@@ -2005,13 +2069,13 @@ def evaluate_crypto_request(req_id):
         hash_note = False
     if not base:
         return {'state': 'hash_mismatch' if hash_note else 'not_found',
-                'note': 'هش وارد‌شده با هیچ واریزی تو نوبیتکس نخورد' if hash_note else ''}
+                'note': u('fa', 'admin_ce_note_hash_no_match') if hash_note else ''}
     if hash_note:
         # هش داده شده ولی با هیچ واریزی نخورده: هیچ‌وقت خودکار تأیید نمی‌شه (ممکنه واریز یه نفر دیگه باشه)؛
         # فقط نزدیک‌ترین واریز به ادمین نشون داده می‌شه. اگه واریز بعداً تو نوبیتکس بیاد، watcher با هش دوباره چک می‌کنه.
         best = min(base, key=lambda d: abs(d['amount'] - expected))
         return {'state': 'hash_mismatch', 'deposit': best, 'expected': expected,
-                'note': 'هش وارد‌شده با واریزی نخورد، نزدیک‌ترین واریز نشون داده شد'}
+                'note': u('fa', 'admin_ce_note_hash_nearest')}
     # مسیر بدون هش (درخواست‌های قدیمی): سقف بالا هم داره تا واریز بزرگ یه نفر دیگه اشتباهاً مچ نشه
     within = [d for d in base if crypto_amount_ok(d['amount'], expected, price)
               and d['amount'] <= expected * (1 + tol)]
@@ -2019,10 +2083,10 @@ def evaluate_crypto_request(req_id):
     if len(ok) == 1:
         if count_competing_crypto_requests(req_id, row[1], symbol, expected, tol) > 0:
             return {'state': 'ambiguous', 'deposit': ok[0], 'expected': expected,
-                    'note': 'چند کاربر مقدار هم‌اندازه اعلام کردن؛ با هش یا دستی مشخص بشه'}
+                    'note': u('fa', 'admin_ce_note_competing')}
         return {'state': 'matched', 'deposit': ok[0], 'expected': expected}
     if len(ok) > 1:
-        return {'state': 'ambiguous', 'deposit': ok[0], 'expected': expected, 'note': f'{len(ok)} واریز هم‌مقدار پیدا شد'}
+        return {'state': 'ambiguous', 'deposit': ok[0], 'expected': expected, 'note': u('fa', 'admin_ce_note_multi', n=len(ok))}
     if within:
         return {'state': 'unconfirmed', 'deposit': within[0], 'expected': expected}
     best = min(base, key=lambda d: abs(d['amount'] - expected))
@@ -2032,35 +2096,34 @@ def evaluate_crypto_request(req_id):
 def format_crypto_eval(req_id, res, coin_label=''):
     st = res.get('state')
     dep, exp = res.get('deposit'), res.get('expected')
-    head = f'🔎 <b>بررسی نوبیتکس</b> — درخواست #{req_id}\n'
+    head = u('fa', 'admin_ce_head', req_id=str(req_id)) + '\n'
+    note = _html.escape(str(res.get('note', '')))
     if st == 'error':
-        return head + '⚠️ بررسی انجام نشد: ' + _html.escape(str(res.get('note', ''))) + '\nدستی بررسی کنید.'
+        return head + u('fa', 'admin_ce_error', note=note)
     if st == 'not_found':
-        return head + '⏳ هنوز واریز مطابقی پیدا نشد (ممکنه تأییدیه شبکه کامل نشده باشه). تا چند ساعت خودکار دوباره چک می‌شه.'
+        return head + u('fa', 'admin_ce_not_found')
     if st == 'hash_mismatch' and not dep:
-        return head + '⚠️ ' + _html.escape(res.get('note', '')) + '\nدستی بررسی کنید.'
+        return head + u('fa', 'admin_ce_hash_mismatch_nodep', note=note)
     diff = ''
     if dep and exp:
-        diff = f' ({(dep["amount"] - exp) / exp * 100:+.2f}٪ نسبت به مقدار مورد انتظار)'
+        diff = ' ' + u('fa', 'admin_ce_diff', pct=f'{(dep["amount"] - exp) / exp * 100:+.2f}')
         if st == 'hash_ok':
-            diff += ' — کوین: ' + _html.escape(str(dep.get('currency', '')).upper())
-    lines = {
-        'hash_ok': '✅ هش تراکنش با یه واریز تو نوبیتکس خورد.',
-        'matched': '✅ واریز هم‌مقدار پیدا شد (کاربر هش نفرستاده؛ تأیید با خودته).',
-        'mismatch': '⚠️ واریزی پیدا شد ولی کوین/مقدار/زمانش با درخواست نمی‌خونه؛ دستی تصمیم بگیرید.',
-        'hash_mismatch': '⚠️ ' + _html.escape(res.get('note', '')) + '.',
-        'ambiguous': '⚠️ ' + _html.escape(res.get('note', '')) + '؛ دستی تأیید کنید.',
-        'unconfirmed': '⏳ واریز پیدا شد ولی هنوز تأیید نهایی شبکه رو نگرفته.',
+            diff += ' ' + u('fa', 'admin_ce_coin_suffix', coin=_html.escape(str(dep.get('currency', '')).upper()))
+    state_keys = {
+        'hash_ok': 'admin_ce_hash_ok', 'matched': 'admin_ce_matched', 'mismatch': 'admin_ce_mismatch',
+        'hash_mismatch': 'admin_ce_hash_mismatch', 'ambiguous': 'admin_ce_ambiguous',
+        'unconfirmed': 'admin_ce_unconfirmed',
     }
-    msg = head + lines.get(st, '') + '\n'
+    line = u('fa', state_keys[st], note=note) if st in state_keys else ''
+    msg = head + line + '\n'
     if dep:
         dep_coin = str(dep.get('currency') or '').upper() or coin_label
-        msg += (f'💰 مقدار واریز: <code>{fmt_coin_amount(dep["amount"])}</code> {_html.escape(dep_coin)}{diff}\n'
-                f'🎯 مقدار مورد انتظار: <code>{fmt_coin_amount(exp)}</code>\n')
+        msg += u('fa', 'admin_ce_amount_line', amount=fmt_coin_amount(dep['amount']), coin=_html.escape(dep_coin),
+                 diff=diff, expected=fmt_coin_amount(exp)) + '\n'
         if dep.get('tx'):
-            msg += '🔗 هش: <code>' + _html.escape(dep['tx']) + '</code>\n'
+            msg += u('fa', 'admin_ce_hash_line', tx=_html.escape(dep['tx'])) + '\n'
         if dep.get('ts'):
-            msg += '🕐 زمان واریز: <code>' + fmt_iran_datetime(dep['ts']) + '</code>'
+            msg += u('fa', 'admin_ce_time_line', time=fmt_iran_datetime(dep['ts']))
     return msg
 
 
@@ -2104,8 +2167,7 @@ def approve_topup_request(req_id, auto=False, reason='hash_ok'):
     else:
         send_message(req[1], u(req[1], 'topup_approved', credited=f'{credited:,}'))
     note = u('fa', 'admin_topup_approved', req_id=str(req_id), credited=f'{credited:,}')
-    auto_note = ('\n🤖 تأیید خودکار: هش تراکنش با واریز نوبیتکس خورد' if reason == 'hash_ok'
-                 else '\n🤖 تأیید خودکار: مقدار و زمان واریز با واریز نوبیتکس خورد (بدون هش)')
+    auto_note = '\n' + u('fa', 'admin_auto_approved_hash' if reason == 'hash_ok' else 'admin_auto_approved_amount')
     send_message(ADMIN_ID, note + (auto_note if auto else ''))
     return True
 
@@ -3203,30 +3265,30 @@ def fmt_iran_datetime(ts):
 
 
 def fmt_duration_fa(seconds):
-    """مدت زمان به فارسی با ثانیه؛ مثلا «۲ ساعت و ۳ دقیقه و ۱۵ ثانیه»."""
+    """مدت زمان با ثانیه؛ مثلا «۲ ساعت و ۳ دقیقه و ۱۵ ثانیه» (قالب هر واحد از پنل قابل تغییره)."""
     seconds = max(0, int(round(seconds)))
     h, rem = divmod(seconds, 3600)
     m, sec = divmod(rem, 60)
     parts = []
     if h:
-        parts.append(f'{h} ساعت')
+        parts.append(u('fa', 'admin_dur_hour', n=h))
     if m:
-        parts.append(f'{m} دقیقه')
+        parts.append(u('fa', 'admin_dur_minute', n=m))
     if sec or not parts:
-        parts.append(f'{sec} ثانیه')
-    return ' و '.join(parts)
+        parts.append(u('fa', 'admin_dur_second', n=sec))
+    return (' ' + u('fa', 'admin_dur_and') + ' ').join(parts)
 
 
 def build_topup_timing_text(requested_at, paid_at):
     """بلوک زمان‌بندی برای پیام ادمین (هم رسید ریالی هم رمزارز): زمان درخواست مبلغ، زمان ارسال رسید/هش و فاصله‌ی بینشون."""
-    lines = ['\n⏱ <b>زمان‌بندی</b>']
+    lines = ['\n' + u('fa', 'admin_timing_title')]
     if requested_at:
-        lines.append('🕐 درخواست مبلغ واریزی: <code>' + fmt_iran_datetime(requested_at) + '</code>')
+        lines.append(u('fa', 'admin_timing_requested', time=fmt_iran_datetime(requested_at)))
     else:
-        lines.append('🕐 درخواست مبلغ واریزی: نامشخص')
-    lines.append('🕑 ارسال رسید/هش: <code>' + fmt_iran_datetime(paid_at) + '</code>')
+        lines.append(u('fa', 'admin_timing_requested_unknown'))
+    lines.append(u('fa', 'admin_timing_paid', time=fmt_iran_datetime(paid_at)))
     if requested_at:
-        lines.append('⌛️ مدت از درخواست تا واریز: <b>' + fmt_duration_fa(paid_at - requested_at) + '</b>')
+        lines.append(u('fa', 'admin_timing_elapsed', duration=fmt_duration_fa(paid_at - requested_at)))
     return '\n'.join(lines)
 
 
@@ -3397,14 +3459,14 @@ def build_quantity_screen(chat_id, step_data):
     kb = {
         'inline_keyboard': [
             [
-                {'text': '➖', 'callback_data': 'qty_gb_dec'},
+                {'text': u(chat_id, 'btn_qty_minus'), 'callback_data': 'qty_gb_dec'},
                 {'text': '📶 ' + str(gb) + ' ' + u(chat_id, 'unit_gb'), 'callback_data': 'qty_noop'},
-                {'text': '➕', 'callback_data': 'qty_gb_inc'},
+                {'text': u(chat_id, 'btn_qty_plus'), 'callback_data': 'qty_gb_inc'},
             ],
             [
-                {'text': '➖', 'callback_data': 'qty_days_dec'},
+                {'text': u(chat_id, 'btn_qty_minus'), 'callback_data': 'qty_days_dec'},
                 {'text': '⏳ ' + str(days) + ' ' + u(chat_id, 'unit_day'), 'callback_data': 'qty_noop'},
-                {'text': '➕', 'callback_data': 'qty_days_inc'},
+                {'text': u(chat_id, 'btn_qty_plus'), 'callback_data': 'qty_days_inc'},
             ],
             [{'text': u(chat_id, 'qty_continue'), 'callback_data': 'qty_confirm'}],
             [{'text': u(chat_id, 'btn_cancel'), 'callback_data': 'menu'}],
@@ -3694,19 +3756,7 @@ def send_crypto_topup_info(chat_id, amount, coin):
     # (حداقل ۴ و حداکثر ۸ رقم) تا برای کوین‌های گرون مثل بیت‌کوین مبلغ واریزی چند برابر نشه.
     coin_amount = round_coin_amount(amount, price)
     # Memo/Comment فقط وقتی تو پنل پر شده باشه نشون داده می‌شه؛ خالی باشه هیچی نمایش داده نمی‌شه
-    memo = str(coin.get('memo') or '').strip()
-    if memo:
-        memo_line = ('\n📝 Memo / Comment:\n<code>%s</code>\n\n⚠️ حتماً Memo رو هم دقیقاً بنویسید، وگرنه واریزی شناسایی نمی‌شه.\n'
-                     if get_user_lang(chat_id) != 'en' else
-                     '\n📝 Memo / Comment:\n<code>%s</code>\n\n⚠️ You must include this memo, otherwise the deposit cannot be identified.\n') % _html.escape(memo)
-    else:
-        memo_line = ''
-    network = str(coin.get('network') or '').strip()
-    if network:
-        network_line = (('🌐 شبکه: <b>%s</b>\n(حتماً از همین شبکه واریز کنید)\n\n' if get_user_lang(chat_id) != 'en'
-                         else '🌐 Network: <b>%s</b>\n(send only on this network)\n\n') % _html.escape(network))
-    else:
-        network_line = ''
+    memo_line, network_line = _crypto_memo_network_lines(chat_id, coin)
     user_steps[str(chat_id)] = {'step': 'waiting_receipt', 'amount': amount, 'method': 'crypto',
                                 'requested_at': time.time(), 'coin_label': coin['label'], 'coin_amount': coin_amount, 'price': price,
                                 'coin_symbol': coin['symbol']}
@@ -3739,20 +3789,10 @@ def parse_coin_amount_text(text):
 
 
 def _crypto_memo_network_lines(chat_id, coin):
-    en = get_user_lang(chat_id) == 'en'
     memo = str(coin.get('memo') or '').strip()
-    if memo:
-        memo_line = (('\n📝 Memo / Comment:\n<code>%s</code>\n\n⚠️ You must include this memo, otherwise the deposit cannot be identified.\n' if en else
-                      '\n📝 Memo / Comment:\n<code>%s</code>\n\n⚠️ حتماً Memo رو هم دقیقاً بنویسید، وگرنه واریزی شناسایی نمی‌شه.\n')
-                     % _html.escape(memo))
-    else:
-        memo_line = ''
+    memo_line = ('\n' + u(chat_id, 'crypto_memo_line', memo=_html.escape(memo)) + '\n') if memo else ''
     network = str(coin.get('network') or '').strip()
-    if network:
-        network_line = (('🌐 Network: <b>%s</b>\n(send only on this network)\n\n' if en else
-                         '🌐 شبکه: <b>%s</b>\n(حتماً از همین شبکه واریز کنید)\n\n') % _html.escape(network))
-    else:
-        network_line = ''
+    network_line = (u(chat_id, 'crypto_network_line', network=_html.escape(network)) + '\n\n') if network else ''
     return memo_line, network_line
 
 
@@ -4016,7 +4056,7 @@ def _action_reseller_menu(chat_id):
         return
     _, _api_key, _secret_hash, gb_balance, price_per_gb, status, _created = row
     uname = get_reseller_username(chat_id)
-    creds_line = (f'👤 نام کاربری پنل: <code>{uname}</code>' if uname else u(chat_id, 'reseller_creds_missing'))
+    creds_line = (u(chat_id, 'reseller_creds_line', username=uname) if uname else u(chat_id, 'reseller_creds_missing'))
     status_label = u(chat_id, 'reseller_status_active') if status == 'active' else u(chat_id, 'reseller_status_blocked')
     send_message(
         chat_id,
@@ -4400,7 +4440,7 @@ def main_menu(chat_id, note=None):
     # فقط یک‌بار (تا وقتی سبک دوباره عوض نشه) انجام می‌شه.
     if get_user_kb_style(chat_id) != style:
         if style == 'inline':
-            send_message(chat_id, '⌨️', reply_markup={'remove_keyboard': True})
+            send_message(chat_id, u(chat_id, 'kb_removed_note'), reply_markup={'remove_keyboard': True})
         set_user_kb_style(chat_id, style)
 
     if style == 'inline':
@@ -4419,9 +4459,9 @@ def main_menu(chat_id, note=None):
     # دکمه‌ی مخصوص ادمین (برای بقیه‌ی کاربرها هیچ‌وقت نمایش داده نمی‌شه)
     if chat_id == ADMIN_ID:
         if style == 'inline':
-            keyboard['inline_keyboard'].append([{'text': ADMIN_ADD_CHANNEL_LABEL, 'callback_data': 'admin_channels'}])
+            keyboard['inline_keyboard'].append([{'text': admin_add_channel_label(), 'callback_data': 'admin_channels'}])
         else:
-            keyboard['keyboard'].append([{'text': ADMIN_ADD_CHANNEL_LABEL}])
+            keyboard['keyboard'].append([{'text': admin_add_channel_label()}])
 
     ct = get_config_types()
     if get_user_lang(chat_id) == 'en':
@@ -4485,10 +4525,11 @@ def network_diagnostic():
 import string as _string
 
 _TEXT_GROUP_RULES = [
+    (('menu_btn_', 'ctype_btn_'), '🔘 دکمه‌های منوی اصلی و نوع سرویس'),
     (('reseller_', 'btn_reseller', 'tier_line', 'price_range'), '🧑‍💼 فروشندگی (ریسلر)'),
     (('referral_', 'btn_referral'), '🎁 دعوت دوستان'),
     (('admin_', 'config_note', 'no_username', 'disabled_feature'), '🛠 پیام‌های ادمین و سیستمی'),
-    (('qty_', 'ask_label', 'invoice_', 'btn_confirm_purchase', 'btn_cancel_purchase', 'btn_apply_discount',
+    (('qty_', 'btn_qty', 'ask_label', 'invoice_', 'btn_confirm_purchase', 'btn_cancel_purchase', 'btn_apply_discount',
       'discount_', 'building_config', 'insufficient_balance', 'purchase_success', 'output_label',
       'proto_unavailable', 'dns_unavailable', 'server_error', 'buy_menu', 'btn_buy', 'svc_',
       'btn_reorder', 'reorder_', 'recentorders', 'btn_recentorders', 'price_unit_suffix'), '🛍 خرید، فاکتور و سفارشات'),
@@ -4497,16 +4538,16 @@ _TEXT_GROUP_RULES = [
       'btn_myconfigs'), '🗂 کانفیگ‌های من و مدیریت'),
     (('delete_', 'btn_delete'), '🗑 حذف کانفیگ'),
     (('trial_', 'btn_trial'), '🧪 تست رایگان'),
-    (('topup_', 'btn_topup', 'number_only_error'), '💠 شارژ کیف پول'),
+    (('topup_', 'btn_topup', 'number_only_error', 'crypto_'), '💠 شارژ کیف پول'),
     (('support_', 'btn_support'), '🎧 پشتیبانی'),
     (('account_', 'btn_account'), '👤 حساب من'),
     (('guide_', 'plat_', 'btn_guide'), '📲 اپ و دانلود'),
     (('lang_', 'btn_language'), '🌐 زبان'),
-    (('welcome_', 'main_menu'), '🏠 منوی اصلی و خوش‌آمدگویی'),
+    (('welcome_', 'main_menu', 'kb_'), '🏠 منوی اصلی و خوش‌آمدگویی'),
     (('cur', 'unit_'), '🔢 واحدها'),
 ]
 _GROUP_DISPLAY_ORDER = [
-    '🏠 منوی اصلی و خوش‌آمدگویی', '🛍 خرید، فاکتور و سفارشات', '🗂 کانفیگ‌های من و مدیریت', '🗑 حذف کانفیگ',
+    '🔘 دکمه‌های منوی اصلی و نوع سرویس', '🏠 منوی اصلی و خوش‌آمدگویی', '🛍 خرید، فاکتور و سفارشات', '🗂 کانفیگ‌های من و مدیریت', '🗑 حذف کانفیگ',
     '🧪 تست رایگان', '💠 شارژ کیف پول', '🎧 پشتیبانی', '👤 حساب من', '📲 اپ و دانلود', '🌐 زبان',
     '🧑‍💼 فروشندگی (ریسلر)', '🎁 دعوت دوستان', '🛠 پیام‌های ادمین و سیستمی', '🔢 واحدها', '🔘 دکمه‌ها و سایر',
 ]
@@ -4544,6 +4585,15 @@ def build_text_registry():
     # دکمه‌های اصلی منو و نام نوع سرویس‌های فارسی تو صفحه‌ی «ظاهر ربات» (با ترتیب) مدیریت می‌شن
     skip_fa = {'btn_recentorders', 'btn_language', 'btn_reseller', 'btn_referral'}
     fa_items = []
+    # دکمه‌های منوی اصلی و نوع سرویس‌ها (فارسی) تو settings زیر کلیدهای قدیمی btn_<key> و
+    # ctype_label_<key> ذخیره می‌شن (همون چیزی که صفحه‌ی «دکمه‌ها و ظاهر» هم می‌نویسه)؛
+    # این‌جا هم می‌آریمشون تا همه‌ی دکمه‌ها یه‌جا و کنار هم قابل ویرایش باشن.
+    for key, default_label, _fn in BUTTON_ACTIONS:
+        fa_items.append({'k': 'menu_btn_' + key, 's': 'btn_' + key, 'd': default_label, 'p': [],
+                         'g': _text_group('menu_btn_' + key)})
+    for key, default_label in CONFIG_TYPE_DEFAULT_LABELS.items():
+        fa_items.append({'k': 'ctype_btn_' + key, 's': 'ctype_label_' + key, 'd': default_label, 'p': [],
+                         'g': _text_group('ctype_btn_' + key)})
     for k, v in fa_defaults.items():
         if k in skip_fa or k.startswith('svc_'):
             continue
@@ -4581,6 +4631,22 @@ def sync_text_registry():
         print('⚠️ ثبت رجیستری متن‌ها برای پنل انجام نشد:', e)
 
 
+def registry_watcher(interval=600):
+    """هر چند دقیقه رجیستری متن‌ها رو دوباره تو دیتابیس می‌نویسه (اگه عوض شده باشه یا
+    پاک شده باشه)، تا صفحه‌ی «متن‌های ربات» پنل همیشه کامل باشه و حتماً لازم نباشه بات
+    ری‌استارت بشه. اگه ثبت اولیه موقع استارت ناموفق بوده هم همین‌جا جبران می‌شه."""
+    last = None
+    while True:
+        time.sleep(interval)
+        try:
+            payload = json.dumps(build_text_registry(), ensure_ascii=False, sort_keys=True)
+            if payload != last:
+                _save_registry(payload)
+                last = payload
+        except Exception as e:
+            print('⚠️ همگام‌سازی دوره‌ای رجیستری متن‌ها ناموفق بود:', e)
+
+
 def commands_watcher():
     """هر ۶۰ ثانیه چک می‌کنه توضیح دستورات / از پنل عوض شده یا نه و اگه شده، دوباره ثبتش می‌کنه."""
     try:
@@ -4605,6 +4671,7 @@ network_diagnostic()
 delete_webhook()
 set_bot_commands()
 threading.Thread(target=commands_watcher, daemon=True).start()
+threading.Thread(target=registry_watcher, daemon=True).start()
 threading.Thread(target=crypto_deposit_watcher, daemon=True).start()
 print('✅ ربات با موفقیت اجرا شد.')
 last_update_id = 0
@@ -5186,7 +5253,7 @@ def process_update(update):
         if text == '/nobitexcheck' and chat_id == ADMIN_ID:
             send_message(chat_id, nobitex_check_report())
 
-        elif chat_id == ADMIN_ID and text in (ADMIN_ADD_CHANNEL_LABEL, '/channels'):
+        elif chat_id == ADMIN_ID and text in (admin_add_channel_label(), '/channels'):
             user_steps[str(chat_id)] = {}
             admin_channels_panel(chat_id)
 
@@ -5506,7 +5573,7 @@ def process_update(update):
                                   coin=_html.escape(str(step.get('coin_label'))),
                                   price=f"{step.get('price'):,.0f}")
                 if tx_hash:
-                    admin_caption += '\n🔗 هش تراکنش (Hash):\n<code>' + _html.escape(tx_hash) + '</code>'
+                    admin_caption += '\n' + u('fa', 'admin_topup_hash_line', tx_hash=_html.escape(tx_hash))
             else:
                 admin_caption = u('fa', 'admin_topup_request', divider=DIVIDER, user_id=str(chat_id),
                                   amount=f'{amount:,}', req_id=str(req_id))
@@ -5588,8 +5655,9 @@ def process_update(update):
 #   GATE_FAIL_OPEN : اگه اکانت هنوز وصل نیست/چک جواب نداد: 1 = کاربر رد شه، 0 = بسته بشه
 # دستورهای ادمین: /start (لاگین)، /gatestatus، /gatedisconnect، /cancel
 #
-# نکته: سشن لاگین و تنظیمات رو دیسکِ همین سرور ذخیره می‌شن (gate_session*، gate_config.json).
-# اگه دیسک با هر دیپلوی پاک بشه، بعدش باید دوباره /start بزنی و لاگین کنی.
+# نکته: سشن لاگین و شماره علاوه بر دیسک، تو دیتابیس (جدول gate_storage) هم ذخیره می‌شن؛ پس
+# با ریدیپلوی (که دیسک پاک می‌شه) دیگه لازم نیست دوباره لاگین کنی. فقط با /gatedisconnect
+# (خروج دستی) سشن از دیتابیس هم پاک می‌شه و دفعه‌ی بعد باید دوباره لاگین کنی.
 GATE_ENABLED = os.getenv("GATE_ENABLED", "1").strip() != "0"
 CHANNEL_LINK = os.getenv("CHANNEL_LINK", "https://splus.ir/skytunnel").strip()
 GATE_FAIL_OPEN = os.getenv("GATE_FAIL_OPEN", "1").strip() != "0"
@@ -5717,11 +5785,12 @@ def g_forget_channel(link):
         for k in [k for k in _member_cache if k[1] == link]:
             _member_cache.pop(k, None)
 
-G_CONTACT_KB = {
-    'keyboard': [[{'text': '📱 ارسال شماره من', 'request_contact': True}]],
-    'resize_keyboard': True,
-    'one_time_keyboard': True,
-}
+def g_contact_kb():
+    return {
+        'keyboard': [[{'text': u('fa', 'admin_btn_send_number'), 'request_contact': True}]],
+        'resize_keyboard': True,
+        'one_time_keyboard': True,
+    }
 G_REMOVE_KB = {'remove_keyboard': True}
 
 
@@ -6142,6 +6211,10 @@ async def g_userbot_main(phone, gen):
     cfg = _g_cfg_load()
     cfg['phone'] = phone
     _g_cfg_save(cfg)
+    g_save_session_to_db(force=True)          # با ریدیپلوی بعدی دیگه نخواد لاگین کنه
+    if not any(t.name == 'g_session_saver' for t in threading.enumerate()):
+        if not any(t.name == 'g_session_saver' for t in threading.enumerate()):
+            threading.Thread(target=g_session_saver, name='g_session_saver', daemon=True).start()
 
     try:
         me = client.get_me()
@@ -6178,13 +6251,140 @@ def g_start_userbot(phone):
     threading.Thread(target=g_userbot_thread, args=(phone, gen), daemon=True).start()
 
 
+# ---------------- ذخیره‌ی سشن لاگین تو دیتابیس (تا با ریدیپلوی از بین نره) ----------------
+_G_DB_KEY = 'session'
+_G_SKIP_SUFFIX = ('-journal', '-wal', '-shm')
+_g_last_saved_hash = {'h': None}
+
+
+@with_db_retry
+def _g_db_exec(sql, params=()):
+    conn = get_conn()
+    c = conn.cursor()
+    c.execute('CREATE TABLE IF NOT EXISTS gate_storage (name TEXT PRIMARY KEY, value TEXT)')
+    c.execute(sql, params)
+    row = c.fetchone() if sql.lstrip().upper().startswith('SELECT') else None
+    conn.commit()
+    conn.close()
+    return row
+
+
+def _g_session_files():
+    return [f for f in glob.glob(GATE_SESSION_NAME + '*') if not f.endswith(_G_SKIP_SUFFIX) and os.path.isfile(f)]
+
+
+def _g_read_file_consistent(path):
+    """محتوای فایل سشن؛ اگه SQLite باشه (و الان باز و در حال نوشتن)، با backup API یه کپی سالم می‌گیره."""
+    import sqlite3
+    import tempfile
+    try:
+        with open(path, 'rb') as f:
+            head = f.read(16)
+        if head.startswith(b'SQLite format 3'):
+            fd, tmp = tempfile.mkstemp(suffix='.session')
+            os.close(fd)
+            try:
+                src = sqlite3.connect(path, timeout=5)
+                dst = sqlite3.connect(tmp)
+                with dst:
+                    src.backup(dst)
+                src.close()
+                dst.close()
+                with open(tmp, 'rb') as f:
+                    return f.read()
+            finally:
+                try:
+                    os.remove(tmp)
+                except Exception:
+                    pass
+    except Exception as e:
+        print('[gate] backup sqlite session failed, raw copy:', repr(e))
+    with open(path, 'rb') as f:
+        return f.read()
+
+
+def g_save_session_to_db(force=False):
+    """سشن + شماره رو (فشرده و base64) تو دیتابیس می‌نویسه. اگه از آخرین ذخیره تغییری نکرده، چیزی نمی‌نویسه."""
+    import base64
+    import zlib
+    try:
+        files = _g_session_files()
+        phone = _g_cfg_load().get('phone')
+        if not files or not phone:
+            return False
+        payload = {'phone': phone, 'files': {
+            os.path.basename(f): base64.b64encode(zlib.compress(_g_read_file_consistent(f), 6)).decode('ascii')
+            for f in files}}
+        raw = json.dumps(payload, sort_keys=True)
+        h = hashlib.sha256(raw.encode()).hexdigest()
+        if not force and _g_last_saved_hash['h'] == h:
+            return True
+        _g_db_exec("INSERT INTO gate_storage (name, value) VALUES (?, ?) "
+                   "ON CONFLICT(name) DO UPDATE SET value=excluded.value", (_G_DB_KEY, raw))
+        _g_last_saved_hash['h'] = h
+        return True
+    except Exception as e:
+        print('[gate] ذخیره‌ی سشن تو دیتابیس ناموفق بود:', repr(e))
+        return False
+
+
+def g_restore_session_from_db():
+    """اگه روی دیسک سشنی نیست (مثلاً بعد از ریدیپلوی)، از دیتابیس برش می‌گردونه. True یعنی چیزی برگشت."""
+    import base64
+    import zlib
+    try:
+        row = _g_db_exec('SELECT value FROM gate_storage WHERE name=?', (_G_DB_KEY,))
+        if not row or not row[0]:
+            return False
+        data = json.loads(row[0])
+        phone, files = data.get('phone'), data.get('files') or {}
+        if not phone or not files:
+            return False
+        for name, b64 in files.items():
+            name = os.path.basename(name)
+            if not name.startswith(GATE_SESSION_NAME):
+                continue
+            with open(name, 'wb') as f:
+                f.write(zlib.decompress(base64.b64decode(b64)))
+        cfg = _g_cfg_load()
+        cfg['phone'] = phone
+        _g_cfg_save(cfg)
+        print('[gate] سشن لاگین از دیتابیس بازیابی شد.')
+        return True
+    except Exception as e:
+        print('[gate] بازیابی سشن از دیتابیس ناموفق بود:', repr(e))
+        return False
+
+
+def g_forget_session_in_db():
+    try:
+        _g_db_exec('DELETE FROM gate_storage WHERE name=?', (_G_DB_KEY,))
+    except Exception as e:
+        print('[gate] پاک‌کردن سشن از دیتابیس ناموفق بود:', repr(e))
+    _g_last_saved_hash['h'] = None
+
+
+def g_session_saver():
+    """هر ۵ دقیقه، اگه اکانت وصله و سشن تغییر کرده، دوباره تو دیتابیس ذخیره‌ش می‌کنه."""
+    while True:
+        time.sleep(300)
+        try:
+            if _G.get('running'):
+                g_save_session_to_db()
+        except Exception as e:
+            print('[gate] session saver error:', repr(e))
+
+
 def g_boot_restore():
     if not (GATE_ENABLED and G_AVAILABLE):
         return
+    if not (_g_cfg_load().get('phone') and _g_session_files()):
+        g_restore_session_from_db()          # دیسک پاک شده؛ از دیتابیس بیار
     phone = _g_cfg_load().get('phone')
-    has_session = any(not f.endswith(('-journal', '-wal', '-shm')) for f in glob.glob(GATE_SESSION_NAME + '*'))
-    if phone and has_session:
+    if phone and _g_session_files():
         g_start_userbot(phone)
+        if not any(t.name == 'g_session_saver' for t in threading.enumerate()):
+            threading.Thread(target=g_session_saver, name='g_session_saver', daemon=True).start()
 
 
 async def _g_safe_disconnect(client):
@@ -6205,6 +6405,7 @@ def g_disconnect():
         _g_cfg_save({})
     except Exception:
         pass
+    g_forget_session_in_db()
     for f in glob.glob(GATE_SESSION_NAME + '*'):
         try:
             os.remove(f)
@@ -6353,7 +6554,7 @@ def admin_gate_handler(update):
         _G_TSTATE['phone'] = True
         send_message(chat_id, '📱 برای کنترل عضویت کاربرها تو کانال، شماره‌ی اکانتی رو بفرست که مالک/ادمین '
                               'کانال هست (با دکمه‌ی زیر یا دستی تایپ کن).\nبرای رد شدن /cancel بزن.',
-                     parse_mode=None, reply_markup=G_CONTACT_KB)
+                     parse_mode=None, reply_markup=g_contact_kb())
         return True
 
     if _G_TSTATE.get('phone'):
@@ -6366,7 +6567,7 @@ def admin_gate_handler(update):
             phone = g_normalize_phone((contact or {}).get('phone_number') or text)
             if not phone:
                 send_message(chat_id, 'این رو نتونستم به‌عنوان شماره بخونم. دوباره بفرست.',
-                             parse_mode=None, reply_markup=G_CONTACT_KB)
+                             parse_mode=None, reply_markup=g_contact_kb())
                 return True
             _G_TSTATE.pop('phone', None)
             print('[gate] شماره از ادمین دریافت شد؛ شروع لاگین اکانت:', phone)
@@ -6377,7 +6578,7 @@ def admin_gate_handler(update):
         # پیامی که نه شماره بود نه متن (مثلاً ساختار غیرمنتظره‌ی contact): بی‌صدا ردش نکن
         print('[gate] پیام نامعتبر تو مرحله‌ی شماره؛ کلیدهای پیام:', list(m.keys()))
         send_message(chat_id, 'نتونستم شماره رو بخونم. با دکمه‌ی «ارسال شماره من» یا تایپ دستی بفرست '
-                              '(برای رد شدن /cancel).', parse_mode=None, reply_markup=G_CONTACT_KB)
+                              '(برای رد شدن /cancel).', parse_mode=None, reply_markup=g_contact_kb())
         return True
     return False
 
@@ -6459,7 +6660,6 @@ def join_gate(update):
 
 
 # ---------------- پنل ادمین: اضافه/حذف کانال‌های عضویت اجباری ----------------
-ADMIN_ADD_CHANNEL_LABEL = '➕ اضافه کردن کانال'
 
 
 def _ch_hash(link):
@@ -6497,10 +6697,10 @@ def admin_channels_panel(chat_id, note=None):
         text += '\n\nکاربر باید عضو همه‌ی این کانال‌ها باشه.'
     if not _G['running']:
         text += '\n\n⚠️ اکانت لاگین نیست؛ اول با /start لاگینش کن.'
-    rows = [[{'text': '➕ افزودن کانال جدید', 'callback_data': 'admin_ch_add'}]]
+    rows = [[{'text': u('fa', 'admin_btn_channel_add'), 'callback_data': 'admin_ch_add'}]]
     for i, lk in enumerate(links, 1):
         nm = _g_parse_channel(lk)
-        rows.append([{'text': f'🗑 حذف {i}' + (f' (@{nm})' if isinstance(nm, str) else ''),
+        rows.append([{'text': u('fa', 'admin_btn_channel_del', i=i, name=(f' (@{nm})' if isinstance(nm, str) else '')),
                       'callback_data': 'admin_ch_del_' + _ch_hash(lk)}])
     send_message(chat_id, text, parse_mode=None, reply_markup={'inline_keyboard': rows})
 

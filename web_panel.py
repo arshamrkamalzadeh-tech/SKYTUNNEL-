@@ -3157,6 +3157,11 @@ def appearance_page():
 
         <h3>💬 متن‌های ربات</h3>
         <p class="muted" style="font-size:12.5px;margin:0 0 10px;">همه‌ی متن‌های ربات (فارسی و انگلیسی؛ پیام‌ها، فاکتور، دکمه‌های داخل پیام، پیام‌های ادمین و ...) در صفحه‌ی <a href="{url_for('texts_page')}">📝 همه‌ی متن‌های ربات</a> قابل ویرایش‌اند.</p>
+        <div class="flex" style="margin:0 0 14px;">
+          <a class="btn secondary" href="{url_for('texts_page', lang='fa', view='buttons')}">🔘 ویرایش همه‌ی دکمه‌ها (فارسی)</a>
+          <a class="btn secondary" href="{url_for('texts_page', lang='en', view='buttons')}">🔘 All buttons (English)</a>
+          <a class="btn secondary" href="{url_for('texts_page', lang='fa', view='messages')}">💬 ویرایش همه‌ی پیام‌ها</a>
+        </div>
 
         <h3>🔘 دکمه‌های منوی اصلی</h3>
         <p class="muted" style="font-size:12.5px;margin:0 0 10px;">با فلش‌ها ترتیبشون رو عوض کن، تو کادر هم اسم دلخواه رو بنویس؛ با «ذخیره‌ی تغییرات» پایین صفحه هر دو با هم ذخیره می‌شن.</p>
@@ -3263,7 +3268,7 @@ TEXTS_CSS_JS = """
 </style>
 <script>
   function insertAt(btn) {
-    var ta = btn.closest('.txt').querySelector('textarea');
+    var ta = btn.closest('.txt').querySelector('textarea, input[type=text]');
     var ph = btn.getAttribute('data-ph');
     var s = ta.selectionStart || 0, e = ta.selectionEnd || 0;
     ta.value = ta.value.slice(0, s) + ph + ta.value.slice(e);
@@ -3271,7 +3276,7 @@ TEXTS_CSS_JS = """
   }
   function resetTxt(btn) {
     var box = btn.closest('.txt');
-    box.querySelector('textarea').value = box.getAttribute('data-default');
+    box.querySelector('textarea, input[type=text]').value = box.getAttribute('data-default');
   }
   function filterTexts() {
     var q = document.getElementById('q').value.trim().toLowerCase();
@@ -3293,10 +3298,22 @@ TEXTS_CSS_JS = """
 """
 
 
+_BUTTON_KEY_PREFIXES = ("btn_", "menu_btn_", "ctype_btn_", "lang_btn_", "plat_", "svc_", "admin_btn_")
+_BUTTON_KEYS_EXACT = {"qty_continue", "ask_label_skip"}
+
+
+def is_button_key(key):
+    """کلیدهایی که متن یه «دکمه» هستن (نه پیام)؛ برای فیلتر «فقط دکمه‌ها» تو صفحه‌ی متن‌ها."""
+    return key in _BUTTON_KEYS_EXACT or key.startswith(_BUTTON_KEY_PREFIXES)
+
+
 @app.route("/texts")
 @login_required
 def texts_page():
     lang = "en" if request.args.get("lang") == "en" else "fa"
+    view = request.args.get("view", "all")
+    if view not in ("all", "buttons", "messages"):
+        view = "all"
     registry = load_text_registry()
     if not registry:
         content = """
@@ -3309,6 +3326,10 @@ def texts_page():
 
     all_settings = get_all_settings()
     items = registry.get(lang, [])
+    if view == "buttons":
+        items = [it for it in items if is_button_key(it["k"])]
+    elif view == "messages":
+        items = [it for it in items if not is_button_key(it["k"])]
     by_group = {}
     for it in items:
         by_group.setdefault(it["g"], []).append(it)
@@ -3322,6 +3343,7 @@ def texts_page():
             overridden = setting in all_settings
             value = all_settings.get(setting, default)
             rows = max(2, min(14, value.count("\n") + 2, 14))
+            as_button = is_button_key(key)
             chips = "".join(
                 f'<button type="button" class="chip" data-ph="{{{esc(p)}}}" onclick="insertAt(this)">{{{esc(p)}}}</button>'
                 for p in it.get("p", [])
@@ -3331,12 +3353,16 @@ def texts_page():
             ref_html = f'<div class="ref">متن فارسی (مرجع):\n{esc(ref)}</div>' if (ref and not default) else ""
             ph_attr = f' placeholder="{esc(ref)}"' if (ref and not default) else ""
             badge = '<span class="badge on">سفارشی</span>' if overridden else ""
+            if as_button:
+                field_html = f'<input type="text" name="t__{esc(setting)}" value="{esc(value)}" maxlength="64"{ph_attr}>'
+            else:
+                field_html = f'<textarea name="t__{esc(setting)}" rows="{rows}"{ph_attr}>{esc(value)}</textarea>'
             search = esc((key + " " + default + " " + value + " " + ref).lower())
             boxes += f"""
             <div class="txt" data-default="{esc(default)}" data-search="{search}">
               <label>{badge}<code class="key">{esc(key)}</code></label>
               {chips_html}
-              <textarea name="t__{esc(setting)}" rows="{rows}"{ph_attr}>{esc(value)}</textarea>
+              {field_html}
               {ref_html}
               <div class="txt-actions"><button type="button" class="secondary" onclick="resetTxt(this)">↩ پیش‌فرض</button></div>
             </div>"""
@@ -3344,6 +3370,7 @@ def texts_page():
 
     tab_fa = "btn" if lang == "fa" else "btn secondary"
     tab_en = "btn" if lang == "en" else "btn secondary"
+    vt = {v: ("btn" if view == v else "btn secondary") for v in ("all", "buttons", "messages")}
     note_en = ("<p class='muted' style='font-size:12.5px;'>متن‌هایی که ترجمه‌ی انگلیسی ندارن (کادرشون خالیه) فعلاً برای کاربران انگلیسی‌زبان "
                "به‌صورت فارسی نمایش داده می‌شن؛ اگه ترجمه‌شون رو بنویسید جایگزین می‌شه.</p>") if lang == "en" else ""
 
@@ -3351,8 +3378,13 @@ def texts_page():
     {TEXTS_CSS_JS}
     <div class="panel">
       <div class="flex" style="margin-bottom:12px;">
-        <a class="{tab_fa}" href="{url_for('texts_page', lang='fa')}">🇮🇷 فارسی</a>
-        <a class="{tab_en}" href="{url_for('texts_page', lang='en')}">🇬🇧 English</a>
+        <a class="{tab_fa}" href="{url_for('texts_page', lang='fa', view=view)}">🇮🇷 فارسی</a>
+        <a class="{tab_en}" href="{url_for('texts_page', lang='en', view=view)}">🇬🇧 English</a>
+      </div>
+      <div class="flex" style="margin-bottom:12px;">
+        <a class="{vt['all']}" href="{url_for('texts_page', lang=lang, view='all')}">همه</a>
+        <a class="{vt['buttons']}" href="{url_for('texts_page', lang=lang, view='buttons')}">🔘 فقط دکمه‌ها</a>
+        <a class="{vt['messages']}" href="{url_for('texts_page', lang=lang, view='messages')}">💬 فقط پیام‌ها</a>
       </div>
       <input type="text" id="q" placeholder="🔎 جستجو در متن‌ها (کلید یا بخشی از متن)..." oninput="filterTexts()">
       <small class="muted" id="count"></small>
@@ -3366,10 +3398,11 @@ def texts_page():
     </div>
     <form method="post" action="{url_for('texts_save')}">
       <input type="hidden" name="lang" value="{lang}">
+      <input type="hidden" name="view" value="{view}">
       {groups_html}
       <div class="savebar"><button type="submit" class="block">💾 ذخیره‌ی تغییرات ({'فارسی' if lang == 'fa' else 'English'})</button></div>
     </form>
-    <p><small class="muted">دکمه‌های اصلی منو، نام نوع سرویس‌های فارسی و ترتیبشان در صفحه‌ی «متن‌ها و ظاهر ربات» هستند.</small></p>
+    <p><small class="muted">دکمه‌های منوی اصلی و نام نوع سرویس‌ها (فارسی) هم همین‌جا در گروه «🔘 دکمه‌های منوی اصلی و نوع سرویس» قابل ویرایش‌اند؛ فقط «ترتیب» دکمه‌ها در صفحه‌ی «دکمه‌ها و ظاهر» تنظیم می‌شود.</small></p>
     """
     return render_page("همه‌ی متن‌های ربات", "texts", content)
 
@@ -3378,10 +3411,13 @@ def texts_page():
 @login_required
 def texts_save():
     lang = "en" if request.form.get("lang") == "en" else "fa"
+    view = request.form.get("view", "all")
+    if view not in ("all", "buttons", "messages"):
+        view = "all"
     registry = load_text_registry()
     if not registry:
         flash("⚠️ لیست متن‌ها از ربات دریافت نشده؛ ربات را ری‌استارت کنید.")
-        return redirect(url_for("texts_page", lang=lang))
+        return redirect(url_for("texts_page", lang=lang, view=view))
 
     current = get_all_settings()
     saved = reset = 0
@@ -3414,7 +3450,7 @@ def texts_save():
         flash("⚠️ ذخیره نشد — " + e)
     if len(errors) > 8:
         flash(f"⚠️ و {len(errors) - 8} خطای دیگر.")
-    return redirect(url_for("texts_page", lang=lang))
+    return redirect(url_for("texts_page", lang=lang, view=view))
 
 
 DISCOUNT_LIST_HTML_HEADER = ""
