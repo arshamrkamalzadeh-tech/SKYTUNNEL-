@@ -936,6 +936,42 @@ UI_TEXT['fa'].update({
     'join_check_error': '⚠️ الان نمی‌تونم عضویت شما رو بررسی کنم. چند لحظه دیگه دوباره «✅ عضو شدم» رو بزنید.',
     'join_ok': '✅ عضویت شما تأیید شد. خوش اومدید!',
 })
+UI_TEXT['fa'].update({
+    'btn_referral': '🎁 دعوت دوستان',
+    'referral_intro': (
+        '🎁 <b>دعوت دوستان</b>\n{divider}\n'
+        '{reward_line}\n\n'
+        '🔗 لینک دعوت اختصاصی شما:\n<code>{link}</code>\n\n'
+        '👥 دعوت‌شده‌ها: <b>{invited}</b>\n'
+        '✅ پاداش‌گرفته‌ها: <b>{rewarded}</b>\n'
+        '💰 مجموع پاداش شما: <b>{earned}</b> تومان'
+    ),
+    'referral_reward_line_purchase': '💰 هر دوستی که با لینک شما وارد ربات بشه و اولین خریدش رو انجام بده، <b>{amount}</b> تومان به کیف پول شما اضافه می‌شه.',
+    'referral_reward_line_join': '💰 به‌ازای هر دوستی که با لینک شما وارد ربات بشه، <b>{amount}</b> تومان به کیف پول شما اضافه می‌شه.',
+    'referral_invitee_bonus_line': '🎉 دوست شما هم <b>{bonus}</b> تومان هدیه می‌گیره.',
+    'referral_link_unavailable': '⚠️ الان نمی‌تونم لینک دعوت رو بسازم. چند لحظه دیگه دوباره امتحان کنید.',
+    'referral_reward_inviter': '🎉 یکی از دوستانتون که با لینک شما وارد شده بود اولین خریدش رو انجام داد!\n💰 <b>{amount}</b> تومان به کیف پول شما اضافه شد.',
+    'referral_reward_inviter_join': '🎉 یه نفر با لینک شما وارد ربات شد!\n💰 <b>{amount}</b> تومان به کیف پول شما اضافه شد.',
+    'referral_bonus_invitee': '🎁 به‌خاطر ورود با لینک دعوت، <b>{amount}</b> تومان هدیه به کیف پول شما اضافه شد.',
+})
+UI_TEXT['en'].update({
+    'btn_referral': '🎁 Invite Friends',
+    'referral_intro': (
+        '🎁 <b>Invite friends</b>\n{divider}\n'
+        '{reward_line}\n\n'
+        '🔗 Your personal invite link:\n<code>{link}</code>\n\n'
+        '👥 Invited: <b>{invited}</b>\n'
+        '✅ Rewarded: <b>{rewarded}</b>\n'
+        '💰 Total earned: <b>{earned}</b> Toman'
+    ),
+    'referral_reward_line_purchase': '💰 For every friend who joins with your link and makes their first purchase, <b>{amount}</b> Toman is added to your wallet.',
+    'referral_reward_line_join': '💰 For every friend who joins with your link, <b>{amount}</b> Toman is added to your wallet.',
+    'referral_invitee_bonus_line': '🎉 Your friend also gets <b>{bonus}</b> Toman as a gift.',
+    'referral_link_unavailable': '⚠️ Could not build the invite link right now. Please try again in a moment.',
+    'referral_reward_inviter': '🎉 A friend who joined with your link just made their first purchase!\n💰 <b>{amount}</b> Toman was added to your wallet.',
+    'referral_reward_inviter_join': '🎉 Someone joined the bot with your link!\n💰 <b>{amount}</b> Toman was added to your wallet.',
+    'referral_bonus_invitee': '🎁 You received <b>{amount}</b> Toman as a gift for joining with an invite link.',
+})
 UI_TEXT['en'].update({
     'join_required': (
         '📢 <b>Channel membership</b>\n{divider}\n'
@@ -1181,6 +1217,10 @@ def init_db():
     except Exception:
         pass
     c.execute('CREATE TABLE IF NOT EXISTS free_trials (user_id INTEGER PRIMARY KEY)')
+    # سیستم دعوت (رفرال): هر کاربر دعوت‌شده فقط یک‌بار پاداش می‌ده (invitee_id کلید اصلیه)
+    c.execute('''CREATE TABLE IF NOT EXISTS referral_rewards (
+        invitee_id INTEGER PRIMARY KEY, inviter_id INTEGER, inviter_amount INTEGER DEFAULT 0,
+        invitee_amount INTEGER DEFAULT 0, created_at TEXT)''')
     c.execute('''CREATE TABLE IF NOT EXISTS topup_requests (
         id INTEGER PRIMARY KEY AUTOINCREMENT,
         user_id INTEGER,
@@ -1212,6 +1252,7 @@ def init_db():
         "ALTER TABLE user_configs ADD COLUMN status TEXT DEFAULT 'active'",
         'ALTER TABLE users ADD COLUMN kb_style TEXT',
         'ALTER TABLE users ADD COLUMN lang TEXT',
+        'ALTER TABLE users ADD COLUMN referred_by INTEGER',
         "ALTER TABLE reseller_api_configs ADD COLUMN source TEXT DEFAULT 'api'",
         'ALTER TABLE resellers ADD COLUMN username TEXT',
         'ALTER TABLE resellers ADD COLUMN password_hash TEXT',
@@ -1345,6 +1386,161 @@ def add_user(user_id):
                (user_id, 0, datetime.now().isoformat()))
     conn.commit()
     conn.close()
+
+
+# ---------------------------------------------------------------------------
+# سیستم دعوت (رفرال)
+# لینک دعوت: https://splus.ir/<یوزرنیم بات>?start=ref_<آیدی عددی دعوت‌کننده>
+# تنظیمات از پنل ادمین (بخش «دعوت دوستان»): referral_enabled, referral_reward_inviter,
+# referral_reward_invitee, referral_on_join
+# ---------------------------------------------------------------------------
+def referral_enabled():
+    return get_setting('referral_enabled', '0') == '1'
+
+
+def _referral_int(key, default):
+    try:
+        return max(0, int(float(str(get_setting(key, str(default))).replace(',', ''))))
+    except Exception:
+        return default
+
+
+def get_referral_reward_inviter():
+    return _referral_int('referral_reward_inviter', 10000)
+
+
+def get_referral_reward_invitee():
+    return _referral_int('referral_reward_invitee', 0)
+
+
+def referral_on_join():
+    """0 = پاداش بعد از اولین خرید کاربر دعوت‌شده (پیش‌فرض)، 1 = همین که وارد ربات شد."""
+    return get_setting('referral_on_join', '0') == '1'
+
+
+def get_bot_username():
+    """یوزرنیم بات برای ساخت لینک دعوت."""
+    # یوزرنیم ثابت بات (می‌شه با متغیر محیطی BOT_USERNAME هم عوضش کرد)
+    return (os.getenv('BOT_USERNAME', '') or 'SKYTUNNELbot').strip().lstrip('@')
+
+
+def build_referral_link(user_id):
+    name = get_bot_username()
+    if not name:
+        return None
+    return f'https://splus.ir/{name}?start=ref_{user_id}'
+
+
+@with_db_retry
+def referral_user_exists(user_id):
+    conn = get_conn()
+    c = conn.cursor()
+    c.execute('SELECT 1 FROM users WHERE user_id=?', (user_id,))
+    row = c.fetchone()
+    conn.close()
+    return bool(row)
+
+
+@with_db_retry
+def register_referred_user(invitee_id, inviter_id):
+    """هر کاربر (تازه یا قدیمی) فقط یک‌بار می‌تونه دعوت‌شده‌ی کسی بشه: اگه تو دیتابیس نباشه ردیفش با
+    referred_by ساخته می‌شه، و اگه از قبل بوده ولی هنوز دعوت‌کننده‌ای نداره، همون‌جا ثبت می‌شه.
+    کسی که قبلاً با لینک دعوت ثبت شده، با لینک بعدی عوض نمی‌شه."""
+    conn = get_conn()
+    c = conn.cursor()
+    c.execute('INSERT OR IGNORE INTO users (user_id, wallet, joined_at, referred_by) VALUES (?, 0, ?, ?)',
+              (invitee_id, datetime.now().isoformat(), inviter_id))
+    c.execute('UPDATE users SET referred_by=? WHERE user_id=? AND referred_by IS NULL', (inviter_id, invitee_id))
+    conn.commit()
+    conn.close()
+
+
+@with_db_retry
+def get_referrer(user_id):
+    conn = get_conn()
+    c = conn.cursor()
+    c.execute('SELECT referred_by FROM users WHERE user_id=?', (user_id,))
+    row = c.fetchone()
+    conn.close()
+    return row[0] if row and row[0] else None
+
+
+@with_db_retry
+def referral_reward_given(invitee_id):
+    conn = get_conn()
+    c = conn.cursor()
+    c.execute('SELECT 1 FROM referral_rewards WHERE invitee_id=?', (invitee_id,))
+    row = c.fetchone()
+    conn.close()
+    return bool(row)
+
+
+@with_db_retry
+def save_referral_reward(invitee_id, inviter_id, inviter_amount, invitee_amount):
+    conn = get_conn()
+    c = conn.cursor()
+    c.execute('INSERT OR IGNORE INTO referral_rewards (invitee_id, inviter_id, inviter_amount, invitee_amount, created_at) '
+              'VALUES (?, ?, ?, ?, ?)', (invitee_id, inviter_id, inviter_amount, invitee_amount, datetime.now().isoformat()))
+    conn.commit()
+    conn.close()
+
+
+@with_db_retry
+def get_referral_stats(inviter_id):
+    """(تعداد دعوت‌شده‌ها, تعداد پاداش‌گرفته‌ها, مجموع پاداش به تومان)"""
+    conn = get_conn()
+    c = conn.cursor()
+    c.execute('SELECT COUNT(*) FROM users WHERE referred_by=?', (inviter_id,))
+    invited = (c.fetchone() or [0])[0] or 0
+    c.execute('SELECT COUNT(*), COALESCE(SUM(inviter_amount), 0) FROM referral_rewards WHERE inviter_id=?', (inviter_id,))
+    row = c.fetchone() or (0, 0)
+    conn.close()
+    return invited, row[0] or 0, row[1] or 0
+
+
+def capture_referral(update):
+    """قبل از هر چیز (حتی قبل از گیت عضویت اجباری) صدا زده می‌شه: اگه کاربر تازه با /start ref_<id>
+    وارد شده باشه، دعوت‌کننده‌اش ثبت می‌شه."""
+    try:
+        msg = update.get('message') or {}
+        text = (msg.get('text') or '').strip()
+        if not text.startswith('/start ') or not referral_enabled():
+            return
+        payload = text.split(None, 1)[1].strip()
+        if not payload.startswith('ref_') or not payload[4:].isdigit():
+            return
+        inviter = int(payload[4:])
+        invitee = (msg.get('chat') or {}).get('id')
+        if not invitee or inviter == invitee or not referral_user_exists(inviter):
+            return
+        if get_referrer(inviter) == invitee:   # دعوت دوطرفه (A→B و B→A) حساب نمی‌شه
+            return
+        register_referred_user(invitee, inviter)
+    except Exception as e:
+        print('⚠️ ثبت رفرال ناموفق بود:', e)
+
+
+def process_referral_reward(invitee_id, event):
+    """event: 'join' یا 'purchase'. فقط یک‌بار برای هر کاربر دعوت‌شده پاداش می‌ده."""
+    try:
+        if not referral_enabled():
+            return
+        if (event == 'join') != referral_on_join():
+            return
+        inviter = get_referrer(invitee_id)
+        if not inviter or referral_reward_given(invitee_id):
+            return
+        a_inviter, a_invitee = get_referral_reward_inviter(), get_referral_reward_invitee()
+        save_referral_reward(invitee_id, inviter, a_inviter, a_invitee)   # اول ثبت، تا دوبار پاداش نره
+        if a_inviter > 0:
+            update_wallet_db(inviter, a_inviter)
+            send_message(inviter, u(inviter, 'referral_reward_inviter_join' if event == 'join' else 'referral_reward_inviter',
+                                    amount=f'{a_inviter:,}'))
+        if a_invitee > 0:
+            update_wallet_db(invitee_id, a_invitee)
+            send_message(invitee_id, u(invitee_id, 'referral_bonus_invitee', amount=f'{a_invitee:,}'))
+    except Exception as e:
+        print('⚠️ پاداش رفرال داده نشد:', e)
 
 
 @with_db_retry
@@ -2141,6 +2337,7 @@ BOT_COMMANDS = [
     {'command': 'account', 'description': '👤 حساب من'},
     {'command': 'support', 'description': '🎧 پشتیبانی'},
     {'command': 'guide', 'description': '📲 اپ مخصوص کانفیگ‌ها'},
+    {'command': 'invite', 'description': '🎁 دعوت دوستان'},
 ]
 
 # دستورهای اسلش معادل دکمه‌های منو، به COMMAND_TO_ACTION_KEY (پایین‌تر، کنار
@@ -3239,6 +3436,25 @@ def action_language_menu(chat_id):
     send_message(chat_id, u(chat_id, 'lang_prompt'), reply_markup=kb)
 
 
+def action_referral(chat_id):
+    if not referral_enabled():
+        send_message(chat_id, u(chat_id, 'disabled_feature'))
+        return
+    link = build_referral_link(chat_id)
+    if not link:
+        send_message(chat_id, u(chat_id, 'referral_link_unavailable'))
+        return
+    a_inviter, a_invitee = get_referral_reward_inviter(), get_referral_reward_invitee()
+    reward_line = u(chat_id, 'referral_reward_line_join' if referral_on_join() else 'referral_reward_line_purchase',
+                    amount=f'{a_inviter:,}')
+    if a_invitee > 0:
+        reward_line += '\n' + u(chat_id, 'referral_invitee_bonus_line', bonus=f'{a_invitee:,}')
+    invited, rewarded, earned = get_referral_stats(chat_id)
+    send_message(chat_id, u(chat_id, 'referral_intro', divider=DIVIDER, reward_line=reward_line,
+                            link=_html.escape(link), invited=f'{invited:,}', rewarded=f'{rewarded:,}',
+                            earned=f'{earned:,}'))
+
+
 # هر آیتم: (کلید داخلی ثابت, متن پیش‌فرض دکمه, تابع اجراکننده)
 BUTTON_ACTIONS = [
     ('buy', '🛍 خرید کانفیگ', action_buy_menu),
@@ -3251,6 +3467,7 @@ BUTTON_ACTIONS = [
     ('guide', '📲 اپ مخصوص کانفیگ‌ها', action_guide),
     ('language', '🌐 تغییر زبان', action_language_menu),
     ('reseller', '🧑‍💼 فروشنده شو', action_reseller_menu),
+    ('referral', '🎁 دعوت دوستان', action_referral),
 ]
 
 # دستورهای اسلش معادل همون آیتم‌های منو (به کلید داخلی نگاشت می‌شن، نه متن دکمه؛
@@ -3267,6 +3484,7 @@ COMMAND_TO_ACTION_KEY = {
     '/guide': 'guide',
     '/app': 'guide',
     '/language': 'language',
+    '/invite': 'referral',
 }
 
 
@@ -3299,6 +3517,8 @@ def main_menu(chat_id, note=None):
     wallet = get_wallet_db(chat_id)
     labels = {key: get_button_label_for(chat_id, key, default_label) for key, default_label, _fn in BUTTON_ACTIONS}
     order = get_ordered_keys('menu_order_main', MAIN_MENU_DEFAULT_ORDER)
+    if not referral_enabled():
+        order = [k for k in order if k != 'referral']   # دکمه‌ی دعوت دوستان تا وقتی از پنل روشن نشده نمایش داده نمی‌شه
     style = get_keyboard_style()
 
     # تلگرام کیبورد ثابت (reply keyboard) رو یه لایه‌ی جدا از دکمه‌های شیشه‌ای
@@ -3389,6 +3609,7 @@ import string as _string
 
 _TEXT_GROUP_RULES = [
     (('reseller_', 'btn_reseller', 'tier_line', 'price_range'), '🧑‍💼 فروشندگی (ریسلر)'),
+    (('referral_', 'btn_referral'), '🎁 دعوت دوستان'),
     (('admin_', 'config_note', 'no_username', 'disabled_feature'), '🛠 پیام‌های ادمین و سیستمی'),
     (('qty_', 'ask_label', 'invoice_', 'btn_confirm_purchase', 'btn_cancel_purchase', 'btn_apply_discount',
       'discount_', 'building_config', 'insufficient_balance', 'purchase_success', 'output_label',
@@ -3410,7 +3631,7 @@ _TEXT_GROUP_RULES = [
 _GROUP_DISPLAY_ORDER = [
     '🏠 منوی اصلی و خوش‌آمدگویی', '🛍 خرید، فاکتور و سفارشات', '🗂 کانفیگ‌های من و مدیریت', '🗑 حذف کانفیگ',
     '🧪 تست رایگان', '💠 شارژ کیف پول', '🎧 پشتیبانی', '👤 حساب من', '📲 اپ و دانلود', '🌐 زبان',
-    '🧑‍💼 فروشندگی (ریسلر)', '🛠 پیام‌های ادمین و سیستمی', '🔢 واحدها', '🔘 دکمه‌ها و سایر',
+    '🧑‍💼 فروشندگی (ریسلر)', '🎁 دعوت دوستان', '🛠 پیام‌های ادمین و سیستمی', '🔢 واحدها', '🔘 دکمه‌ها و سایر',
 ]
 
 
@@ -3444,7 +3665,7 @@ def build_text_registry():
         fa_defaults[k] = v
 
     # دکمه‌های اصلی منو و نام نوع سرویس‌های فارسی تو صفحه‌ی «ظاهر ربات» (با ترتیب) مدیریت می‌شن
-    skip_fa = {'btn_recentorders', 'btn_language', 'btn_reseller'}
+    skip_fa = {'btn_recentorders', 'btn_language', 'btn_reseller', 'btn_referral'}
     fa_items = []
     for k, v in fa_defaults.items():
         if k in skip_fa or k.startswith('svc_'):
@@ -3750,6 +3971,8 @@ def process_update(update):
                             output_label=output_label, sub_url=res['sub_url'],
                         )
                         send_message(chat_id, success_text)
+                        if price and price > 0:
+                            process_referral_reward(chat_id, 'purchase')   # بعد از پیام موفقیت، تا خریدار معطل نشه
                     elif res.get('error_code') and 'proto_unavailable' in str(res.get('error_code')).lower():
                         send_message(chat_id, u(chat_id, 'proto_unavailable', ctype_label=ctype_label))
                     elif res.get('error_code') and any(
@@ -4082,6 +4305,7 @@ def process_update(update):
             add_user(chat_id)
             user_steps[str(chat_id)] = {}
             main_menu(chat_id)
+            process_referral_reward(chat_id, 'join')
 
         elif matched_action_key:
             get_action_handlers()[matched_action_key](chat_id)
@@ -5129,6 +5353,7 @@ def join_gate(update):
             user_steps[str(chat_id)] = {}
             send_message(chat_id, u(chat_id, 'join_ok'))
             main_menu(chat_id)
+            process_referral_reward(chat_id, 'join')
         elif status is False:
             send_message(chat_id, u(chat_id, 'join_not_yet'), reply_markup=join_keyboard(chat_id))
         else:
@@ -5169,6 +5394,7 @@ def safe_process_update(update):
 
     def _run():
         t0 = time.time()
+        capture_referral(update)   # قبل از گیت عضویت اجباری، تا لینک دعوت گم نشه
         try:
             track_activity(update)
         except Exception as e:
