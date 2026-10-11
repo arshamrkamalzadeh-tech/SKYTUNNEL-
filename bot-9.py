@@ -985,12 +985,12 @@ UI_TEXT['en'].update({
 UI_TEXT['fa'].update({
     'join_required': (
         '📢 <b>عضویت در کانال</b>\n{divider}\n'
-        'برای استفاده از ربات، اول باید عضو کانال ما بشید.\n\n'
+        'برای استفاده از ربات، اول باید عضو کانال(های) زیر بشید.\n\n'
         'بعد از عضویت، به ربات برگردید و دکمه‌ی «✅ عضو شدم» رو بزنید.'
     ),
     'btn_join_channel': '📢 عضویت در کانال',
     'btn_joined': '✅ عضو شدم',
-    'join_not_yet': '⚠️ هنوز عضو کانال نشدید. اول عضو بشید، بعد دکمه‌ی «✅ عضو شدم» رو بزنید.',
+    'join_not_yet': '⚠️ هنوز عضو همه‌ی کانال‌ها نشدید. کانال‌های زیر رو عضو بشید، بعد دکمه‌ی «✅ عضو شدم» رو بزنید.',
     'join_check_error': '⚠️ الان نمی‌تونم عضویت شما رو بررسی کنم. چند لحظه دیگه دوباره «✅ عضو شدم» رو بزنید.',
     'join_ok': '✅ عضویت شما تأیید شد. خوش اومدید!',
 })
@@ -1033,12 +1033,12 @@ UI_TEXT['en'].update({
 UI_TEXT['en'].update({
     'join_required': (
         '📢 <b>Channel membership</b>\n{divider}\n'
-        'To use this bot you must first join our channel.\n\n'
+        'To use this bot you must first join the channel(s) below.\n\n'
         'After joining, come back to the bot and tap "✅ I\'ve joined".'
     ),
     'btn_join_channel': '📢 Join the channel',
     'btn_joined': "✅ I've joined",
-    'join_not_yet': "⚠️ You haven't joined the channel yet. Join first, then tap \"✅ I've joined\".",
+    'join_not_yet': "⚠️ You haven't joined all the channels yet. Join the ones below, then tap \"✅ I've joined\".",
     'join_check_error': "⚠️ I can't verify your membership right now. Please tap \"✅ I've joined\" again in a moment.",
     'join_ok': '✅ Your membership is confirmed. Welcome!',
 })
@@ -4416,6 +4416,13 @@ def main_menu(chat_id, note=None):
             'resize_keyboard': True
         }
 
+    # دکمه‌ی مخصوص ادمین (برای بقیه‌ی کاربرها هیچ‌وقت نمایش داده نمی‌شه)
+    if chat_id == ADMIN_ID:
+        if style == 'inline':
+            keyboard['inline_keyboard'].append([{'text': ADMIN_ADD_CHANNEL_LABEL, 'callback_data': 'admin_channels'}])
+        else:
+            keyboard['keyboard'].append([{'text': ADMIN_ADD_CHANNEL_LABEL}])
+
     ct = get_config_types()
     if get_user_lang(chat_id) == 'en':
         text = u(
@@ -5137,6 +5144,16 @@ def process_update(update):
                 user_steps[str(chat_id)] = {'step': 'crypto_send_hash', 'req_id': req_id}
                 send_message(chat_id, u(chat_id, 'topup_hash_prompt'), reply_markup=cancel_kb(chat_id))
 
+        elif data == 'admin_channels' and chat_id == ADMIN_ID:
+            user_steps[str(chat_id)] = {}
+            admin_channels_panel(chat_id)
+
+        elif data == 'admin_ch_add' and chat_id == ADMIN_ID:
+            admin_add_channel_ask(chat_id)
+
+        elif data.startswith('admin_ch_del_') and chat_id == ADMIN_ID:
+            admin_remove_channel(chat_id, data[len('admin_ch_del_'):])
+
         elif data.startswith('topup_acc_') and chat_id == ADMIN_ID:
             req_id = int(data.split('_')[2])
             if not approve_topup_request(req_id):
@@ -5169,6 +5186,10 @@ def process_update(update):
         if text == '/nobitexcheck' and chat_id == ADMIN_ID:
             send_message(chat_id, nobitex_check_report())
 
+        elif chat_id == ADMIN_ID and text in (ADMIN_ADD_CHANNEL_LABEL, '/channels'):
+            user_steps[str(chat_id)] = {}
+            admin_channels_panel(chat_id)
+
         elif text == '/start' or text.startswith('/start '):
             add_user(chat_id)
             user_steps[str(chat_id)] = {}
@@ -5179,6 +5200,9 @@ def process_update(update):
             get_action_handlers()[matched_action_key](chat_id)
 
         # ---------------- step-based flows ----------------
+
+        elif step.get('step') == 'admin_add_channel' and chat_id == ADMIN_ID:
+            admin_add_channel_submit(chat_id, text)
 
         elif step.get('step') == 'ask_label':
             label = clean_label(text) or get_next_user_label()
@@ -5595,12 +5619,103 @@ except Exception:
     sp_events = None
 
 _G = {'running': False, 'starting': False, 'waiting': None, 'phone': None, 'account': None,
-      'client': None, 'loop': None, 'gen': 0, 'ch': None, 'ch_src': None,
-      'list_mode': None, 'last_refresh': 0.0, 'members': set()}
+      'client': None, 'loop': None, 'gen': 0,
+      # حالت چندکاناله: همه‌چیز بر اساس «لینک کانال» نگه داشته می‌شه
+      'chs': {}, 'modes': {}, 'refreshed': {}, 'members': {}}
 _G_ANSWERS = queue.Queue()
 _G_TSTATE = {}
-_member_cache = {}
+_member_cache = {}          # کلید: (user_id, لینک کانال)
 _member_cache_guard = threading.Lock()
+
+
+def _gm(link):
+    """مجموعه‌ی آیدی اعضای کش‌شده‌ی یک کانال."""
+    return _G['members'].setdefault(link, set())
+
+
+# ---------------- لیست کانال‌های عضویت اجباری (از داخل خود بات مدیریت می‌شه) ----------------
+# تو جدول settings با کلید gate_channels (JSON) ذخیره می‌شه. اگه هنوز هیچ‌وقت ست نشده باشه،
+# همون CHANNEL_LINK پیش‌فرض تنها کانال لیسته. اگه ادمین همه رو حذف کنه، لیست خالیه و عضویت اجباری اعمال نمی‌شه.
+_GATE_CH = {'list': None}
+_gate_ch_lock = threading.Lock()
+
+
+@with_db_retry
+def _gate_ch_load_db():
+    conn = get_conn()
+    c = conn.cursor()
+    c.execute("SELECT value FROM settings WHERE key='gate_channels'")
+    row = c.fetchone()
+    conn.close()
+    return row[0] if row else None
+
+
+@with_db_retry
+def _gate_ch_save_db(links):
+    conn = get_conn()
+    c = conn.cursor()
+    c.execute("INSERT INTO settings (key, value) VALUES ('gate_channels', ?) "
+              "ON CONFLICT(key) DO UPDATE SET value=excluded.value",
+              (json.dumps(links, ensure_ascii=False),))
+    conn.commit()
+    conn.close()
+
+
+def get_gate_channels():
+    with _gate_ch_lock:
+        if _GATE_CH['list'] is None:
+            links = None
+            try:
+                raw = _gate_ch_load_db()
+                if raw is not None:
+                    data = json.loads(raw)
+                    if isinstance(data, list):
+                        links = [str(x).strip() for x in data if str(x).strip()]
+            except Exception as e:
+                print('⚠️ خوندن لیست کانال‌های عضویت اجباری ناموفق بود:', e)
+                return [CHANNEL_LINK] if CHANNEL_LINK else []     # کش نمی‌شه؛ دفعه‌ی بعد دوباره تلاش می‌کنه
+            if links is None:
+                links = [CHANNEL_LINK] if CHANNEL_LINK else []
+            _GATE_CH['list'] = links
+        return list(_GATE_CH['list'])
+
+
+def set_gate_channels(links):
+    _gate_ch_save_db(list(links))
+    with _gate_ch_lock:
+        _GATE_CH['list'] = list(links)
+
+
+def _g_ch_name(link):
+    n = _g_parse_channel(link)
+    return str(n if n is not None else link).lower()
+
+
+def g_normalize_channel_link(raw):
+    """لینک یا @یوزرنیم → (لینک نرمال‌شده, یوزرنیم) یا None اگه معتبر نبود (لینک دعوت خصوصی هم پشتیبانی نمی‌شه)."""
+    s = str(raw or '').strip()
+    if not s or len(s) > 200:
+        return None
+    name = _g_parse_channel(s)
+    if name is None or isinstance(name, int) or not re.fullmatch(r'[\w.\-]{3,64}', str(name)):
+        return None
+    name = str(name)
+    if s.lower().startswith(('http://', 'https://')):
+        link = s.split('?')[0].rstrip('/')
+    elif '/' in s:
+        link = 'https://' + s.split('?')[0].rstrip('/')
+    else:
+        link = 'https://splus.ir/' + name
+    return link, name
+
+
+def g_forget_channel(link):
+    """وضعیت درون‌حافظه‌ای یه کانال حذف‌شده رو پاک می‌کنه."""
+    for k in ('chs', 'modes', 'refreshed', 'members'):
+        _G[k].pop(link, None)
+    with _member_cache_guard:
+        for k in [k for k in _member_cache if k[1] == link]:
+            _member_cache.pop(k, None)
 
 G_CONTACT_KB = {
     'keyboard': [[{'text': '📱 ارسال شماره من', 'request_contact': True}]],
@@ -5688,12 +5803,13 @@ if G_AVAILABLE:
 
 
 # ---------------- منطق یوزربات (async) ----------------
-async def g_get_channel(client):
-    if _G['ch'] is not None and _G['ch_src'] == CHANNEL_LINK:
-        return _G['ch']
+async def g_get_channel(client, link):
+    ch = _G['chs'].get(link)
+    if ch is not None:
+        return ch
     getter = getattr(client, 'get_entity', None) or getattr(client, 'get_chat')
-    ch = await getter(_g_parse_channel(CHANNEL_LINK))
-    _G['ch'], _G['ch_src'] = ch, CHANNEL_LINK
+    ch = await getter(_g_parse_channel(link))
+    _G['chs'][link] = ch
     return ch
 
 
@@ -5793,24 +5909,26 @@ async def g_list_members(client, ch):
             print('[gate] list_members error:', repr(e))
         n_lib = len(ids)
     ids |= await g_deep_search(client, ch, len(ids))
-    if _G.get('last_log_n') != len(ids):
-        _G['last_log_n'] = len(ids)
+    _lk = getattr(ch, 'id', None) or str(ch)
+    _ln = _G.setdefault('last_log_n_map', {})
+    if _ln.get(_lk) != len(ids):
+        _ln[_lk] = len(ids)
         print(f'[gate] members: raw={n_raw} lib={n_lib} total={len(ids)} channel={(getattr(ch, "title", None) or getattr(ch, "id", ch))!r}')
     return ids
 
 
-async def g_refresh_members(client, force=False):
+async def g_refresh_members(client, link, force=False):
     now = time.time()
-    if now - _G['last_refresh'] < (2 if force else 10):
-        return  # همین الان تازه شده؛ دوباره نزن
-    _G['last_refresh'] = now
-    ch = await g_get_channel(client)
+    if now - _G['refreshed'].get(link, 0.0) < (2 if force else 10):
+        return len(_gm(link))  # همین الان تازه شده؛ دوباره نزن
+    _G['refreshed'][link] = now
+    ch = await g_get_channel(client, link)
     ids = await g_list_members(client, ch)
     if ids:
-        _G['members'] = set(ids)
-        _G['list_mode'] = 'full'
+        _G['members'][link] = set(ids)
+        _G['modes'][link] = 'full'
     else:
-        _G['list_mode'] = 'live'
+        _G['modes'][link] = 'live'
     return len(ids)
 
 
@@ -5849,33 +5967,33 @@ def _g_is_member_participant(part):
     return not isinstance(part, (tl_types.ChannelParticipantLeft, tl_types.ChannelParticipantBanned))
 
 
-async def g_check_one(client, ch, uid, force=False):
+async def g_check_one(client, ch, link, uid, force=False):
     """True/False."""
     if force:
         # چک اجباری (/start یا دکمه‌ی «عضو شدم»): اول لیست رو تازه کن تا لفت‌دادن‌ها دیده بشن
         try:
-            await g_refresh_members(client, force=True)
+            await g_refresh_members(client, link, force=True)
         except Exception as e:
             print('[gate] forced refresh failed:', repr(e))
-    if uid in _G['members']:
+    if uid in _gm(link):
         return True
     # لیست قدیمیه (هر ۵ دقیقه همگام می‌شه)؛ قبل از هر کاری تازه‌اش کن
     if not force:
         try:
-            await g_refresh_members(client, force=False)
+            await g_refresh_members(client, link, force=False)
         except Exception as e:
             print('[gate] refresh before check failed:', repr(e))
-        if uid in _G['members']:
+        if uid in _gm(link):
             return True
     if _G.get('peruser_unsupported', os.getenv('GATE_PERUSER', '0').strip() != '1'):
         return False  # چک تکی پشتیبانی نمی‌شه و لیست تازه‌ست؛ الکی منتظر نمون
-    print(f'[gate] check uid={uid}: not in list (size={len(_G["members"])}, mode={_G["list_mode"]}, '
-          f'ids={sorted(_G["members"])})')
+    print(f'[gate] check uid={uid}: not in list (size={len(_gm(link))}, mode={_G["modes"].get(link)}, '
+          f'ids={sorted(_gm(link))})')
     user = await g_resolve_user(client, uid)
     if user is None:
         # اکانت هنوز این کاربر رو ندیده (مثلاً تازه عضو شده)؛ لیست رو تازه کن و دوباره تلاش کن
-        await g_refresh_members(client, force=force)
-        if uid in _G['members']:
+        await g_refresh_members(client, link, force=force)
+        if uid in _gm(link):
             return True
         user = await g_resolve_user(client, uid)
         if user is None:
@@ -5911,12 +6029,32 @@ async def g_check_one(client, ch, uid, force=False):
                 return False
             print('[gate] get_permissions error:', repr(e))
 
-    return uid in _G['members']
+    return uid in _gm(link)
 
 
-async def g_check_live(client, uid, force=False):
-    ch = await g_get_channel(client)
-    return await g_check_one(client, ch, uid, force=force)
+async def g_check_live(client, uid, link, force=False):
+    ch = await g_get_channel(client, link)
+    return await g_check_one(client, ch, link, uid, force=force)
+
+
+def _g_event_links(event):
+    """لینک کانال(های) مربوط به یه رویداد عضویت؛ اگه تشخیص داده نشه None."""
+    try:
+        cid = getattr(event, 'chat_id', None)
+        if cid is None:
+            return None
+        cid_s = str(abs(int(cid)))
+        hits = []
+        for lk, ch in list(_G['chs'].items()):
+            chid = getattr(ch, 'id', None)
+            if chid is None:
+                continue
+            chid_s = str(abs(int(chid)))
+            if cid_s == chid_s or cid_s.endswith(chid_s):
+                hits.append(lk)
+        return hits or None
+    except Exception:
+        return None
 
 
 def g_register_join_handler(client):
@@ -5932,12 +6070,17 @@ def g_register_join_handler(client):
                     uids.append(single)
                 if not uids:
                     return
+                links = _g_event_links(event)
                 if getattr(event, 'user_left', False) or getattr(event, 'user_kicked', False):
-                    for x in uids:
-                        _G['members'].discard(x)
-                else:
-                    for x in uids:
-                        _G['members'].add(x)
+                    # کانال رویداد معلوم نبود: از همه‌ی کانال‌ها حذف می‌کنیم (بی‌خطره؛ دور بعدی همگام‌سازی درستش می‌کنه)
+                    for lk in (links if links is not None else list(_G['members'].keys())):
+                        for x in uids:
+                            _gm(lk).discard(x)
+                elif links:
+                    # عضو شدن فقط وقتی اعمال می‌شه که کانالش معلوم باشه؛ وگرنه همگام‌سازی دوره‌ای اضافه‌ش می‌کنه
+                    for lk in links:
+                        for x in uids:
+                            _gm(lk).add(x)
             except Exception as e:
                 print('[gate] event handler error:', repr(e))
 
@@ -5947,27 +6090,31 @@ def g_register_join_handler(client):
 
 
 async def g_sync_loop(client, gen):
-    notified = None
+    notified = {}
     while _G['gen'] == gen:
-        try:
-            n = await g_refresh_members(client, force=True)
-            key = (CHANNEL_LINK, _G['list_mode'])
-            if notified != key:
-                notified = key
-                if _G['list_mode'] == 'full':
-                    g_notify_admin(f'✅ کانال همگام شد ({n} عضو). عضویت‌ها از الان چک می‌شن.')
-                else:
-                    g_notify_admin('✅ به کانال وصل شدم. لیست کامل اعضا برنگشت، پس عضویت هر کاربر '
-                                   'موقع درخواست زنده چک می‌شه.')
-        except Exception as e:
-            print('[gate] sync error:', repr(e))
-            if 'flood' in repr(e).lower() or 'too_many' in repr(e).lower() or '429' in repr(e):
-                _G['flood'] = True
-            _G['ch'] = None
-            if notified != ('err', CHANNEL_LINK):
-                notified = ('err', CHANNEL_LINK)
-                g_notify_admin('⚠️ نتونستم به کانال وصل بشم. مطمئن شو لینک درسته و اکانت '
-                               f'({_G["account"] or "؟"}) مالک/ادمین کانال هست.\nخطا: {e!r}')
+        for link in get_gate_channels():
+            if _G['gen'] != gen:
+                return
+            try:
+                n = await g_refresh_members(client, link, force=True)
+                mode = _G['modes'].get(link)
+                key = (link, mode)
+                if notified.get(link) != key:
+                    notified[link] = key
+                    if mode == 'full':
+                        g_notify_admin(f'✅ کانال {link} همگام شد ({n} عضو). عضویت‌ها از الان چک می‌شن.')
+                    else:
+                        g_notify_admin(f'✅ به کانال {link} وصل شدم. لیست کامل اعضا برنگشت، پس عضویت هر کاربر '
+                                       'موقع درخواست زنده چک می‌شه.')
+            except Exception as e:
+                print('[gate] sync error:', link, repr(e))
+                if 'flood' in repr(e).lower() or 'too_many' in repr(e).lower() or '429' in repr(e):
+                    _G['flood'] = True
+                _G['chs'].pop(link, None)
+                if notified.get(link) != ('err', link):
+                    notified[link] = ('err', link)
+                    g_notify_admin(f'⚠️ نتونستم به کانال {link} وصل بشم. مطمئن شو لینک درسته و اکانت '
+                                   f'({_G["account"] or "؟"}) مالک/ادمین کانال هست.\nخطا: {e!r}')
         wait = GATE_SYNC_INTERVAL
         if _G.pop('flood', False):
             wait = max(wait, 60)  # محدودیت سرعت سروش پلاس؛ یه مدت آروم‌تر
@@ -6009,7 +6156,7 @@ async def g_userbot_main(phone, gen):
         return
     g_register_join_handler(client)
     _G['running'], _G['starting'], _G['client'] = True, False, client
-    g_notify_admin(f'✅ لاگین انجام شد. در حال همگام‌سازی کانال {CHANNEL_LINK} ...')
+    g_notify_admin('✅ لاگین انجام شد. در حال همگام‌سازی کانال‌ها ...')
 
     await g_sync_loop(client, gen)
 
@@ -6027,7 +6174,7 @@ def g_userbot_thread(phone, gen):
 def g_start_userbot(phone):
     _G['gen'] += 1
     gen = _G['gen']
-    _G.update({'phone': phone, 'starting': True, 'running': False, 'client': None, 'ch': None})
+    _G.update({'phone': phone, 'starting': True, 'running': False, 'client': None, 'chs': {}})
     threading.Thread(target=g_userbot_thread, args=(phone, gen), daemon=True).start()
 
 
@@ -6064,7 +6211,7 @@ def g_disconnect():
         except Exception:
             pass
     _G.update({'running': False, 'starting': False, 'waiting': None, 'phone': None, 'account': None,
-               'client': None, 'loop': None, 'ch': None, 'list_mode': None, 'members': set()})
+               'client': None, 'loop': None, 'chs': {}, 'modes': {}, 'refreshed': {}, 'members': {}})
     with _member_cache_guard:
         _member_cache.clear()
 
@@ -6072,12 +6219,12 @@ def g_disconnect():
 _BOTAPI_GATE = {'works': None}
 
 
-def bot_api_check_member(user_id):
+def bot_api_check_member(user_id, link=None):
     """چک عضویت با خود Bot API (getChatMember). True/False، یا None اگه پشتیبانی نشه
     یا بات تو کانال ادمین نباشه. برای کار کردنش بات باید ادمین کانال باشه."""
     if _BOTAPI_GATE['works'] is False:
         return None
-    target = _g_parse_channel(CHANNEL_LINK)
+    target = _g_parse_channel(link or CHANNEL_LINK)
     if target is None:
         return None
     chat = target if isinstance(target, int) else '@' + str(target)
@@ -6102,41 +6249,62 @@ def bot_api_check_member(user_id):
 
 
 # ---------------- چک عضویت (برای بقیه‌ی کد بات) ----------------
-def check_channel_member(user_id, use_cache=True):
-    """True (عضوه) / False (عضو نیست) / None (اکانت وصل نیست یا چک جواب نداد)."""
+def _check_one_channel(user_id, link, use_cache=True):
+    """True (عضوه) / False (عضو نیست) / None (اکانت وصل نیست یا چک جواب نداد) برای یک کانال مشخص."""
     client, loop = _G['client'], _G['loop']
     if not _G['running'] or client is None or loop is None:
         return None
     now = time.time()
+    ck = (user_id, link)
     if use_cache:
-        if user_id in _G['members']:
+        if user_id in _gm(link):
             return True
         with _member_cache_guard:
-            ts = _member_cache.get(user_id)
+            ts = _member_cache.get(ck)
         if ts and now - ts < GATE_CACHE_TTL:
             return True
-    if os.getenv('GATE_BOTAPI', '0').strip() == '1' and bot_api_check_member(user_id) is True:
+    if os.getenv('GATE_BOTAPI', '0').strip() == '1' and bot_api_check_member(user_id, link) is True:
         with _member_cache_guard:
-            _member_cache[user_id] = now
+            _member_cache[ck] = now
         return True
-    if use_cache and _G['list_mode'] == 'full' and now - _G['last_refresh'] < 30 \
+    if use_cache and _G['modes'].get(link) == 'full' and now - _G['refreshed'].get(link, 0.0) < 30 \
             and _G.get('peruser_unsupported', os.getenv('GATE_PERUSER', '0').strip() != '1'):
         # لیست همین چند ثانیه پیش تازه شده و چک تکی هم ممکن نیست؛ نیازی به رفت‌وبرگشت به لوپ یوزربات نیست
         return False
     try:
-        fut = asyncio.run_coroutine_threadsafe(g_check_live(client, user_id, force=not use_cache), loop)
+        fut = asyncio.run_coroutine_threadsafe(g_check_live(client, user_id, link, force=not use_cache), loop)
         member = bool(fut.result(timeout=GATE_LIVE_TIMEOUT))
     except Exception as e:
         print('⚠️ خطا در چک عضویت:', repr(e))
         return None
     with _member_cache_guard:
         if member:
-            _member_cache[user_id] = now
+            _member_cache[ck] = now
         else:
-            _member_cache.pop(user_id, None)
+            _member_cache.pop(ck, None)
     if not member:
-        _G['members'].discard(user_id)
+        _gm(link).discard(user_id)
     return member
+
+
+def check_channels_status(user_id, use_cache=True):
+    """(وضعیت, کانال‌های ناقص): وضعیت True = عضو «همه‌ی» کانال‌هاست، False = حداقل یکی رو عضو نیست
+    (لینکش تو لیست دوم میاد)، None = چک جواب نداد. اگه هیچ کانالی ثبت نشده باشه همه رد می‌شن."""
+    links = get_gate_channels()
+    if not links:
+        return True, []
+    missing, unknown = [], False
+    for link in links:
+        st = _check_one_channel(user_id, link, use_cache)
+        if st is False:
+            missing.append(link)
+        elif st is None:
+            unknown = True
+    if missing:
+        return False, missing
+    if unknown:
+        return None, []
+    return True, []
 
 
 # ---------------- لاگین اکانت از طریق چت ادمین ----------------
@@ -6169,9 +6337,11 @@ def admin_gate_handler(update):
 
     if cmd == '/gatestatus':
         status = '🟢 وصل' if _G['running'] else ('🟡 در حال وصل‌شدن' if _G['starting'] else '🔴 وصل نیست (/start)')
-        mode = {'full': 'لیست کامل', 'live': 'چک زنده'}.get(_G['list_mode'], '—')
-        g_notify_admin(f'وضعیت اکانت: {status}\nاکانت: {_G["account"] or "—"}\nکانال: {CHANNEL_LINK}\n'
-                       f'روش چک: {mode}\nاعضای کش‌شده: {len(_G["members"])}')
+        lines = []
+        for lk in get_gate_channels():
+            md = {'full': 'لیست کامل', 'live': 'چک زنده'}.get(_G['modes'].get(lk), '—')
+            lines.append(f'• {lk} — {md} — {len(_gm(lk))} عضو')
+        g_notify_admin(f'وضعیت اکانت: {status}\nاکانت: {_G["account"] or "—"}\nکانال‌ها:\n' + ('\n'.join(lines) or '—'))
         return True
 
     if cmd == '/gatedisconnect':
@@ -6213,15 +6383,22 @@ def admin_gate_handler(update):
 
 
 # ---------------- گیت روی آپدیت‌ها ----------------
-def join_keyboard(chat_id):
-    return {'inline_keyboard': [
-        [{'text': u(chat_id, 'btn_join_channel'), 'url': CHANNEL_LINK}],
-        [{'text': u(chat_id, 'btn_joined'), 'callback_data': 'check_join'}],
-    ]}
+def join_keyboard(chat_id, links=None):
+    """یه دکمه‌ی عضویت برای هر کانال (اگه معلوم باشه، فقط اونایی که کاربر هنوز عضوشون نیست) + «✅ عضو شدم»."""
+    links = list(links or get_gate_channels())
+    rows = []
+    for i, lk in enumerate(links, 1):
+        label = u(chat_id, 'btn_join_channel')
+        if len(links) > 1:
+            nm = _g_parse_channel(lk)
+            label += f' @{nm}' if isinstance(nm, str) else f' {i}'
+        rows.append([{'text': label, 'url': lk}])
+    rows.append([{'text': u(chat_id, 'btn_joined'), 'callback_data': 'check_join'}])
+    return {'inline_keyboard': rows}
 
 
 def join_gate(update):
-    """True یعنی این آپدیت همین‌جا مدیریت شد (کاربر عضو نیست) و نباید به
+    """True یعنی این آپدیت همین‌جا مدیریت شد (کاربر عضو همه‌ی کانال‌ها نیست) و نباید به
     process_update بره؛ False یعنی ادامه بده."""
     if not (GATE_ENABLED and G_AVAILABLE):
         return False
@@ -6246,12 +6423,12 @@ def join_gate(update):
 
     if is_check_btn:
         answer_callback(cb_id)
-        status = check_channel_member(user_id, use_cache=False)
+        status, missing = check_channels_status(user_id, use_cache=False)
         for _retry in range(1):  # تازه‌عضو شده‌ها ممکنه چند ثانیه طول بکشه تا تو لیست بیان
             if status is not False:
                 break
             time.sleep(2)
-            status = check_channel_member(user_id, use_cache=False)
+            status, missing = check_channels_status(user_id, use_cache=False)
         if status is True:
             add_user(chat_id)
             user_steps[str(chat_id)] = {}
@@ -6259,13 +6436,13 @@ def join_gate(update):
             main_menu(chat_id)
             process_referral_reward(chat_id, 'join')
         elif status is False:
-            send_message(chat_id, u(chat_id, 'join_not_yet'), reply_markup=join_keyboard(chat_id))
+            send_message(chat_id, u(chat_id, 'join_not_yet'), reply_markup=join_keyboard(chat_id, missing))
         else:
             send_message(chat_id, u(chat_id, 'join_check_error'), reply_markup=join_keyboard(chat_id))
         return True
 
     # لیست اعضا هر ~۱۰ ثانیه تو پس‌زمینه تازه می‌شه؛ پس /start نیازی به چک اجباری (کند) نداره
-    status = check_channel_member(user_id)
+    status, missing = check_channels_status(user_id)
     if status is True:
         return False
     if status is None and GATE_FAIL_OPEN:
@@ -6274,10 +6451,110 @@ def join_gate(update):
     if cb_id:
         answer_callback(cb_id)
     if status is False:
-        send_message(chat_id, u(chat_id, 'join_required', divider=DIVIDER), reply_markup=join_keyboard(chat_id))
+        send_message(chat_id, u(chat_id, 'join_required', divider=DIVIDER), reply_markup=join_keyboard(chat_id, missing))
     else:
         send_message(chat_id, u(chat_id, 'join_check_error'), reply_markup=join_keyboard(chat_id))
     return True
+
+
+
+# ---------------- پنل ادمین: اضافه/حذف کانال‌های عضویت اجباری ----------------
+ADMIN_ADD_CHANNEL_LABEL = '➕ اضافه کردن کانال'
+
+
+def _ch_hash(link):
+    return hashlib.md5(link.encode('utf-8')).hexdigest()[:8]
+
+
+async def g_validate_channel(client, link):
+    """کانال رو با اکانت یوزربات باز می‌کنه و لیست اعضاش رو می‌گیره → (عنوان, تعداد اعضا).
+    اگه لیست اعضا برنگرده (یعنی اکانت ادمین کانال نیست) خطا می‌ده؛ چون با چنین کانالی همه‌ی کاربرها گیر می‌کردن."""
+    _G['chs'].pop(link, None)
+    ch = await g_get_channel(client, link)
+    ids = await g_list_members(client, ch)
+    if not ids:
+        _G['chs'].pop(link, None)
+        raise RuntimeError('لیست اعضای کانال خالی برگشت؛ اکانت باید مالک/ادمین کانال باشه')
+    _G['members'][link] = set(ids)
+    _G['modes'][link] = 'full'
+    _G['refreshed'][link] = time.time()
+    title = getattr(ch, 'title', None) or getattr(ch, 'username', None) or link
+    return str(title), len(ids)
+
+
+def admin_channels_panel(chat_id, note=None):
+    if not GATE_ENABLED:
+        send_message(chat_id, '⛔ عضویت اجباری با GATE_ENABLED=0 خاموشه.', parse_mode=None)
+        return
+    if not G_AVAILABLE:
+        send_message(chat_id, '⚠️ کتابخونه‌ی spluspy نصب نیست، برای همین عضویت اجباری کار نمی‌کنه.', parse_mode=None)
+        return
+    links = get_gate_channels()
+    body = ('\n'.join(f'{i}. {lk}' for i, lk in enumerate(links, 1)) if links
+            else 'هیچ کانالی ثبت نشده؛ فعلاً عضویت اجباری برای کاربرها اعمال نمی‌شه.')
+    text = (note + '\n\n' if note else '') + '📢 کانال‌های عضویت اجباری\n' + DIVIDER + '\n' + body
+    if links:
+        text += '\n\nکاربر باید عضو همه‌ی این کانال‌ها باشه.'
+    if not _G['running']:
+        text += '\n\n⚠️ اکانت لاگین نیست؛ اول با /start لاگینش کن.'
+    rows = [[{'text': '➕ افزودن کانال جدید', 'callback_data': 'admin_ch_add'}]]
+    for i, lk in enumerate(links, 1):
+        nm = _g_parse_channel(lk)
+        rows.append([{'text': f'🗑 حذف {i}' + (f' (@{nm})' if isinstance(nm, str) else ''),
+                      'callback_data': 'admin_ch_del_' + _ch_hash(lk)}])
+    send_message(chat_id, text, parse_mode=None, reply_markup={'inline_keyboard': rows})
+
+
+def admin_add_channel_ask(chat_id):
+    if not (_G['running'] and _G['client'] is not None and _G['loop'] is not None):
+        admin_channels_panel(chat_id, note='⚠️ اول باید اکانت لاگین باشه (با /start).')
+        return
+    user_steps[str(chat_id)] = {'step': 'admin_add_channel'}
+    send_message(chat_id, '🔗 لینک یا @یوزرنیم کانال رو بفرست (مثلاً https://splus.ir/mychannel).\n'
+                          f'اکانت ({_G["account"] or "؟"}) باید مالک/ادمین اون کانال باشه.',
+                 parse_mode=None, reply_markup=cancel_kb(chat_id))
+
+
+def admin_add_channel_submit(chat_id, text):
+    norm = g_normalize_channel_link(text)
+    if not norm:
+        send_message(chat_id, '⚠️ این لینک/یوزرنیم معتبر نیست (لینک دعوت خصوصی هم پشتیبانی نمی‌شه). '
+                              'دوباره بفرست یا انصراف بزن.', parse_mode=None, reply_markup=cancel_kb(chat_id))
+        return
+    link, name = norm
+    links = get_gate_channels()
+    if any(_g_ch_name(x) == name.lower() for x in links):
+        user_steps[str(chat_id)] = {}
+        admin_channels_panel(chat_id, note='ℹ️ این کانال از قبل تو لیست هست.')
+        return
+    client, loop = _G['client'], _G['loop']
+    if not (_G['running'] and client is not None and loop is not None):
+        user_steps[str(chat_id)] = {}
+        admin_channels_panel(chat_id, note='⚠️ اکانت لاگین نیست؛ اول با /start لاگین کن.')
+        return
+    send_message(chat_id, '⏳ در حال بررسی کانال ...', parse_mode=None)
+    try:
+        title, count = asyncio.run_coroutine_threadsafe(g_validate_channel(client, link), loop).result(timeout=40)
+    except Exception as e:
+        print('[gate] validate channel error:', link, repr(e))
+        user_steps[str(chat_id)] = {}
+        send_message(chat_id, f'❌ نتونستم کانال رو اضافه کنم. مطمئن شو لینک درسته و اکانت ({_G["account"] or "؟"}) '
+                              f'مالک/ادمین کانال هست.\nخطا: {str(e) or repr(e)}', parse_mode=None)
+        return
+    set_gate_channels(links + [link])
+    user_steps[str(chat_id)] = {}
+    admin_channels_panel(chat_id, note=f'✅ کانال «{title}» اضافه شد ({count} عضو). از الان کاربرها باید عضوش هم باشن.')
+
+
+def admin_remove_channel(chat_id, h):
+    links = get_gate_channels()
+    target = next((lk for lk in links if _ch_hash(lk) == h), None)
+    if not target:
+        admin_channels_panel(chat_id, note='⚠️ این کانال دیگه تو لیست نیست.')
+        return
+    set_gate_channels([lk for lk in links if lk != target])
+    g_forget_channel(target)
+    admin_channels_panel(chat_id, note=f'🗑 کانال {target} از عضویت اجباری حذف شد.')
 
 
 g_boot_restore()
