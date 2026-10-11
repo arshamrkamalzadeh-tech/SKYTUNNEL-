@@ -884,8 +884,9 @@ UI_TEXT['fa'].update({
         '🔢 مقدار قابل واریز: <code>{coin_amount}</code> <b>{coin}</b>\n\n'
         '{network_line}👛 آدرس ولت:\n<code>{wallet}</code>\n{memo_line}\n'
         '⚠️ دقیقاً همین مقدار رو واریز کنید. قیمت لحظه‌ایه و ممکنه عوض بشه؛ پس زودتر واریز کنید.\n\n'
-        '📸 بعد از واریز، تصویر رسید (اسکرین‌شات تراکنش) رو بفرستید تا بررسی بشه.'
+        '📸 بعد از واریز، تصویر رسید (اسکرین‌شات تراکنش) رو بفرستید، یا اگه خواستید «هش تراکنش (Hash)» رو به‌صورت متن بفرستید تا بررسی بشه.'
     ),
+    'topup_crypto_need_proof': '📸 لطفاً تصویر رسید یا هش تراکنش (Hash) رو بفرستید. هش باید یه متن پیوسته و بدون فاصله باشه.',
     'topup_crypto_price_error': '❌ الان نتونستم قیمت لحظه‌ای رو بگیرم. چند لحظه دیگه دوباره امتحان کنید یا کارت به کارت بزنید.',
     'admin_topup_request_crypto': '🪙 <b>درخواست شارژ با رمزارز</b>\n{divider}\n👤 کاربر: <code>{user_id}</code>\n💵 مبلغ: <b>{amount}</b> تومان\n🔢 باید واریز شده باشه: <b>{coin_amount} {coin}</b>\n📈 قیمت زمان درخواست: {price} تومان\n🎫 شناسه درخواست: <b>{req_id}</b>',
 })
@@ -902,8 +903,9 @@ UI_TEXT['en'].update({
         '🔢 Amount to send: <code>{coin_amount}</code> <b>{coin}</b>\n\n'
         '{network_line}👛 Wallet address:\n<code>{wallet}</code>\n{memo_line}\n'
         '⚠️ Send exactly this amount. The price is live and may change, so please send soon.\n\n'
-        '📸 After sending, upload a screenshot of the transaction for review.'
+        '📸 After sending, upload a screenshot of the transaction, or send the transaction hash as text, for review.'
     ),
+    'topup_crypto_need_proof': '📸 Please send a photo of the receipt or the transaction hash. The hash must be a single continuous text with no spaces.',
     'topup_crypto_price_error': '❌ Could not fetch the live price right now. Try again in a moment or use card to card.',
 })
 UI_TEXT['en'].update({
@@ -2351,6 +2353,41 @@ def now_iran():
     return datetime.utcnow() + timedelta(hours=3, minutes=30)
 
 
+def fmt_iran_datetime(ts):
+    """timestamp → «تاریخ شمسی  ساعت:دقیقه:ثانیه» به وقت ایران."""
+    dt = datetime.utcfromtimestamp(ts) + timedelta(hours=3, minutes=30)
+    jy, jm, jd = gregorian_to_jalali(dt.year, dt.month, dt.day)
+    return f'{jy:04d}/{jm:02d}/{jd:02d}  {dt.strftime("%H:%M:%S")}'
+
+
+def fmt_duration_fa(seconds):
+    """مدت زمان به فارسی با ثانیه؛ مثلا «۲ ساعت و ۳ دقیقه و ۱۵ ثانیه»."""
+    seconds = max(0, int(round(seconds)))
+    h, rem = divmod(seconds, 3600)
+    m, sec = divmod(rem, 60)
+    parts = []
+    if h:
+        parts.append(f'{h} ساعت')
+    if m:
+        parts.append(f'{m} دقیقه')
+    if sec or not parts:
+        parts.append(f'{sec} ثانیه')
+    return ' و '.join(parts)
+
+
+def build_topup_timing_text(requested_at, paid_at):
+    """بلوک زمان‌بندی برای پیام ادمین (هم رسید ریالی هم رمزارز): زمان درخواست مبلغ، زمان ارسال رسید/هش و فاصله‌ی بینشون."""
+    lines = ['\n⏱ <b>زمان‌بندی</b>']
+    if requested_at:
+        lines.append('🕐 درخواست مبلغ واریزی: <code>' + fmt_iran_datetime(requested_at) + '</code>')
+    else:
+        lines.append('🕐 درخواست مبلغ واریزی: نامشخص')
+    lines.append('🕑 ارسال رسید/هش: <code>' + fmt_iran_datetime(paid_at) + '</code>')
+    if requested_at:
+        lines.append('⌛️ مدت از درخواست تا واریز: <b>' + fmt_duration_fa(paid_at - requested_at) + '</b>')
+    return '\n'.join(lines)
+
+
 def build_config_note(chat_id, username, price):
     """متن یادداشتی که رو هر کانفیگ (تو پنل su.randomatic.ir) ثبت می‌شه:
     تاریخ شمسی و ساعت دقیق (با ثانیه) ساخت به وقت ایران، آیدی عددی و
@@ -2748,7 +2785,7 @@ def get_crypto_price_toman(symbol):
 
 
 def send_card_topup_info(chat_id, amount):
-    user_steps[str(chat_id)] = {'step': 'waiting_receipt', 'amount': amount}
+    user_steps[str(chat_id)] = {'step': 'waiting_receipt', 'amount': amount, 'requested_at': time.time()}
     if get_user_lang(chat_id) == 'en':
         card_text = u(
             chat_id, 'topup_card_info', amount=f'{amount:,}',
@@ -2763,6 +2800,12 @@ def send_card_topup_info(chat_id, amount):
             divider=DIVIDER,
         )
     send_message(chat_id, card_text)
+
+
+def _looks_like_tx_hash(text):
+    """هش تراکنش / لینک اکسپلورر: یه متن پیوسته (بدون فاصله) بین ۱۶ تا ۳۰۰ کاراکتر."""
+    t = (text or '').strip()
+    return bool(re.fullmatch(r'\S{16,300}', t))
 
 
 def fmt_coin_amount(x):
@@ -2817,7 +2860,7 @@ def send_crypto_topup_info(chat_id, amount, coin):
     else:
         network_line = ''
     user_steps[str(chat_id)] = {'step': 'waiting_receipt', 'amount': amount, 'method': 'crypto',
-                                'coin_label': coin['label'], 'coin_amount': coin_amount, 'price': price}
+                                'requested_at': time.time(), 'coin_label': coin['label'], 'coin_amount': coin_amount, 'price': price}
     send_message(chat_id, u(chat_id, 'topup_crypto_info', divider=DIVIDER, amount=f'{amount:,}',
                             price=f'{price:,.0f}', coin=_html.escape(coin['label']),
                             coin_amount=fmt_coin_amount(coin_amount), wallet=_html.escape(coin['wallet']),
@@ -4309,8 +4352,11 @@ def process_update(update):
             except ValueError:
                 send_message(chat_id, u(chat_id, 'topup_amount_error'))
 
-        elif step.get('step') == 'waiting_receipt' and 'photo' in message:
-            photo_id = message['photo'][-1]['file_id']
+        elif step.get('step') == 'waiting_receipt' and (
+                'photo' in message or (step.get('method') == 'crypto' and _looks_like_tx_hash(text))):
+            # رسید کارت‌به‌کارت فقط عکسه؛ رمزارز هم عکس رسید و هم هش تراکنش (متن) رو قبول می‌کنه
+            photo_id = message['photo'][-1]['file_id'] if 'photo' in message else None
+            tx_hash = None if photo_id else text.strip()
             amount = step.get('amount')
             is_crypto = step.get('method') == 'crypto'
             if is_crypto:
@@ -4320,6 +4366,7 @@ def process_update(update):
             else:
                 req_id = create_topup_request(chat_id, amount)
 
+            paid_at = time.time()
             send_message(chat_id, u(chat_id, 'topup_receipt_ok') if get_user_lang(chat_id) == 'en'
                           else get_bot_text('topup_receipt_ok', DEFAULT_TOPUP_RECEIPT_OK))
             user_steps[str(chat_id)] = {}
@@ -4331,16 +4378,25 @@ def process_update(update):
                                   coin_amount=fmt_coin_amount(step.get('coin_amount')),
                                   coin=_html.escape(str(step.get('coin_label'))),
                                   price=f"{step.get('price'):,.0f}")
+                if tx_hash:
+                    admin_caption += '\n🔗 هش تراکنش (Hash):\n<code>' + _html.escape(tx_hash) + '</code>'
             else:
                 admin_caption = u('fa', 'admin_topup_request', divider=DIVIDER, user_id=str(chat_id),
                                   amount=f'{amount:,}', req_id=str(req_id))
+            admin_caption += build_topup_timing_text(step.get('requested_at'), paid_at)
             admin_kb = {
                 'inline_keyboard': [[
                     {'text': u('fa', 'admin_btn_accept'), 'callback_data': 'topup_acc_' + str(req_id)},
                     {'text': u('fa', 'admin_btn_reject'), 'callback_data': 'topup_rej_' + str(req_id)}
                 ]]
             }
-            send_photo(ADMIN_ID, photo_id, caption=admin_caption, reply_markup=admin_kb)
+            if photo_id:
+                send_photo(ADMIN_ID, photo_id, caption=admin_caption, reply_markup=admin_kb)
+            else:
+                send_message(ADMIN_ID, admin_caption, reply_markup=admin_kb)
+
+        elif step.get('step') == 'waiting_receipt' and step.get('method') == 'crypto':
+            send_message(chat_id, u(chat_id, 'topup_crypto_need_proof'))
 
         elif step.get('step') == 'waiting_receipt' and 'photo' not in message:
             send_message(chat_id, u(chat_id, 'topup_need_photo') if get_user_lang(chat_id) == 'en'
