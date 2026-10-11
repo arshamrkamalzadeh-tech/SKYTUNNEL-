@@ -1228,11 +1228,13 @@ def init_db():
         status TEXT DEFAULT "pending",
         created_at TEXT
     )''')
-    for _col in ("method TEXT DEFAULT 'card'", "crypto_amount TEXT", "crypto_price TEXT"):
+    for _col in ("method TEXT DEFAULT 'card'", "crypto_amount TEXT", "crypto_price TEXT",
+                 "coin_symbol TEXT", "coin_qty TEXT", "tx_hash TEXT", "matched_tx TEXT", "req_ts REAL"):
         try:
             c.execute('ALTER TABLE topup_requests ADD COLUMN ' + _col)
         except Exception:
             pass  # ستون از قبل هست
+    c.execute('CREATE TABLE IF NOT EXISTS crypto_deposits_used (tx TEXT PRIMARY KEY, req_id INTEGER, created_at TEXT)')
     c.execute('CREATE TABLE IF NOT EXISTS settings (key TEXT PRIMARY KEY, value TEXT)')
     c.execute('''CREATE TABLE IF NOT EXISTS discount_codes (
         code TEXT PRIMARY KEY,
@@ -1541,6 +1543,477 @@ def process_referral_reward(invitee_id, event):
             send_message(invitee_id, u(invitee_id, 'referral_bonus_invitee', amount=f'{a_invitee:,}'))
     except Exception as e:
         print('⚠️ پاداش رفرال داده نشد:', e)
+
+
+# ---------------------------------------------------------------------------
+# بررسی خودکار واریز رمزارزی از روی حساب نوبیتکس (API Key فقط‌خواندنی)
+# احراز هویت طبق مستندات نوبیتکس: هدرهای Nobitex-Key / Nobitex-Signature / Nobitex-Timestamp
+# امضا = Ed25519 روی «timestamp + METHOD + full_path + raw_body» (URL-safe Base64)
+# مقادیر از Environment (NOBITEX_API_KEY / NOBITEX_API_SECRET) خونده می‌شن؛ اگه نبودن همین مقادیر داخل کد استفاده می‌شه.
+# ---------------------------------------------------------------------------
+NOBITEX_API_KEY = (os.getenv('NOBITEX_API_KEY') or 'L6NkONpb_eLVYgPCME2ZK0uF0etCda0F7vJttsUw8ms=').strip()
+NOBITEX_API_SECRET = (os.getenv('NOBITEX_API_SECRET') or '2dVf_2Xl9flVS_ZCtHMuQgC4wB_NVW8YNBySBtPLLZM=').strip()
+
+
+# ---- Ed25519 (RFC 8032) خالص پایتون؛ فقط وقتی استفاده می‌شه که cryptography/pynacl نصب نباشه ----
+_P = 2 ** 255 - 19
+_L = 2 ** 252 + 27742317777372353535851937790883648493
+_D = (-121665 * pow(121666, _P - 2, _P)) % _P
+_I = pow(2, (_P - 1) // 4, _P)
+
+
+def _inv(x):
+    return pow(x, _P - 2, _P)
+
+
+def _xrecover(y):
+    xx = (y * y - 1) * _inv(_D * y * y + 1)
+    x = pow(xx, (_P + 3) // 8, _P)
+    if (x * x - xx) % _P != 0:
+        x = (x * _I) % _P
+    if x % 2 != 0:
+        x = _P - x
+    return x
+
+
+_BY = (4 * _inv(5)) % _P
+_B = (_xrecover(_BY), _BY)
+
+
+def _add(a, b):
+    (x1, y1), (x2, y2) = a, b
+    t = _D * x1 * x2 * y1 * y2
+    x3 = (x1 * y2 + x2 * y1) * _inv(1 + t)
+    y3 = (y1 * y2 + x1 * x2) * _inv(1 - t)
+    return (x3 % _P, y3 % _P)
+
+
+def _mul(p, e):
+    q = (0, 1)
+    while e:
+        if e & 1:
+            q = _add(q, p)
+        p = _add(p, p)
+        e >>= 1
+    return q
+
+
+def _enc_int(y):
+    return y.to_bytes(32, 'little')
+
+
+def _enc_point(p):
+    x, y = p
+    return _enc_int(y | ((x & 1) << 255))
+
+
+def _h(m):
+    return hashlib.sha512(m).digest()
+
+
+def _clamp(h):
+    a = int.from_bytes(h[:32], 'little')
+    a &= (1 << 254) - 8
+    a |= 1 << 254
+    return a
+
+
+def ed25519_public_key(seed):
+    return _enc_point(_mul(_B, _clamp(_h(seed))))
+
+
+def ed25519_sign(seed, msg):
+    h = _h(seed)
+    a = _clamp(h)
+    pub = _enc_point(_mul(_B, a))
+    r = int.from_bytes(_h(h[32:] + msg), 'little') % _L
+    R = _enc_point(_mul(_B, r))
+    k = int.from_bytes(_h(R + pub + msg), 'little') % _L
+    s = (r + k * a) % _L
+    return R + s.to_bytes(32, 'little')
+
+
+def _ed_sign(seed, msg):
+    try:
+        from cryptography.hazmat.primitives.asymmetric import ed25519 as _ed
+        return _ed.Ed25519PrivateKey.from_private_bytes(seed).sign(msg)
+    except ImportError:
+        return ed25519_sign(seed, msg)      # بدون نیاز به نصب کتابخونه (کندتر، ولی برای چند درخواست کافیه)
+
+
+def _b64u_decode(sv):
+    import base64
+    return base64.urlsafe_b64decode(sv + '=' * (-len(sv) % 4))
+
+
+def nobitex_keys_configured():
+    return bool(NOBITEX_API_KEY and NOBITEX_API_SECRET)
+
+
+def nobitex_signed_request(method, path, params=None, json_body=None, timeout=10):
+    """درخواست امضاشده به نوبیتکس. اول apiv2 بعد آدرس قدیمی؛ اگه امضا با padding قبول نشد بدون padding امتحان می‌شه."""
+    import base64
+    if not nobitex_keys_configured():
+        raise RuntimeError('کلید API نوبیتکس تنظیم نشده')
+    seed = _b64u_decode(NOBITEX_API_SECRET)[:32]
+    raw = json.dumps(json_body, separators=(',', ':')) if json_body is not None else ''
+    last_err = None
+    for base_url in NOBITEX_API_BASES:
+        for with_pad in (True, False):
+            prep = requests.Request(method, base_url + path, params=params, data=(raw or None),
+                                    headers=({'Content-Type': 'application/json'} if raw else {})).prepare()
+            ts = str(int(time.time()))
+            sig = base64.urlsafe_b64encode(_ed_sign(seed, (ts + method + prep.path_url + raw).encode('utf-8'))).decode()
+            if not with_pad:
+                sig = sig.rstrip('=')
+            prep.headers.update({'Nobitex-Key': NOBITEX_API_KEY, 'Nobitex-Signature': sig, 'Nobitex-Timestamp': ts})
+            try:
+                env = SESSION.merge_environment_settings(prep.url, {}, None, None, None)
+                r = SESSION.send(prep, timeout=timeout, **env)
+            except requests.exceptions.RequestException as ce:
+                last_err = ce
+                print(f'⚠️ اتصال به {base_url} ممکن نشد:', ce)
+                break                      # آدرس بعدی
+            if r.status_code in (401, 403) and with_pad:
+                continue                   # یه‌بار هم بدون padding
+            return r
+    raise last_err or RuntimeError('اتصال به نوبیتکس ممکن نشد')
+
+
+def _parse_ts(v):
+    if v is None or v == '':
+        return None
+    if isinstance(v, (int, float)):
+        return float(v) / 1000.0 if v > 1e12 else float(v)
+    t = str(v).strip().replace('Z', '+00:00')
+    t = re.sub(r'(\.\d+)', lambda m: ('.' + m.group(1)[1:].ljust(6, '0')[:6]), t, count=1)
+    try:
+        dt = datetime.fromisoformat(t)
+        if dt.tzinfo is None:
+            dt = dt.replace(tzinfo=timezone.utc)
+        return dt.timestamp()
+    except Exception:
+        return None
+
+
+def _normalize_deposit(d):
+    tr = d.get('transaction') if isinstance(d.get('transaction'), dict) else {}
+    wl = d.get('wallet') if isinstance(d.get('wallet'), dict) else {}
+
+    def pick(*keys):
+        for k in keys:
+            for src in (d, tr):
+                if src.get(k) not in (None, ''):
+                    return src.get(k)
+        return None
+    try:
+        amount = float(str(pick('amount', 'value')).replace(',', ''))
+    except Exception:
+        return None
+    cur = pick('currency', 'coin') or wl.get('currency')
+    conf = pick('confirmed', 'is_confirmed')
+    if conf is None:
+        st = str(pick('status') or '').lower()
+        conf = (st in ('confirmed', 'done', 'success', 'completed', 'ok')) if st else True
+    return {
+        'tx': str(pick('txHash', 'tx_hash', 'txid', 'hash') or ''),
+        'currency': str(cur or '').lower(),
+        'amount': amount,
+        'ts': _parse_ts(pick('created_at', 'createdAt', 'date', 'timestamp')),
+        'confirmed': bool(conf),
+        'raw_keys': sorted(list(d.keys())) + ['transaction.' + k for k in sorted(tr.keys())],
+    }
+
+
+_nb_cache = {'t': 0.0, 'v': None}
+_nb_logged = {'done': False}
+
+
+def nobitex_fetch_deposits(force=False):
+    if not force and _nb_cache['v'] is not None and time.time() - _nb_cache['t'] < 20:
+        return _nb_cache['v']
+    r = nobitex_signed_request('GET', '/users/wallets/deposits/list')
+    if r.status_code == 405:
+        r = nobitex_signed_request('POST', '/users/wallets/deposits/list', json_body={})
+    if r.status_code != 200:
+        raise RuntimeError(f'HTTP {r.status_code}: {r.text[:200]}')
+    data = r.json()
+    if isinstance(data, dict) and data.get('status') not in (None, 'ok'):
+        raise RuntimeError(f'نوبیتکس خطا داد: {str(data)[:200]}')
+    items = None
+    if isinstance(data, dict):
+        for k in ('deposits', 'result', 'results', 'data', 'transactions'):
+            if isinstance(data.get(k), list):
+                items = data[k]
+                break
+        if items is None:
+            lists = [v for v in data.values() if isinstance(v, list)]
+            items = lists[0] if lists else []
+    elif isinstance(data, list):
+        items = data
+    deps = [x for x in (_normalize_deposit(i) for i in (items or []) if isinstance(i, dict)) if x]
+    if not _nb_logged['done'] and deps:
+        _nb_logged['done'] = True
+        print('[nobitex] فیلدهای یک واریز:', deps[0]['raw_keys'])
+    _nb_cache['t'], _nb_cache['v'] = time.time(), deps
+    return deps
+
+
+def crypto_auto_confirm_enabled():
+    return get_setting('crypto_auto_confirm', '0') == '1'
+
+
+def crypto_match_tolerance():
+    try:
+        return min(max(float(str(get_setting('crypto_match_tolerance_percent', '1')).replace(',', '.')), 0.0), 50.0) / 100.0
+    except Exception:
+        return 0.01
+
+
+@with_db_retry
+def get_crypto_request_row(req_id):
+    conn = get_conn()
+    c = conn.cursor()
+    c.execute('SELECT id, user_id, amount, status, created_at, coin_symbol, coin_qty, tx_hash, req_ts, matched_tx '
+              'FROM topup_requests WHERE id=?', (req_id,))
+    row = c.fetchone()
+    conn.close()
+    return row
+
+
+@with_db_retry
+def list_pending_crypto_requests(hours=12):
+    cutoff = (datetime.now() - timedelta(hours=hours)).isoformat()
+    conn = get_conn()
+    c = conn.cursor()
+    c.execute("SELECT id FROM topup_requests WHERE status='pending' AND method='crypto' AND coin_symbol IS NOT NULL "
+              "AND created_at >= ? ORDER BY id", (cutoff,))
+    rows = [r[0] for r in c.fetchall()]
+    conn.close()
+    return rows
+
+
+@with_db_retry
+def is_deposit_used(tx):
+    if not tx:
+        return False
+    conn = get_conn()
+    c = conn.cursor()
+    c.execute('SELECT 1 FROM crypto_deposits_used WHERE tx=?', (tx,))
+    row = c.fetchone()
+    conn.close()
+    return bool(row)
+
+
+@with_db_retry
+def mark_deposit_used(tx, req_id):
+    if not tx:
+        return
+    conn = get_conn()
+    c = conn.cursor()
+    c.execute('INSERT OR IGNORE INTO crypto_deposits_used (tx, req_id, created_at) VALUES (?, ?, ?)',
+              (tx, req_id, datetime.now().isoformat()))
+    conn.commit()
+    conn.close()
+
+
+@with_db_retry
+def set_request_matched_tx(req_id, tx):
+    conn = get_conn()
+    c = conn.cursor()
+    c.execute('UPDATE topup_requests SET matched_tx=? WHERE id=?', (tx, req_id))
+    conn.commit()
+    conn.close()
+
+
+def evaluate_crypto_request(req_id):
+    """نتیجه‌ی تطبیق یه درخواست رمزارزی با واریزهای نوبیتکس: دیکشنری {state, deposit, note}.
+    state: matched | mismatch | hash_mismatch | ambiguous | unconfirmed | not_found | error"""
+    row = get_crypto_request_row(req_id)
+    if not row or not row[5] or not row[6]:
+        return {'state': 'error', 'note': 'اطلاعات کوین این درخواست ثبت نشده'}
+    symbol, expected = str(row[5]).lower(), float(row[6])
+    user_hash = (row[7] or '').strip().lower()
+    req_ts = row[8]
+    if not req_ts:
+        try:
+            req_ts = datetime.fromisoformat(row[4]).timestamp()
+        except Exception:
+            req_ts = time.time() - 6 * 3600
+    tol = crypto_match_tolerance()
+    try:
+        deps = nobitex_fetch_deposits()
+    except Exception as e:
+        return {'state': 'error', 'note': str(e)[:200]}
+
+    unused = [d for d in deps if not is_deposit_used(d['tx'])]
+    # تطبیق با هش: فقط خودِ هش مهمه (طول حداقل ۱۶ تا هش‌های کوتاه اتفاقی نخورن)
+    hash_hits = [d for d in unused if user_hash and len(d['tx']) >= 16 and d['tx'].lower() in user_hash]
+    if hash_hits:
+        return {'state': 'hash_ok', 'deposit': hash_hits[0], 'expected': expected}
+    pool = [d for d in unused if d['currency'] == symbol]
+    by_hash = []
+    by_time = [d for d in pool if d['ts'] is not None and d['ts'] >= req_ts - 600]
+    if user_hash and not by_hash:
+        base = by_time
+        hash_note = True
+    else:
+        base = by_hash or by_time
+        hash_note = False
+    if not base:
+        return {'state': 'hash_mismatch' if hash_note else 'not_found',
+                'note': 'هش وارد‌شده با هیچ واریزی تو نوبیتکس نخورد' if hash_note else ''}
+    within = [d for d in base if abs(d['amount'] - expected) <= expected * tol]
+    if hash_note:     # هش داده شده ولی نخورده: خودکار تأیید نمی‌شه، فقط نشون می‌دیم
+        best = min(base, key=lambda d: abs(d['amount'] - expected))
+        return {'state': 'hash_mismatch', 'deposit': best, 'expected': expected,
+                'note': 'هش وارد‌شده با واریزی نخورد، نزدیک‌ترین واریز نشون داده شد'}
+    ok = [d for d in within if d['confirmed']]
+    if len(ok) == 1:
+        return {'state': 'matched', 'deposit': ok[0], 'expected': expected}
+    if len(ok) > 1:
+        return {'state': 'ambiguous', 'deposit': ok[0], 'expected': expected, 'note': f'{len(ok)} واریز هم‌مقدار پیدا شد'}
+    if within:
+        return {'state': 'unconfirmed', 'deposit': within[0], 'expected': expected}
+    best = min(base, key=lambda d: abs(d['amount'] - expected))
+    return {'state': 'mismatch', 'deposit': best, 'expected': expected}
+
+
+def format_crypto_eval(req_id, res, coin_label=''):
+    st = res.get('state')
+    dep, exp = res.get('deposit'), res.get('expected')
+    head = f'🔎 <b>بررسی نوبیتکس</b> — درخواست #{req_id}\n'
+    if st == 'error':
+        return head + '⚠️ بررسی انجام نشد: ' + _html.escape(str(res.get('note', ''))) + '\nدستی بررسی کنید.'
+    if st == 'not_found':
+        return head + '⏳ هنوز واریز مطابقی پیدا نشد (ممکنه تأییدیه شبکه کامل نشده باشه). تا چند ساعت خودکار دوباره چک می‌شه.'
+    if st == 'hash_mismatch' and not dep:
+        return head + '⚠️ ' + _html.escape(res.get('note', '')) + '\nدستی بررسی کنید.'
+    diff = ''
+    if dep and exp:
+        diff = f' ({(dep["amount"] - exp) / exp * 100:+.2f}٪ نسبت به مقدار مورد انتظار)'
+        if st == 'hash_ok':
+            diff += ' — کوین: ' + _html.escape(str(dep.get('currency', '')).upper())
+    lines = {
+        'hash_ok': '✅ هش تراکنش با یه واریز تو نوبیتکس خورد.',
+        'matched': '✅ واریز هم‌مقدار پیدا شد (کاربر هش نفرستاده؛ تأیید با خودته).',
+        'mismatch': '⚠️ واریزی پیدا شد ولی مقدارش با مقدار مورد انتظار فرق داره؛ دستی تصمیم بگیرید.',
+        'hash_mismatch': '⚠️ ' + _html.escape(res.get('note', '')) + '.',
+        'ambiguous': '⚠️ ' + _html.escape(res.get('note', '')) + '؛ دستی تأیید کنید.',
+        'unconfirmed': '⏳ واریز پیدا شد ولی هنوز تأیید نهایی شبکه رو نگرفته.',
+    }
+    msg = head + lines.get(st, '') + '\n'
+    if dep:
+        msg += (f'💰 مقدار واریز: <code>{fmt_coin_amount(dep["amount"])}</code> {_html.escape(coin_label)}{diff}\n'
+                f'🎯 مقدار مورد انتظار: <code>{fmt_coin_amount(exp)}</code>\n')
+        if dep.get('tx'):
+            msg += '🔗 هش: <code>' + _html.escape(dep['tx']) + '</code>\n'
+        if dep.get('ts'):
+            msg += '🕐 زمان واریز: <code>' + fmt_iran_datetime(dep['ts']) + '</code>'
+    return msg
+
+
+_topup_approve_lock = threading.Lock()
+
+
+def approve_topup_request(req_id, auto=False, reason='hash_ok'):
+    """تأیید یه درخواست شارژ (دستی با دکمه‌ی ادمین یا خودکار). True اگه همین الان تأیید شد."""
+    with _topup_approve_lock:
+        req = get_topup_request(req_id)
+        if not (req and req[3] == 'pending'):
+            return False
+        # شارژ رمزارزی دقیقاً همون مبلغی‌ه که کاربر وارد کرده (ضریب واریزی فقط برای کارت‌به‌کارت)
+        multiplier = 1.0 if get_topup_method(req_id) == 'crypto' else get_topup_multiplier()
+        credited = int(round(req[2] * multiplier))
+        update_topup_status(req_id, 'approved')
+        update_wallet_db(req[1], credited)
+        try:
+            row = get_crypto_request_row(req_id)
+            if row and row[9]:
+                mark_deposit_used(row[9], req_id)     # این واریز دیگه به درخواست دیگه‌ای نخوره
+        except Exception as e:
+            print('⚠️ ثبت واریز استفاده‌شده ناموفق بود:', e)
+    if multiplier != 1:
+        send_message(req[1], u(req[1], 'topup_approved_mult', credited=f'{credited:,}', amount=f'{req[2]:,}',
+                               multiplier=('%g' % multiplier)))
+    else:
+        send_message(req[1], u(req[1], 'topup_approved', credited=f'{credited:,}'))
+    note = u('fa', 'admin_topup_approved', req_id=str(req_id), credited=f'{credited:,}')
+    auto_note = ('\n🤖 تأیید خودکار: هش تراکنش با واریز نوبیتکس خورد' if reason == 'hash_ok'
+                 else '\n🤖 تأیید خودکار: مقدار و زمان واریز با واریز نوبیتکس خورد (بدون هش)')
+    send_message(ADMIN_ID, note + (auto_note if auto else ''))
+    return True
+
+
+_crypto_notified = set()
+
+
+def handle_crypto_eval(req_id, res, force_notify=False):
+    """نتیجه‌ی تطبیق رو اعمال می‌کنه: تأیید خودکار (اگه روشن باشه) یا پیام اطلاعاتی به ادمین (هر حالت فقط یک‌بار)."""
+    st = res.get('state')
+    row = get_crypto_request_row(req_id)
+    label = str(row[5]).upper() if row and row[5] else ''
+    if st in ('hash_ok', 'matched'):
+        try:
+            set_request_matched_tx(req_id, res['deposit'].get('tx') or None)
+        except Exception as e:
+            print('⚠️ ثبت matched_tx ناموفق:', e)
+        if crypto_auto_confirm_enabled():
+            # هش‌خورده (hash_ok) یا مقدار+کوین+زمان خورده بدون هش (matched): هر دو خودکار تأیید می‌شن
+            # قبل از تأیید، گزارش واریز (مقدار واقعی) برای ادمین می‌ره تا همیشه ببینی چی تأیید شده
+            send_message(ADMIN_ID, format_crypto_eval(req_id, res, label))
+            if approve_topup_request(req_id, auto=True, reason=st):
+                return
+    key = (req_id, st)
+    if key in _crypto_notified or (st == 'not_found' and not force_notify):
+        return
+    _crypto_notified.add(key)
+    kb = None
+    if st in ('hash_ok', 'matched', 'mismatch', 'hash_mismatch', 'ambiguous', 'unconfirmed'):
+        kb = {'inline_keyboard': [[
+            {'text': u('fa', 'admin_btn_accept'), 'callback_data': 'topup_acc_' + str(req_id)},
+            {'text': u('fa', 'admin_btn_reject'), 'callback_data': 'topup_rej_' + str(req_id)}]]}
+    send_message(ADMIN_ID, format_crypto_eval(req_id, res, label), reply_markup=kb)
+
+
+def check_crypto_request_async(req_id):
+    def _run():
+        try:
+            if nobitex_keys_configured():
+                handle_crypto_eval(req_id, evaluate_crypto_request(req_id), force_notify=True)
+        except Exception as e:
+            print('⚠️ بررسی نوبیتکس ناموفق بود:', e)
+    threading.Thread(target=_run, daemon=True).start()
+
+
+def crypto_deposit_watcher():
+    """هر ~۴۵ ثانیه درخواست‌های رمزارزیِ معلق رو با واریزهای نوبیتکس تطبیق می‌ده (فقط اگه درخواست معلقی باشه)."""
+    time.sleep(25)
+    while True:
+        try:
+            if nobitex_keys_configured():
+                for rid in list_pending_crypto_requests(hours=12):
+                    handle_crypto_eval(rid, evaluate_crypto_request(rid))
+        except Exception as e:
+            print('⚠️ crypto_deposit_watcher:', e)
+        time.sleep(45)
+
+
+def nobitex_check_report():
+    """گزارش تست اتصال برای دستور ادمین /nobitexcheck."""
+    if not nobitex_keys_configured():
+        return '⚠️ کلید API نوبیتکس تنظیم نشده.'
+    try:
+        deps = nobitex_fetch_deposits(force=True)
+    except Exception as e:
+        return '❌ اتصال/دسترسی به نوبیتکس ناموفق بود:\n' + _html.escape(str(e)[:300])
+    lines = [f'✅ اتصال به نوبیتکس برقراره. {len(deps)} واریز خونده شد.']
+    for d in deps[:3]:
+        lines.append(f'• {d["currency"].upper()} {fmt_coin_amount(d["amount"])} — '
+                     + (fmt_iran_datetime(d['ts']) if d['ts'] else 'زمان نامشخص')
+                     + ('' if d['confirmed'] else ' (تأیید نشده)'))
+    lines.append(f'تأیید خودکار: {"روشن" if crypto_auto_confirm_enabled() else "خاموش"}')
+    return '\n'.join(lines)
 
 
 @with_db_retry
@@ -2077,16 +2550,18 @@ def set_free_trial(user_id):
 
 
 @with_db_retry
-def create_topup_request(user_id, amount, method='card', crypto_amount=None, crypto_price=None):
+def create_topup_request(user_id, amount, method='card', crypto_amount=None, crypto_price=None,
+                         coin_symbol=None, coin_qty=None, tx_hash=None, req_ts=None):
     conn = get_conn()
     c = conn.cursor()
     if method == 'card':
         c.execute('INSERT INTO topup_requests (user_id, amount, created_at) VALUES (?, ?, ?)',
                    (user_id, amount, datetime.now().isoformat()))
     else:
-        c.execute('INSERT INTO topup_requests (user_id, amount, created_at, method, crypto_amount, crypto_price) '
-                  'VALUES (?, ?, ?, ?, ?, ?)',
-                  (user_id, amount, datetime.now().isoformat(), method, str(crypto_amount), str(crypto_price)))
+        c.execute('INSERT INTO topup_requests (user_id, amount, created_at, method, crypto_amount, crypto_price, '
+                  'coin_symbol, coin_qty, tx_hash, req_ts) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)',
+                  (user_id, amount, datetime.now().isoformat(), method, str(crypto_amount), str(crypto_price),
+                   coin_symbol, None if coin_qty is None else repr(float(coin_qty)), tx_hash, req_ts))
     conn.commit()
     req_id = c.lastrowid
     conn.close()
@@ -3057,7 +3532,8 @@ def send_crypto_topup_info(chat_id, amount, coin):
     else:
         network_line = ''
     user_steps[str(chat_id)] = {'step': 'waiting_receipt', 'amount': amount, 'method': 'crypto',
-                                'requested_at': time.time(), 'coin_label': coin['label'], 'coin_amount': coin_amount, 'price': price}
+                                'requested_at': time.time(), 'coin_label': coin['label'], 'coin_amount': coin_amount, 'price': price,
+                                'coin_symbol': coin['symbol']}
     send_message(chat_id, u(chat_id, 'topup_crypto_info', divider=DIVIDER, amount=f'{amount:,}',
                             price=f'{price:,.0f}', coin=_html.escape(coin['label']),
                             coin_amount=fmt_coin_amount(coin_amount), wallet=_html.escape(coin['wallet']),
@@ -3728,6 +4204,7 @@ network_diagnostic()
 delete_webhook()
 set_bot_commands()
 threading.Thread(target=commands_watcher, daemon=True).start()
+threading.Thread(target=crypto_deposit_watcher, daemon=True).start()
 print('✅ ربات با موفقیت اجرا شد.')
 last_update_id = 0
 
@@ -4260,21 +4737,7 @@ def process_update(update):
 
         elif data.startswith('topup_acc_'):
             req_id = int(data.split('_')[2])
-            req = get_topup_request(req_id)
-            if req and req[3] == 'pending':
-                # شارژ رمزارزی دقیقاً همون مبلغی‌ه که کاربر وارد کرده (ضریب واریزی فقط برای کارت‌به‌کارت)
-                multiplier = 1.0 if get_topup_method(req_id) == 'crypto' else get_topup_multiplier()
-                credited = int(round(req[2] * multiplier))
-                update_topup_status(req_id, 'approved')
-                update_wallet_db(req[1], credited)
-                if multiplier != 1:
-                    mult_str = ('%g' % multiplier)
-                    send_message(req[1], u(req[1], 'topup_approved_mult', credited=f'{credited:,}',
-                                           amount=f'{req[2]:,}', multiplier=mult_str))
-                else:
-                    send_message(req[1], u(req[1], 'topup_approved', credited=f'{credited:,}'))
-                send_message(ADMIN_ID, u('fa', 'admin_topup_approved', req_id=str(req_id), credited=f'{credited:,}'))
-            else:
+            if not approve_topup_request(req_id):
                 send_message(ADMIN_ID, u('fa', 'admin_already_reviewed'))
 
         elif data.startswith('topup_rej_'):
@@ -4301,7 +4764,10 @@ def process_update(update):
 
         matched_action_key = COMMAND_TO_ACTION_KEY.get(text) or get_label_to_action_key().get(text)
 
-        if text == '/start' or text.startswith('/start '):
+        if text == '/nobitexcheck' and chat_id == ADMIN_ID:
+            send_message(chat_id, nobitex_check_report())
+
+        elif text == '/start' or text.startswith('/start '):
             add_user(chat_id)
             user_steps[str(chat_id)] = {}
             main_menu(chat_id)
@@ -4586,7 +5052,9 @@ def process_update(update):
             if is_crypto:
                 req_id = create_topup_request(chat_id, amount, 'crypto',
                                               f"{fmt_coin_amount(step.get('coin_amount'))} {step.get('coin_label')}",
-                                              step.get('price'))
+                                              step.get('price'), coin_symbol=step.get('coin_symbol'),
+                                              coin_qty=step.get('coin_amount'), tx_hash=tx_hash,
+                                              req_ts=step.get('requested_at'))
             else:
                 req_id = create_topup_request(chat_id, amount)
 
@@ -4618,6 +5086,8 @@ def process_update(update):
                 send_photo(ADMIN_ID, photo_id, caption=admin_caption, reply_markup=admin_kb)
             else:
                 send_message(ADMIN_ID, admin_caption, reply_markup=admin_kb)
+            if is_crypto:
+                check_crypto_request_async(req_id)    # تطبیق با واریزهای نوبیتکس (نتیجه جدا برای ادمین می‌آد)
 
         elif step.get('step') == 'waiting_receipt' and step.get('method') == 'crypto':
             send_message(chat_id, u(chat_id, 'topup_crypto_need_proof'))
