@@ -1217,6 +1217,9 @@ BG_EXECUTOR = ThreadPoolExecutor(max_workers=4)
 # راه‌حل: برای پنل هر بار اتصال تازه (Connection: close) + timeout جدا برای
 # اتصال و خوندن + لاگ زمان.
 PANEL_TIMEOUT = (8, 30)   # (اتصال، خوندن)
+# پنل با TCP/TLS سالم جواب می‌ده ولی درخواست‌های پیش‌فرض python-requests رو (از IP دیتاسنتر)
+# ظاهراً بی‌صدا رها می‌کنه، در حالی که curl سریع جواب می‌گیره. UA شبیه curl می‌فرستیم.
+PANEL_USER_AGENT = os.getenv('PANEL_USER_AGENT', 'curl/8.5.0')
 
 
 def panel_request(method, url, retry_read=False, attempts=2, **kwargs):
@@ -1228,6 +1231,8 @@ def panel_request(method, url, retry_read=False, attempts=2, **kwargs):
     """
     headers = dict(kwargs.pop('headers', {}) or {})
     headers['Connection'] = 'close'
+    headers.setdefault('User-Agent', PANEL_USER_AGENT)
+    headers.setdefault('Accept', '*/*')
     kwargs.setdefault('timeout', PANEL_TIMEOUT)
     last_exc = None
     for attempt in range(1, attempts + 1):
@@ -4794,17 +4799,26 @@ def panel_selftest():
         print('🧪 TLS handshake: %.2fs' % (time.time() - t)); ssock.close()
     except Exception as e:
         print('🧪 خطای شبکه:', e)
-    for name, method, kw in (
-        ('GET بدون کلید', 'GET', {}),
-        ('POST کلید غلط', 'POST', {'headers': {'Authorization': 'Bearer bad'}, 'json': {'gb': 1}}),
-        ('GET با کلید واقعی', 'GET', {'headers': {'Authorization': 'Bearer ' + CONFIG_KEY}}),
-    ):
-        t = time.time()
-        try:
-            r = requests.request(method, CONFIG_API, timeout=(8, 30), **kw)
-            print('🧪 %s -> %s در %.2fs | %s' % (name, r.status_code, time.time() - t, r.text[:80].replace('\n', ' ')))
-        except Exception as e:
-            print('🧪 %s -> خطا بعد از %.1fs: %s' % (name, time.time() - t, e))
+    uas = (
+        ('python-requests پیش‌فرض', None),
+        ('curl', 'curl/8.5.0'),
+        ('مرورگر', 'Mozilla/5.0 (Linux; Android 13) AppleWebKit/537.36 Chrome/120.0 Mobile Safari/537.36'),
+    )
+    for ua_name, ua in uas:
+        for name, method, kw in (
+            ('GET بدون کلید', 'GET', {}),
+            ('POST کلید غلط', 'POST', {'headers': {'Authorization': 'Bearer bad'}, 'json': {'gb': 1}}),
+        ):
+            kw = dict(kw)
+            hdrs = dict(kw.pop('headers', {}) or {})
+            if ua:
+                hdrs['User-Agent'] = ua
+            t = time.time()
+            try:
+                r = requests.request(method, CONFIG_API, headers=hdrs, timeout=(8, 12), **kw)
+                print('🧪 [%s] %s -> %s در %.2fs | %s' % (ua_name, name, r.status_code, time.time() - t, r.text[:60].replace('\n', ' ')))
+            except Exception as e:
+                print('🧪 [%s] %s -> خطا بعد از %.1fs: %s' % (ua_name, name, time.time() - t, str(e)[:100]))
 
 
 if os.getenv('PANEL_SELFTEST') == '1':
