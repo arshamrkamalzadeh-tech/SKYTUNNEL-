@@ -32,13 +32,6 @@ BASE_URL = "https://api.splus.ir/bot" + TOKEN
 CONFIG_API = os.getenv("CONFIG_API", "https://su.randomatic.ir/api/v1/configs")
 CONFIG_KEY = os.getenv("CONFIG_KEY", "").strip()
 
-# پنل پشتیبان (اختیاری): اگه هر دو ست باشن، موقع خطا/تایم‌اوتِ پنل اصلی سریع روی این سوییچ می‌شه.
-CONFIG_API_2 = os.getenv("CONFIG_API_2", "").strip().rstrip("/")
-CONFIG_KEY_2 = os.getenv("CONFIG_KEY_2", "").strip()
-# کانفیگ‌هایی که روی پنل پشتیبان ساخته می‌شن، config_id‌شون با این پیشوند ذخیره می‌شه
-# تا تمدید/حذف/مصرف/... بعداً به پنل درست بره (بدون تغییر ساختار دیتابیس).
-BACKUP_PREFIX = "b2:"
-
 # --- فروشندگی (reseller): حداقل خرید استخر برای فعال‌سازی و قیمت هر گیگ ---
 RESELLER_MIN_GB = int(os.getenv("RESELLER_MIN_GB", "50"))
 RESELLER_PRICE_PER_GB = int(os.getenv("RESELLER_PRICE_PER_GB", "2000"))
@@ -1207,62 +1200,6 @@ UPDATE_EXECUTOR = ThreadPoolExecutor(max_workers=16)
 # کارهای فرعیِ «فایر-اند-فورگت» (مثل answerCallbackQuery یا رفرش کش تنظیمات) که
 # نباید جواب اصلی به کاربر رو معطل کنن، تو یه استخر جدا اجرا می‌شن.
 BG_EXECUTOR = ThreadPoolExecutor(max_workers=4)
-
-# ---------------------------------------------------------------------------
-# درخواست به پنل (su.randomatic.ir)
-# ---------------------------------------------------------------------------
-# مشکل: SESSION مشترک اتصال keep-alive رو نگه می‌داشت. بعد از چند دقیقه بی‌کاری،
-# فایروال/NAT اون سوکت رو بی‌صدا می‌بست و اولین درخواست بعدی (مثلاً «تایید خرید»)
-# روی سوکت مرده می‌رفت و تا timeout هیچ جوابی نمی‌اومد.
-# راه‌حل: برای پنل هر بار اتصال تازه (Connection: close) + timeout جدا برای
-# اتصال و خوندن + لاگ زمان.
-PANEL_TIMEOUT = (8, 30)   # (اتصال، خوندن)
-# پنل با TCP/TLS سالم جواب می‌ده ولی درخواست‌های پیش‌فرض python-requests رو (از IP دیتاسنتر)
-# ظاهراً بی‌صدا رها می‌کنه، در حالی که curl سریع جواب می‌گیره. UA شبیه curl می‌فرستیم.
-PANEL_USER_AGENT = os.getenv('PANEL_USER_AGENT', 'curl/8.5.0')
-
-
-def panel_request(method, url, retry_read=False, attempts=2, **kwargs):
-    """
-    درخواست به پنل با اتصال تازه.
-    - ConnectTimeout: همیشه یک‌بار ریتری می‌شه (درخواست هنوز به پنل نرسیده، امنه).
-    - ReadTimeout: فقط اگه retry_read=True (برای درخواست‌های بدون اثر جانبی مثل GET/DELETE)،
-      چون ممکنه پنل درخواست رو انجام داده باشه و فقط جواب نرسیده باشه.
-    """
-    headers = dict(kwargs.pop('headers', {}) or {})
-    headers['Connection'] = 'close'
-    headers.setdefault('User-Agent', PANEL_USER_AGENT)
-    headers.setdefault('Accept', '*/*')
-    kwargs.setdefault('timeout', PANEL_TIMEOUT)
-    last_exc = None
-    for attempt in range(1, attempts + 1):
-        t0 = time.time()
-        try:
-            res = requests.request(method, url, headers=headers, **kwargs)
-            print('⏱ panel %s %s -> %s در %.2fs' % (method, url.split('/api/')[-1], res.status_code, time.time() - t0))
-            return res
-        except requests.exceptions.ConnectTimeout as e:
-            print('⚠️ panel connect timeout (تلاش %d) بعد از %.1fs' % (attempt, time.time() - t0))
-            last_exc = e
-        except requests.exceptions.ReadTimeout as e:
-            print('⚠️ panel read timeout (تلاش %d) بعد از %.1fs' % (attempt, time.time() - t0))
-            last_exc = e
-            if not retry_read:
-                raise
-        except requests.exceptions.ConnectionError as e:
-            print('⚠️ panel connection error (تلاش %d) بعد از %.1fs: %s' % (attempt, time.time() - t0, e))
-            last_exc = e
-            if not retry_read:
-                raise
-    raise last_exc
-
-
-def split_config_id(config_id):
-    """config_id ذخیره‌شده رو به (آدرس API، کلید، آیدی واقعی روی پنل) تبدیل می‌کنه."""
-    cid = str(config_id)
-    if cid.startswith(BACKUP_PREFIX):
-        return CONFIG_API_2, CONFIG_KEY_2, cid[len(BACKUP_PREFIX):]
-    return CONFIG_API, CONFIG_KEY, cid
 
 # قفل جدا برای هر chat_id: دو آپدیت از یه کاربر واحد (مثلاً دوبار زدن سریع
 # دکمه‌ی «تایید خرید») صف می‌شن و یکی‌یکی اجرا می‌شن؛ کاربرهای مختلف همچنان
@@ -2695,12 +2632,10 @@ def delete_config_from_panel(config_id):
     if not config_id:
         return True
     try:
-        api, key, raw_id = split_config_id(config_id)
-        res = panel_request(
-            'DELETE',
-            api + '/' + raw_id,
-            retry_read=True,
-            headers={'Authorization': 'Bearer ' + key}
+        res = SESSION.delete(
+            CONFIG_API + '/' + str(config_id),
+            headers={'Authorization': 'Bearer ' + CONFIG_KEY},
+            timeout=15
         )
         return res.status_code in (200, 201, 204)
     except Exception:
@@ -2710,12 +2645,12 @@ def delete_config_from_panel(config_id):
 def _panel_action(method, path_suffix, config_id, json_body=None):
     """کمکی مشترک برای عملیات مدیریتی پنل (تمدید/تغییر نام/توقف/ازسرگیری/تغییر لینک)."""
     try:
-        api, key, raw_id = split_config_id(config_id)
-        res = panel_request(
+        res = SESSION.request(
             method,
-            api + '/' + raw_id + path_suffix,
-            headers={'Authorization': 'Bearer ' + key},
-            json=json_body
+            CONFIG_API + '/' + str(config_id) + path_suffix,
+            headers={'Authorization': 'Bearer ' + CONFIG_KEY},
+            json=json_body,
+            timeout=20
         )
         if res.status_code in (200, 201):
             try:
@@ -2758,12 +2693,10 @@ def get_config_usage_gb(config_id):
     if not config_id:
         return None
     try:
-        api, key, raw_id = split_config_id(config_id)
-        res = panel_request(
-            'GET',
-            api + '/' + raw_id,
-            retry_read=True,
-            headers={'Authorization': 'Bearer ' + key}
+        res = SESSION.get(
+            CONFIG_API + '/' + str(config_id),
+            headers={'Authorization': 'Bearer ' + CONFIG_KEY},
+            timeout=15
         )
         if res.status_code not in (200, 201):
             print('⚠️ خطای دریافت اطلاعات کانفیگ (وضعیت ' + str(res.status_code) + '):', res.text[:500])
@@ -3254,32 +3187,24 @@ def answer_callback(callback_query_id):
         _answer_callback_sync(callback_query_id)
 
 
-# اگه پنل اصلی تا این زمان (epoch) «خراب» علامت خورده باشه، ساخت کانفیگ اول سراغ پشتیبان می‌ره
-_panel_bad_until = {'primary': 0.0, 'backup': 0.0}
-PANEL_BAD_COOLDOWN = 120  # ثانیه
-FAILOVER_TIMEOUT = (5, 15)  # وقتی پنل پشتیبان هست، زود قضاوت کن و سوییچ شو
-
-
-def _make_config_on(api, key, prefix, gb, label, days, proto, attempts, timeout):
-    """ساخت کانفیگ روی یک پنل. فیلد retryable می‌گه آیا ارزش داره پنل دیگه رو امتحان کنیم."""
+def make_config(gb, label, days, proto='both'):
     try:
-        res = panel_request(
-            'POST',
-            api,
-            headers={'Authorization': 'Bearer ' + key},
+        res = SESSION.post(
+            CONFIG_API,
+            headers={'Authorization': 'Bearer ' + CONFIG_KEY},
             json={'gb': gb, 'label': label, 'expiryDays': days, 'proto': proto},
-            attempts=attempts,
-            timeout=timeout
+            timeout=20
         )
         if res.status_code in (200, 201):
             data = res.json()
-            cid = data.get('id') or data.get('uuid') or data.get('username')
             return {
                 'success': True,
                 'sub_url': data.get('subUrl'),
-                'config_id': (prefix + str(cid)) if cid else cid,
+                'config_id': data.get('id') or data.get('uuid') or data.get('username'),
                 'data': data
             }
+        # اگه پنل با proto_unavailable رد کنه (مثلاً فروش OpenVPN موقتاً بسته
+        # باشه)، این خطا رو جدا تشخیص می‌دیم تا پیام مناسب به کاربر نشون بدیم.
         err_code = None
         body_text = None
         try:
@@ -3288,47 +3213,15 @@ def _make_config_on(api, key, prefix, gb, label, days, proto, attempts, timeout)
             body_text = body
         except Exception:
             body_text = res.text[:500] if res.text else None
+        # این پرینت رو عمداً برای هر خطای ساخت کانفیگ (نه فقط DNS) گذاشتیم؛ چون
+        # قبلاً وقتی پنل یه چیزی غیر از 200/201 برمی‌گردوند، هیچ جزئیاتی تو
+        # لاگ رایلوی ثبت نمی‌شد و تشخیص علت واقعی (مثلاً proto نامعتبر بودن)
+        # غیرممکن بود.
         print('⚠️ خطای ساخت کانفیگ (proto=' + str(proto) + '، کد ' + str(res.status_code) + '):', body_text)
-        # خطای سرور / کلید نامعتبر / کمبود اعتبار / rate-limit => پنل دیگه رو امتحان کن
-        retryable = res.status_code >= 500 or res.status_code in (401, 402, 403, 429)
-        return {'success': False, 'error': str(res.status_code), 'error_code': err_code, 'retryable': retryable}
+        return {'success': False, 'error': str(res.status_code), 'error_code': err_code}
     except Exception as e:
         print('⚠️ استثنا در ساخت کانفیگ (proto=' + str(proto) + '):', e)
-        return {'success': False, 'error': str(e), 'error_code': None, 'retryable': True}
-
-
-def make_config(gb, label, days, proto='both'):
-    panels = [('primary', CONFIG_API, CONFIG_KEY, '')]
-    if CONFIG_API_2 and CONFIG_KEY_2:
-        panels.append(('backup', CONFIG_API_2, CONFIG_KEY_2, BACKUP_PREFIX))
-    multi = len(panels) > 1
-
-    # اگه اصلی تازه خراب شده و پشتیبان سالمه، اول سراغ پشتیبان برو (سوییچ فوری)
-    now = time.time()
-    if multi and _panel_bad_until['primary'] > now and _panel_bad_until['backup'] <= now:
-        panels.reverse()
-
-    last = {'success': False, 'error': 'no_panel', 'error_code': None}
-    for idx, (name, api, key, prefix) in enumerate(panels):
-        has_next = idx < len(panels) - 1
-        res = _make_config_on(
-            api, key, prefix, gb, label, days, proto,
-            attempts=1 if has_next else 2,
-            timeout=FAILOVER_TIMEOUT if multi else PANEL_TIMEOUT
-        )
-        if res['success']:
-            _panel_bad_until[name] = 0.0
-            if name == 'backup':
-                print('✅ کانفیگ روی پنل پشتیبان ساخته شد')
-            return res
-        last = res
-        if res.get('retryable') and has_next:
-            _panel_bad_until[name] = time.time() + PANEL_BAD_COOLDOWN
-            print('🔁 پنل %s خطا داد؛ سوییچ به پنل بعدی' % name)
-            continue
-        break
-    last.pop('retryable', None)
-    return last
+        return {'success': False, 'error': str(e), 'error_code': None}
 
 
 def gregorian_to_jalali(gy, gm, gd):
@@ -3421,13 +3314,11 @@ def set_config_note(config_id, note):
     if not config_id:
         return
     try:
-        api, key, raw_id = split_config_id(config_id)
-        panel_request(
-            'PUT',
-            f'{api}/{raw_id}/note',
-            retry_read=True,
-            headers={'Authorization': 'Bearer ' + key, 'Content-Type': 'application/json'},
-            json={'note': note}
+        SESSION.put(
+            f'{CONFIG_API}/{config_id}/note',
+            headers={'Authorization': 'Bearer ' + CONFIG_KEY, 'Content-Type': 'application/json'},
+            json={'note': note},
+            timeout=10
         )
     except Exception as e:
         print('⚠️ خطا در ثبت یادداشت کانفیگ:', e)
@@ -4783,46 +4674,6 @@ threading.Thread(target=commands_watcher, daemon=True).start()
 threading.Thread(target=registry_watcher, daemon=True).start()
 threading.Thread(target=crypto_deposit_watcher, daemon=True).start()
 print('✅ ربات با موفقیت اجرا شد.')
-
-
-def panel_selftest():
-    """تست تشخیصی (فقط وقتی PANEL_SELFTEST=1 باشه): از خود Railway به پنل درخواست می‌زنه
-    و زمان هر مرحله رو لاگ می‌کنه. هیچ کانفیگی نمی‌سازه."""
-    import socket, ssl
-    host = CONFIG_API.split('//')[-1].split('/')[0]
-    try:
-        t = time.time(); ip = socket.gethostbyname(host)
-        print('🧪 DNS %s -> %s (%.2fs)' % (host, ip, time.time() - t))
-        t = time.time(); sock = socket.create_connection((host, 443), timeout=10)
-        print('🧪 TCP connect: %.2fs' % (time.time() - t))
-        t = time.time(); ssock = ssl.create_default_context().wrap_socket(sock, server_hostname=host)
-        print('🧪 TLS handshake: %.2fs' % (time.time() - t)); ssock.close()
-    except Exception as e:
-        print('🧪 خطای شبکه:', e)
-    uas = (
-        ('python-requests پیش‌فرض', None),
-        ('curl', 'curl/8.5.0'),
-        ('مرورگر', 'Mozilla/5.0 (Linux; Android 13) AppleWebKit/537.36 Chrome/120.0 Mobile Safari/537.36'),
-    )
-    for ua_name, ua in uas:
-        for name, method, kw in (
-            ('GET بدون کلید', 'GET', {}),
-            ('POST کلید غلط', 'POST', {'headers': {'Authorization': 'Bearer bad'}, 'json': {'gb': 1}}),
-        ):
-            kw = dict(kw)
-            hdrs = dict(kw.pop('headers', {}) or {})
-            if ua:
-                hdrs['User-Agent'] = ua
-            t = time.time()
-            try:
-                r = requests.request(method, CONFIG_API, headers=hdrs, timeout=(8, 12), **kw)
-                print('🧪 [%s] %s -> %s در %.2fs | %s' % (ua_name, name, r.status_code, time.time() - t, r.text[:60].replace('\n', ' ')))
-            except Exception as e:
-                print('🧪 [%s] %s -> خطا بعد از %.1fs: %s' % (ua_name, name, time.time() - t, str(e)[:100]))
-
-
-if os.getenv('PANEL_SELFTEST') == '1':
-    threading.Thread(target=panel_selftest, daemon=True).start()
 last_update_id = 0
 
 def process_update(update):
