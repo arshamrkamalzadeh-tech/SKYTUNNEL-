@@ -4778,6 +4778,37 @@ threading.Thread(target=commands_watcher, daemon=True).start()
 threading.Thread(target=registry_watcher, daemon=True).start()
 threading.Thread(target=crypto_deposit_watcher, daemon=True).start()
 print('✅ ربات با موفقیت اجرا شد.')
+
+
+def panel_selftest():
+    """تست تشخیصی (فقط وقتی PANEL_SELFTEST=1 باشه): از خود Railway به پنل درخواست می‌زنه
+    و زمان هر مرحله رو لاگ می‌کنه. هیچ کانفیگی نمی‌سازه."""
+    import socket, ssl
+    host = CONFIG_API.split('//')[-1].split('/')[0]
+    try:
+        t = time.time(); ip = socket.gethostbyname(host)
+        print('🧪 DNS %s -> %s (%.2fs)' % (host, ip, time.time() - t))
+        t = time.time(); sock = socket.create_connection((host, 443), timeout=10)
+        print('🧪 TCP connect: %.2fs' % (time.time() - t))
+        t = time.time(); ssock = ssl.create_default_context().wrap_socket(sock, server_hostname=host)
+        print('🧪 TLS handshake: %.2fs' % (time.time() - t)); ssock.close()
+    except Exception as e:
+        print('🧪 خطای شبکه:', e)
+    for name, method, kw in (
+        ('GET بدون کلید', 'GET', {}),
+        ('POST کلید غلط', 'POST', {'headers': {'Authorization': 'Bearer bad'}, 'json': {'gb': 1}}),
+        ('GET با کلید واقعی', 'GET', {'headers': {'Authorization': 'Bearer ' + CONFIG_KEY}}),
+    ):
+        t = time.time()
+        try:
+            r = requests.request(method, CONFIG_API, timeout=(8, 30), **kw)
+            print('🧪 %s -> %s در %.2fs | %s' % (name, r.status_code, time.time() - t, r.text[:80].replace('\n', ' ')))
+        except Exception as e:
+            print('🧪 %s -> خطا بعد از %.1fs: %s' % (name, time.time() - t, e))
+
+
+if os.getenv('PANEL_SELFTEST') == '1':
+    threading.Thread(target=panel_selftest, daemon=True).start()
 last_update_id = 0
 
 def process_update(update):
