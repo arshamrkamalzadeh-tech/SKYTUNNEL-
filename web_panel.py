@@ -1537,6 +1537,7 @@ ICONS = {
     "appearance": '<circle cx="13.5" cy="6.5" r="1.5"/><circle cx="17.5" cy="10.5" r="1.5"/><circle cx="8.5" cy="7.5" r="1.5"/><circle cx="6.5" cy="12.5" r="1.5"/><path d="M12 2a10 10 0 1 0 0 20c1.1 0 2-.9 2-2 0-.5-.2-1-.5-1.3-.3-.4-.5-.8-.5-1.3 0-1.1.9-2 2-2h2.4a4.6 4.6 0 0 0 4.6-4.6C22 6 17.5 2 12 2z"/>',
     "sellertheme": '<rect x="3" y="3" width="18" height="18" rx="4"/><path d="M3 9h18M9 21V9"/>',
     "crypto": '<circle cx="12" cy="12" r="9"/><path d="M9.5 8.5h4a1.8 1.8 0 0 1 0 3.6H9.5m0 0h4.4a1.8 1.8 0 0 1 0 3.6H9.5M9.5 7v10M12 6v2m0 8v2"/>',
+    "salenotify": '<path d="M4 4h16v12H8l-4 4z"/><path d="M8 9h8M8 12h5"/>',
     "more": '<path d="M4 7h16M4 12h16M4 17h16"/>',
     "logout": '<path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4"/><path d="M16 17l5-5-5-5M21 12H9"/>',
 }
@@ -1551,7 +1552,8 @@ NAV = [
     ("نمای کلی", [("dashboard", "داشبورد", "dashboard")]),
     ("مشتریان", [("users", "کاربران", "users"), ("tickets", "تیکت‌ها", "tickets"), ("resellers", "فروشنده‌ها", "resellers_page")]),
     ("فروش", [("discounts", "کدهای تخفیف", "discount_codes"), ("topups", "شارژهای کیف پول", "topups_page"),
-              ("crypto", "رمزارزها", "crypto_page"), ("broadcast", "پیام همگانی", "broadcast")]),
+              ("crypto", "رمزارزها", "crypto_page"), ("broadcast", "پیام همگانی", "broadcast"),
+              ("salenotify", "اعلان فروش", "sale_notify_page")]),
     ("ربات", [("settings", "تنظیمات ربات", "settings_page"), ("texts", "متن‌های ربات", "texts_page"),
               ("appearance", "دکمه‌ها و ظاهر", "appearance_page"),
               ("sellertheme", "ظاهر پنل فروشندگان", "seller_theme_page")]),
@@ -3028,6 +3030,172 @@ def broadcast():
     </div>
     <p><small class="muted">این پیام برای همه‌ی کاربرانی که تا الان با ربات فروش /start زده‌اند ارسال می‌شود.</small></p>"""
     return render_page("پیام همگانی", "broadcast", content)
+
+
+# ---------- اعلان فروش (بات sales_notifier.py این تنظیمات رو از جدول settings می‌خونه) ----------
+
+SALE_NOTIFY_FIELDS = ("gb", "type", "days", "price", "time", "date", "user", "bot")
+SALE_NOTIFY_DEFAULT_TEMPLATE = (
+    "📦 {gb} گیگ {type}\n"
+    "🕒 در ساعت {time}\n"
+    "💰 با قیمت {price} تومان\n"
+    "👤 توسط آیدی عددی {user}\n"
+    "\n"
+    "🛒 جهت خرید: {bot}"
+)
+SALE_NOTIFY_TYPES = (("config", "کانفیگ"), ("wireguard", "وایرگارد"), ("both", "کانفیگ + وایرگارد"),
+                     ("openvpn", "OpenVPN"), ("dns", "DNS بازی"))
+SALE_NOTIFY_SAMPLE = {"gb": "10", "type": "کانفیگ", "days": "30", "price": "35,000",
+                      "time": "14:32", "date": "2026-10-12", "user": "45****90", "bot": "@SKYTUNNELbot"}
+
+
+def sale_notify_render(tpl, values):
+    return re.sub(r"\{(\w+)\}", lambda m: str(values.get(m.group(1), m.group(0))), tpl)
+
+
+@app.route("/sale-notify")
+@login_required
+def sale_notify_page():
+    ensure_settings_table()
+    st = get_all_settings()
+    on = st.get("sale_notify_enabled", "1") == "1"
+    channel = st.get("sale_notify_channel", "")
+    bot_name = st.get("sale_notify_bot", "@SKYTUNNELbot")
+    tpl = st.get("sale_notify_template") or SALE_NOTIFY_DEFAULT_TEMPLATE
+
+    status_html = '<p class="muted">هنوز گزارشی از بات اعلان نرسیده؛ مطمئن شو sales_notifier.py در حال اجراست.</p>'
+    raw = st.get("sale_notify_status")
+    if raw:
+        try:
+            info = json.loads(raw)
+            age = rel_time(info.get("ts"))
+            stale = False
+            dt = parse_ts(info.get("ts"))
+            if dt and (datetime.now(timezone.utc) - dt).total_seconds() > 300:
+                stale = True
+            badge = "⛔ احتمالاً بات اعلان خاموشه" if stale else ("✅ سالم" if info.get("ok") else "⚠️ خطا")
+            status_html = (f'<div class="kv"><div><span>وضعیت</span><b>{badge}</b></div>'
+                           f'<div><span>اکانت</span><b dir="ltr">{esc(info.get("account") or "—")}</b></div>'
+                           f'<div><span>آخرین گزارش</span><b>{esc(age)}</b></div></div>'
+                           f'<p class="muted" style="margin:8px 0 0;">{esc(info.get("msg", ""))}</p>')
+        except Exception:
+            pass
+
+    type_inputs = "".join(
+        f'<div><label>نام نوع «{k}» در اعلان</label>'
+        f'<input type="text" name="type_{k}" value="{esc(st.get("sale_notify_type_" + k, ""))}" placeholder="{esc(d)}"></div>'
+        for k, d in SALE_NOTIFY_TYPES)
+
+    preview = esc(re.sub(r"<[^>]+>", "", sale_notify_render(tpl, {**SALE_NOTIFY_SAMPLE, "bot": bot_name or "@SKYTUNNELbot"})))
+    fields_hint = " ".join(f"<code>{{{f}}}</code>" for f in SALE_NOTIFY_FIELDS)
+
+    content = f"""
+    <div class="card"><h3>وضعیت بات اعلان</h3>{status_html}</div>
+
+    <div class="card">
+      <div class="switch-row" style="padding-top:0;">
+        <div><b>📢 اعلان خودکار فروش</b><br><small class="muted">با هر خرید موفق، یه پیام توی کانال ارسال می‌شه.</small></div>
+        <form method="post" action="{url_for('sale_notify_toggle')}">{tgl_btn(on)}</form>
+      </div>
+    </div>
+
+    <form method="post" action="{url_for('sale_notify_save')}">
+      <div class="card">
+        <label>کانال‌های اعلان فروش (هر خط یه کانال، حداکثر ۱۰ تا؛ یوزرنیم یا لینک عمومی مثل https://splus.ir/mychannel — اکانتِ بات اعلان باید تو همه‌شون ادمین باشه)</label>
+        <textarea name="channel" dir="ltr" style="min-height:90px;" placeholder="https://splus.ir/mychannel&#10;https://splus.ir/otherchannel">{esc(channel)}</textarea>
+        <label style="margin-top:12px;">یوزرنیم بات فروش (برای «جهت خرید»)</label>
+        <input type="text" name="bot" value="{esc(bot_name)}" dir="ltr" placeholder="@SKYTUNNELbot">
+        <label style="margin-top:12px;">متن اعلان (متن ساده؛ ایموجی و خط جدید مجازه)</label>
+        <textarea name="template" dir="rtl" style="min-height:170px;" required>{esc(tpl)}</textarea>
+        <p class="muted" style="margin:6px 0 0;"><small>متغیرها: {fields_hint}<br>
+          <code>{{user}}</code> آیدی خریدار به‌صورت نیمه‌مخفی (مثل 45****90) نمایش داده می‌شه.</small></p>
+      </div>
+      <div class="card"><h3>نام نوع سرویس‌ها (اختیاری)</h3>
+        <div class="kv" style="grid-template-columns:repeat(auto-fit,minmax(200px,1fr));">{type_inputs}</div>
+        <p class="muted" style="margin:6px 0 0;"><small>خالی بذاری، اسم پیش‌فرض (داخل کادر) استفاده می‌شه.</small></p>
+      </div>
+      <div class="card"><h3>پیش‌نمایش</h3>
+        <pre style="white-space:pre-wrap;margin:0;font-family:inherit;line-height:1.9;">{preview}</pre></div>
+      <div style="margin:12px 0;"><button type="submit">ذخیره</button>
+        <button type="submit" formaction="{url_for('sale_notify_test')}" formnovalidate style="margin-inline-start:8px;">💾 ذخیره و ارسال پیام تست</button></div>
+    </form>
+    <p><small class="muted">فقط خریدهای واقعیِ بعد از روشن‌شدن اعلان می‌شن؛ خرید قبلی و تست رایگان اعلان نمی‌شن.</small></p>"""
+    return render_page("اعلان فروش", "salenotify", content)
+
+
+def _sale_notify_save_form():
+    """فرم رو اعتبارسنجی و ذخیره می‌کنه؛ True اگه همه‌چی ذخیره شد."""
+    channels = []
+    for part in re.split(r"[\s,;،]+", request.form.get("channel", "")):
+        part = part.strip()
+        if part and part not in channels:
+            channels.append(part)
+    if len(channels) > 10:
+        flash("⚠️ حداکثر ۱۰ کانال مجازه — ذخیره نشد.")
+        return False
+    for ch in channels:
+        m = re.fullmatch(r"(?:https?://)?(?:splus\.ir/|sapp\.ir/)?@?([A-Za-z0-9_.\-]{3,64})/?(?:\?.*)?", ch) \
+            or re.fullmatch(r"-?\d+", ch)
+        if not m or "+" in ch or "joinchat" in ch.lower():
+            flash(f"⚠️ کانال نامعتبره: {ch} (لینک دعوت خصوصی پشتیبانی نمی‌شه؛ یوزرنیم عمومی یا آیدی عددی بده) — ذخیره نشد.")
+            return False
+    channel = "\n".join(channels)
+    bot_name = request.form.get("bot", "").strip()
+    tpl = request.form.get("template", "").replace("\r\n", "\n").strip()
+    if bot_name and not re.fullmatch(r"@?[A-Za-z0-9_]{3,64}", bot_name):
+        flash("⚠️ یوزرنیم بات نامعتبره — ذخیره نشد.")
+        return False
+    if bot_name and not bot_name.startswith("@"):
+        bot_name = "@" + bot_name
+    if not tpl:
+        flash("⚠️ متن اعلان نمی‌تواند خالی باشد — ذخیره نشد.")
+        return False
+    if len(tpl) > 1500:
+        flash("⚠️ متن اعلان خیلی بلنده (حداکثر ۱۵۰۰ کاراکتر) — ذخیره نشد.")
+        return False
+    err = validate_template(tpl, SALE_NOTIFY_FIELDS)
+    if err:
+        flash(f"⚠️ متن اعلان: {err} — ذخیره نشد.")
+        return False
+
+    def put(key, value, default=""):
+        if value and value != default:
+            set_setting(key, value)
+        else:
+            delete_setting(key)
+
+    put("sale_notify_channel", channel)
+    put("sale_notify_bot", bot_name, "@SKYTUNNELbot")
+    put("sale_notify_template", tpl, SALE_NOTIFY_DEFAULT_TEMPLATE)
+    for k, _d in SALE_NOTIFY_TYPES:
+        put("sale_notify_type_" + k, request.form.get("type_" + k, "").strip()[:40])
+    return True
+
+
+@app.route("/sale-notify/save", methods=["POST"])
+@login_required
+def sale_notify_save():
+    if _sale_notify_save_form():
+        flash("تنظیمات اعلان فروش ذخیره شد (حداکثر چند ثانیه بعد روی بات اعلان اعمال می‌شه).")
+    return redirect(url_for("sale_notify_page"))
+
+
+@app.route("/sale-notify/test", methods=["POST"])
+@login_required
+def sale_notify_test():
+    if _sale_notify_save_form():
+        set_setting("sale_notify_test_req", secrets.token_hex(6))
+        flash("ذخیره شد و درخواست پیام تست ثبت شد؛ چند ثانیه بعد صفحه رو رفرش کن و وضعیت رو ببین.")
+    return redirect(url_for("sale_notify_page"))
+
+
+@app.route("/sale-notify/toggle", methods=["POST"])
+@login_required
+def sale_notify_toggle():
+    cur = get_setting("sale_notify_enabled", "1")
+    set_setting("sale_notify_enabled", "0" if cur == "1" else "1")
+    flash("اعلان فروش " + ("خاموش شد." if cur == "1" else "روشن شد."))
+    return redirect(url_for("sale_notify_page"))
 
 
 # ---------- ذخیره‌ی تنظیمات / ظاهر / متن‌ها / کد تخفیف ----------

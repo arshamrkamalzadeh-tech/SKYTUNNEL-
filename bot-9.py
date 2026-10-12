@@ -5655,9 +5655,9 @@ def process_update(update):
 #   GATE_FAIL_OPEN : اگه اکانت هنوز وصل نیست/چک جواب نداد: 1 = کاربر رد شه، 0 = بسته بشه
 # دستورهای ادمین: /start (لاگین)، /gatestatus، /gatedisconnect، /cancel
 #
-# نکته: سشن لاگین و شماره علاوه بر دیسک، تو دیتابیس (جدول gate_storage) هم ذخیره می‌شن؛ پس
-# با ریدیپلوی (که دیسک پاک می‌شه) دیگه لازم نیست دوباره لاگین کنی. فقط با /gatedisconnect
-# (خروج دستی) سشن از دیتابیس هم پاک می‌شه و دفعه‌ی بعد باید دوباره لاگین کنی.
+# نکته: سشن لاگین فقط روی دیسک سرور نگه داشته می‌شه و تو دیتابیس ذخیره نمی‌شه. با ریدیپلوی
+# (که دیسک پاک می‌شه) سشن از بین می‌ره و بات به‌محض بالا اومدن از ادمین می‌خواد دوباره
+# با /start لاگین کنه.
 GATE_ENABLED = os.getenv("GATE_ENABLED", "1").strip() != "0"
 CHANNEL_LINK = os.getenv("CHANNEL_LINK", "https://splus.ir/skytunnel").strip()
 GATE_FAIL_OPEN = os.getenv("GATE_FAIL_OPEN", "1").strip() != "0"
@@ -6211,10 +6211,6 @@ async def g_userbot_main(phone, gen):
     cfg = _g_cfg_load()
     cfg['phone'] = phone
     _g_cfg_save(cfg)
-    g_save_session_to_db(force=True)          # با ریدیپلوی بعدی دیگه نخواد لاگین کنه
-    if not any(t.name == 'g_session_saver' for t in threading.enumerate()):
-        if not any(t.name == 'g_session_saver' for t in threading.enumerate()):
-            threading.Thread(target=g_session_saver, name='g_session_saver', daemon=True).start()
 
     try:
         me = client.get_me()
@@ -6254,7 +6250,6 @@ def g_start_userbot(phone):
 # ---------------- ذخیره‌ی سشن لاگین تو دیتابیس (تا با ریدیپلوی از بین نره) ----------------
 _G_DB_KEY = 'session'
 _G_SKIP_SUFFIX = ('-journal', '-wal', '-shm')
-_g_last_saved_hash = {'h': None}
 
 
 @with_db_retry
@@ -6273,118 +6268,27 @@ def _g_session_files():
     return [f for f in glob.glob(GATE_SESSION_NAME + '*') if not f.endswith(_G_SKIP_SUFFIX) and os.path.isfile(f)]
 
 
-def _g_read_file_consistent(path):
-    """محتوای فایل سشن؛ اگه SQLite باشه (و الان باز و در حال نوشتن)، با backup API یه کپی سالم می‌گیره."""
-    import sqlite3
-    import tempfile
-    try:
-        with open(path, 'rb') as f:
-            head = f.read(16)
-        if head.startswith(b'SQLite format 3'):
-            fd, tmp = tempfile.mkstemp(suffix='.session')
-            os.close(fd)
-            try:
-                src = sqlite3.connect(path, timeout=5)
-                dst = sqlite3.connect(tmp)
-                with dst:
-                    src.backup(dst)
-                src.close()
-                dst.close()
-                with open(tmp, 'rb') as f:
-                    return f.read()
-            finally:
-                try:
-                    os.remove(tmp)
-                except Exception:
-                    pass
-    except Exception as e:
-        print('[gate] backup sqlite session failed, raw copy:', repr(e))
-    with open(path, 'rb') as f:
-        return f.read()
-
-
-def g_save_session_to_db(force=False):
-    """سشن + شماره رو (فشرده و base64) تو دیتابیس می‌نویسه. اگه از آخرین ذخیره تغییری نکرده، چیزی نمی‌نویسه."""
-    import base64
-    import zlib
-    try:
-        files = _g_session_files()
-        phone = _g_cfg_load().get('phone')
-        if not files or not phone:
-            return False
-        payload = {'phone': phone, 'files': {
-            os.path.basename(f): base64.b64encode(zlib.compress(_g_read_file_consistent(f), 6)).decode('ascii')
-            for f in files}}
-        raw = json.dumps(payload, sort_keys=True)
-        h = hashlib.sha256(raw.encode()).hexdigest()
-        if not force and _g_last_saved_hash['h'] == h:
-            return True
-        _g_db_exec("INSERT INTO gate_storage (name, value) VALUES (?, ?) "
-                   "ON CONFLICT(name) DO UPDATE SET value=excluded.value", (_G_DB_KEY, raw))
-        _g_last_saved_hash['h'] = h
-        return True
-    except Exception as e:
-        print('[gate] ذخیره‌ی سشن تو دیتابیس ناموفق بود:', repr(e))
-        return False
-
-
-def g_restore_session_from_db():
-    """اگه روی دیسک سشنی نیست (مثلاً بعد از ریدیپلوی)، از دیتابیس برش می‌گردونه. True یعنی چیزی برگشت."""
-    import base64
-    import zlib
-    try:
-        row = _g_db_exec('SELECT value FROM gate_storage WHERE name=?', (_G_DB_KEY,))
-        if not row or not row[0]:
-            return False
-        data = json.loads(row[0])
-        phone, files = data.get('phone'), data.get('files') or {}
-        if not phone or not files:
-            return False
-        for name, b64 in files.items():
-            name = os.path.basename(name)
-            if not name.startswith(GATE_SESSION_NAME):
-                continue
-            with open(name, 'wb') as f:
-                f.write(zlib.decompress(base64.b64decode(b64)))
-        cfg = _g_cfg_load()
-        cfg['phone'] = phone
-        _g_cfg_save(cfg)
-        print('[gate] سشن لاگین از دیتابیس بازیابی شد.')
-        return True
-    except Exception as e:
-        print('[gate] بازیابی سشن از دیتابیس ناموفق بود:', repr(e))
-        return False
-
-
 def g_forget_session_in_db():
     try:
         _g_db_exec('DELETE FROM gate_storage WHERE name=?', (_G_DB_KEY,))
     except Exception as e:
         print('[gate] پاک‌کردن سشن از دیتابیس ناموفق بود:', repr(e))
-    _g_last_saved_hash['h'] = None
-
-
-def g_session_saver():
-    """هر ۵ دقیقه، اگه اکانت وصله و سشن تغییر کرده، دوباره تو دیتابیس ذخیره‌ش می‌کنه."""
-    while True:
-        time.sleep(300)
-        try:
-            if _G.get('running'):
-                g_save_session_to_db()
-        except Exception as e:
-            print('[gate] session saver error:', repr(e))
 
 
 def g_boot_restore():
     if not (GATE_ENABLED and G_AVAILABLE):
         return
-    if not (_g_cfg_load().get('phone') and _g_session_files()):
-        g_restore_session_from_db()          # دیسک پاک شده؛ از دیتابیس بیار
+    g_forget_session_in_db()                 # سشنِ باقی‌مونده‌ی قدیمی تو دیتابیس (اگه بود) پاک بشه
     phone = _g_cfg_load().get('phone')
     if phone and _g_session_files():
-        g_start_userbot(phone)
-        if not any(t.name == 'g_session_saver' for t in threading.enumerate()):
-            threading.Thread(target=g_session_saver, name='g_session_saver', daemon=True).start()
+        g_start_userbot(phone)               # سشن روی همین دیسک هنوز هست (ریدیپلوی نشده)
+        return
+    # سشنی نیست (مثلاً بعد از ریدیپلوی): از ادمین بخواه دوباره لاگین کنه
+    try:
+        g_notify_admin('🔐 اکانت عضویت اجباری وصل نیست (احتمالاً بات ریدیپلوی شده).\n'
+                       'برای وصل‌شدن دوباره، /start بزن و شماره/کد رو بفرست.')
+    except Exception as e:
+        print('[gate] پیام درخواست لاگین به ادمین نرفت:', repr(e))
 
 
 async def _g_safe_disconnect(client):
