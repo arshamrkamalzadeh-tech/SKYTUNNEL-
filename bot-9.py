@@ -3977,6 +3977,10 @@ def action_topup_menu(chat_id):
         send_message(chat_id, u(chat_id, 'disabled_feature'))
 
 
+# کدهای خطای پنل که یعنی «این کاربر قبلاً تست گرفته». اگه کد واقعی پنل فرق داره اینجا اضافه کن.
+TRIAL_USED_PANEL_CODES = ('trial_already_used', 'trial_used', 'already_used', 'already_received', 'free_trial_used')
+
+
 def action_trial(chat_id):
     if not is_feature_enabled('trial'):
         send_message(chat_id, u(chat_id, 'disabled_feature'))
@@ -4003,15 +4007,16 @@ def action_trial(chat_id):
             )
         send_message(chat_id, trial_text)
     else:
-        # اگه پنل به‌خاطر «قبلاً تست رایگان گرفته» رد کرده باشه (مثلاً چون این
-        # کاربر رو از یه شناسه‌ی دیگه/قبلی شناسایی کرده)، به‌جای پیام گنگِ
-        # «خطا در ارتباط با سرور»، پیام درست و واضح رو نشون می‌دیم و محلی هم
-        # ثبتش می‌کنیم تا دفعه‌ی بعد اصلاً به پنل درخواست نزنه.
-        err_blob = (str(res.get('error_code') or '') + ' ' + str(res.get('error') or '')).lower()
-        if any(k in err_blob for k in ('trial', 'already', 'duplicate', 'تکراری', 'قبلا')):
+        # فقط وقتی پنل صراحتاً بگه «این تست قبلاً گرفته شده» کاربر رو ثبت می‌کنیم.
+        # استثناهای شبکه (error_code=None) و خطاهای عمومی نباید کاربر رو برای
+        # همیشه «تست‌گرفته» کنن؛ در این حالت فقط پیام خطا نشون داده می‌شه و
+        # کاربر می‌تونه دوباره تلاش کنه.
+        err_code = str(res.get('error_code') or '').lower()
+        if err_code and any(k in err_code for k in TRIAL_USED_PANEL_CODES):
             set_free_trial(chat_id)
             send_message(chat_id, u(chat_id, 'trial_used_on_panel'))
         else:
+            print('⚠️ تست رایگان ناموفق برای', chat_id, ':', res)
             send_message(chat_id, u(chat_id, 'trial_error') if lang == 'en' else get_bot_text('trial_error', DEFAULT_TRIAL_ERROR))
 
 
