@@ -72,7 +72,11 @@ CONFIG_GROUPS = [
     ("🧪 تست رایگان و خرید", [
         ("trial_gb", "حجم تست رایگان (گیگ — اعشاری مجاز، مثل 0.1)", "0.1", "float"),
         ("trial_days", "مدت تست رایگان (روز)", "1", "number"),
-        ("trial_label", "اسم کانفیگ تست رایگان (همون اسمی که تو پنل اصلی ثبت می‌شه)", "تست رایگان", "text"),
+        ("trial_label", "پیشوند اسم کانفیگ تست رایگان — شماره‌ی ترتیبی خودکار بهش اضافه می‌شه (مثلاً FREE-TEST-1، FREE-TEST-2، ...)", "FREE-TEST", "text"),
+        ("trial_max_per_user", "حداکثر تعداد تست رایگان برای هر کاربر (0 = نامحدود)", "1", "number"),
+        ("trial_cooldown_hours", "حداقل فاصله‌ی بین دو تست رایگان یک کاربر (ساعت — اعشاری مجاز؛ 0 = بدون فاصله)", "0", "float"),
+        ("trial_new_users_only", "تست رایگان فقط برای کاربرانی که هنوز خرید نکرده‌اند||روشن باشه: کسی که قبلاً حتی یک خرید داشته، دیگه تست نمی‌گیره", "0", "toggle"),
+        ("trial_proto", "نوع سرویس تست رایگان — یکی از: both (هر دو) / xray (فقط کانفیگ) / wireguard / openvpn / dns", "both", "text"),
         ("default_gb", "حجم پیش‌فرض صفحه‌ی خرید (گیگ)", "1", "number"),
         ("default_days", "مدت پیش‌فرض صفحه‌ی خرید (روز)", "30", "number"),
         ("refund_ratio", "نسبت بازگشت وجه هنگام حذف کانفیگ (بین 0 تا 1؛ مثلاً 0.5 یعنی نصف ارزش باقی‌مانده)", "0.5", "float"),
@@ -89,6 +93,7 @@ CONFIG_GROUPS = [
         ("referral_enabled", "سیستم دعوت دوستان", "0", "toggle"),
         ("referral_reward_inviter", "پاداش دعوت‌کننده — به کیف پولش اضافه می‌شه (تومان)", "10000", "number"),
         ("referral_reward_invitee", "هدیه‌ی کاربر دعوت‌شده — به کیف پول خودش اضافه می‌شه (تومان؛ 0 = بدون هدیه)", "0", "number"),
+        ("referral_require_channel", "پاداش فقط بعد از عضویت کاربر دعوت‌شده در کانال(های) اجباری||روشن باشه: تا وقتی کاربر دعوت‌شده عضو همه‌ی کانال‌های عضویت اجباری نشده، به دعوت‌کننده پاداشی داده نمی‌شه؛ بعد از عضویت و اولین بار که شرط پاداش پیش بیاد پرداخت می‌شه. اگه عضویت اجباری خاموش یا بدون کانال باشه، شرطی اعمال نمی‌شه", "1", "toggle"),
         ("referral_on_join", "پرداخت پاداش به‌محض ورود کاربر دعوت‌شده||خاموش = بعد از اولین خرید کاربر دعوت‌شده؛ روشن = به‌محض ورود به ربات", "0", "toggle"),
     ]),
     ("📲 لینک‌های دانلود اپ", [
@@ -102,6 +107,14 @@ CONFIG_GROUPS = [
         ("admin_id", "آیدی عددی ادمین (تیکت‌ها و رسیدهای شارژ برای این آیدی میاد)", os.getenv("ADMIN_ID", "48198481"), "number"),
         ("maintenance_text", "پیامی که تو «حالت تعمیر» به کاربران نشون داده می‌شه",
          "🛠 ربات موقتاً در حال بروزرسانی است. لطفاً کمی بعد دوباره تلاش کنید.", "text"),
+    ]),
+    ("⚙️ تنظیمات پیشرفته ربات (بدون نیاز به ری‌استارت)", [
+        ("bot_username", "یوزرنیم ربات برای لینک دعوت (بدون @)", os.getenv("BOT_USERNAME", "SKYTUNNELbot"), "text"),
+        ("gate_enabled", "عضویت اجباری کانال||خاموش = هیچ‌کس برای استفاده از ربات مجبور به عضویت نیست (کانال‌ها از داخل خود ربات، دکمه‌ی ادمین، مدیریت می‌شن)", "1", "toggle"),
+        ("gate_fail_open", "اگه چک عضویت جواب نداد، کاربر رد بشه||روشن = وقتی اکانت گیت وصل نیست یا چک خطا داد، کاربر وارد ربات می‌شه؛ خاموش = تا چک موفق نشه وارد نمی‌شه", "1", "toggle"),
+        ("gate_cache_ttl", "مدت اعتبار عضویتِ تاییدشده (ثانیه، حداقل 5)", "60", "number"),
+        ("gate_sync_interval", "فاصله‌ی تازه‌سازی لیست اعضای کانال (ثانیه، حداقل 5)", "10", "number"),
+        ("divider", "خط جداکننده‌ی پیام‌های ربات", "┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄", "text"),
     ]),
     ("⌨️ توضیح دستورات منوی «/» (تا ~۱ دقیقه بعد روی تلگرام اعمال می‌شه)", [
         ("cmd_start", "/start", "🏠 شروع و منوی اصلی", "text"),
@@ -600,6 +613,8 @@ def ensure_schema():
             "ALTER TABLE users ADD COLUMN first_name TEXT",
             "ALTER TABLE users ADD COLUMN joined_at TEXT",
             "ALTER TABLE users ADD COLUMN lang TEXT",
+            "ALTER TABLE free_trials ADD COLUMN trial_count INTEGER DEFAULT 1",
+            "ALTER TABLE free_trials ADD COLUMN last_at TEXT",
             "ALTER TABLE resellers ADD COLUMN username TEXT",
             "ALTER TABLE resellers ADD COLUMN password_hash TEXT",
             "ALTER TABLE resellers ADD COLUMN password_plain TEXT",
@@ -841,6 +856,29 @@ def get_user(user_id):
     res = c.fetchone()
     conn.close()
     return res
+
+
+@with_db_retry
+def get_trial_info(user_id):
+    """(تعداد تست‌های گرفته‌شده, زمان آخرین تست). اگه کاربر تست نگرفته (0, None)."""
+    conn = get_conn()
+    c = conn.cursor()
+    try:
+        c.execute("SELECT COALESCE(trial_count, 1), last_at FROM free_trials WHERE user_id=?", (user_id,))
+        row = c.fetchone()
+    except Exception:
+        row = None
+    conn.close()
+    return (int(row[0] or 0), row[1]) if row else (0, None)
+
+
+@with_db_retry
+def reset_trial(user_id):
+    conn = get_conn()
+    c = conn.cursor()
+    c.execute("DELETE FROM free_trials WHERE user_id=?", (user_id,))
+    conn.commit()
+    conn.close()
 
 
 @with_db_retry
@@ -1889,6 +1927,18 @@ def user_detail(user_id):
           <td data-label="وضعیت"><span class="badge {'on' if active else 'off'}">{'فعال' if active else esc(status)}</span></td>
         </tr>"""
 
+    trial_count, trial_last = get_trial_info(user_id)
+    trial_card = f"""
+    <div class="card"><h3>🧪 تست رایگان</h3>
+      <div class="kv">
+        <div><span>تعداد تست گرفته‌شده</span><b class="num">{trial_count}</b></div>
+        <div><span>آخرین تست</span><b>{fmt_dt(trial_last) if trial_last else '—'}</b></div>
+      </div>
+      <form method="post" action="{url_for('user_trial_reset', user_id=user_id)}" style="margin-top:10px;">
+        <button type="submit" class="secondary">♻️ ریست تست رایگان این کاربر</button>
+      </form>
+    </div>"""
+
     content = f"""
     <p><a class="btn secondary sm" href="{url_for('users')}">‹ بازگشت به کاربران</a></p>
     <div class="card">
@@ -1918,6 +1968,8 @@ def user_detail(user_id):
         </form></div>
     </div>
 
+    {trial_card}
+
     <h3>کانفیگ‌های کاربر</h3>
     <table class="rt">
       <thead><tr><th>اسم</th><th>نوع</th><th>حجم</th><th>مدت</th><th>مبلغ</th><th>تاریخ ساخت</th><th>وضعیت</th></tr></thead>
@@ -1944,6 +1996,14 @@ def adjust_wallet():
         update_wallet(user_id, amount * sign)
         flash(f"موجودی کاربر {user_id} به مقدار {amount:,} تومان {'افزایش' if sign > 0 else 'کاهش'} یافت.")
     return redirect(back)
+
+
+@app.route("/users/<int:user_id>/trial-reset", methods=["POST"])
+@login_required
+def user_trial_reset(user_id):
+    reset_trial(user_id)
+    flash(f"تست رایگان کاربر {user_id} ریست شد؛ دوباره می‌تونه تست بگیره.")
+    return redirect(url_for("user_detail", user_id=user_id))
 
 
 @app.route("/users/<int:user_id>/message", methods=["POST"])
@@ -3224,6 +3284,13 @@ def save_config():
         if key == "admin_id" and int(value) <= 0:
             flash(f"⚠️ «{label}»: باید یک آیدی عددی معتبر باشه — ذخیره نشد.")
             continue
+        if key == "trial_proto" and value.lower() not in ("both", "xray", "wireguard", "openvpn", "dns"):
+            flash(f"⚠️ «{label}»: فقط یکی از both / xray / wireguard / openvpn / dns مجازه — ذخیره نشد.")
+            continue
+        if key == "trial_proto":
+            value = value.lower()
+        if key == "bot_username":
+            value = value.lstrip("@")
         if key == "trial_gb" and float(value) <= 0:
             flash(f"⚠️ «{label}»: باید بزرگ‌تر از صفر باشه — ذخیره نشد.")
             continue

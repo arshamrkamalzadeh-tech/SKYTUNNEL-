@@ -255,7 +255,28 @@ def get_trial_days():
 
 
 def get_trial_label():
-    return get_setting('trial_label', 'تست رایگان') or 'تست رایگان'
+    return get_setting('trial_label', 'FREE-TEST') or 'FREE-TEST'
+
+
+TRIAL_PROTOS = ('both', 'xray', 'wireguard', 'openvpn', 'dns')
+
+
+def get_trial_max_per_user():
+    """حداکثر تعداد تست برای هر کاربر (0 = نامحدود)."""
+    return max(0, _setting_int('trial_max_per_user', 1))
+
+
+def get_trial_cooldown_hours():
+    return max(0.0, _setting_float('trial_cooldown_hours', 0))
+
+
+def trial_new_users_only():
+    return get_setting('trial_new_users_only', '0') == '1'
+
+
+def get_trial_proto():
+    v = (get_setting('trial_proto', 'both') or 'both').strip().lower()
+    return v if v in TRIAL_PROTOS else 'both'
 
 
 def get_refund_ratio():
@@ -443,6 +464,8 @@ UI_TEXT = {
         'support_reply_received': '📩 پاسخ پشتیبانی برای تیکت #{tid}:\n\n{reply_text}',
         'trial_used': '⚠️ شما پیش‌تر از تست رایگان استفاده کرده‌اید.',
         'trial_used_on_panel': '⚠️ شما قبلاً تست رایگان دریافت کرده‌اید.',
+        'trial_cooldown': '⏳ برای دریافت تست بعدی باید {wait} دیگه صبر کنید.',
+        'trial_not_new': '⚠️ تست رایگان فقط برای کاربرانی هست که هنوز خرید نکرده‌اند.',
         'trial_building': '⏳ در حال ساخت کانفیگ تست...',
         'trial_ready': (
             '🎁 <b>کانفیگ تست رایگان شما آماده شد</b>\n{divider}\n'
@@ -782,6 +805,8 @@ UI_TEXT = {
         'delete_cancelled': '❌ Deletion cancelled.',
         'trial_used': "⚠️ You've already used your free trial.",
         'trial_used_on_panel': "⚠️ You've already received a free trial before.",
+        'trial_cooldown': '⏳ You can get your next trial in {wait}.',
+        'trial_not_new': '⚠️ The free trial is only available to users who have not made a purchase yet.',
         'trial_building': '⏳ Building your trial config...',
         'trial_ready': (
             '🎁 <b>Your free trial config is ready</b>\n{divider}\n'
@@ -1381,6 +1406,8 @@ def init_db():
         'ALTER TABLE resellers ADD COLUMN username TEXT',
         'ALTER TABLE resellers ADD COLUMN password_hash TEXT',
         'ALTER TABLE resellers ADD COLUMN password_plain TEXT',
+        'ALTER TABLE free_trials ADD COLUMN trial_count INTEGER DEFAULT 1',
+        'ALTER TABLE free_trials ADD COLUMN last_at TEXT',
     ):
         try:
             c.execute(statement)
@@ -1537,6 +1564,27 @@ def get_referral_reward_invitee():
     return _referral_int('referral_reward_invitee', 0)
 
 
+def referral_require_channel():
+    """روشن (پیش‌فرض): پاداش فقط وقتی داده می‌شه که کاربر دعوت‌شده عضو کانال(های) اجباری باشه."""
+    return get_setting('referral_require_channel', '1') == '1'
+
+
+def referral_invitee_is_member(invitee_id):
+    """True فقط اگه عضویت اجباری فعاله و کاربر واقعاً عضو همه‌ی کانال‌هاست. اگه چک جواب نده
+    (مثلاً اکانت گیت وصل نیست) پاداش داده نمی‌شه و دفعه‌ی بعد که شرط پاداش پیش اومد دوباره چک می‌شه.
+    اگه عضویت اجباری خاموش/بدون کانال باشه، شرطی وجود نداره و پاداش عادی داده می‌شه."""
+    if not referral_require_channel():
+        return True
+    if not (GATE_ENABLED and G_AVAILABLE):
+        return True
+    try:
+        status, _missing = check_channels_status(invitee_id, use_cache=False)
+    except Exception as e:
+        print('⚠️ چک عضویت برای پاداش رفرال ناموفق بود:', e)
+        return False
+    return status is True
+
+
 def referral_on_join():
     """0 = پاداش بعد از اولین خرید کاربر دعوت‌شده (پیش‌فرض)، 1 = همین که وارد ربات شد."""
     return get_setting('referral_on_join', '0') == '1'
@@ -1545,7 +1593,7 @@ def referral_on_join():
 def get_bot_username():
     """یوزرنیم بات برای ساخت لینک دعوت."""
     # یوزرنیم ثابت بات (می‌شه با متغیر محیطی BOT_USERNAME هم عوضش کرد)
-    return (os.getenv('BOT_USERNAME', '') or 'SKYTUNNELbot').strip().lstrip('@')
+    return (get_setting('bot_username', '') or os.getenv('BOT_USERNAME', '') or 'SKYTUNNELbot').strip().lstrip('@')
 
 
 def build_referral_link(user_id):
@@ -1654,6 +1702,8 @@ def process_referral_reward(invitee_id, event):
         inviter = get_referrer(invitee_id)
         if not inviter or referral_reward_given(invitee_id):
             return
+        if not referral_invitee_is_member(invitee_id):
+            return   # هنوز عضو کانال نشده؛ بعداً که عضو شد و شرط پاداش پیش اومد پرداخت می‌شه
         a_inviter, a_invitee = get_referral_reward_inviter(), get_referral_reward_invitee()
         save_referral_reward(invitee_id, inviter, a_inviter, a_invitee)   # اول ثبت، تا دوبار پاداش نره
         if a_inviter > 0:
@@ -2763,22 +2813,55 @@ def get_total_purchases(user_id):
 
 
 @with_db_retry
-def check_free_trial(user_id):
+def get_free_trial_info(user_id):
+    """(تعداد تست‌هایی که کاربر تا حالا گرفته, زمان آخرین تست). ردیف قدیمی بدون شمارنده = ۱ تست."""
     conn = get_conn()
     c = conn.cursor()
-    c.execute('SELECT COUNT(*) FROM free_trials WHERE user_id=?', (user_id,))
-    count = c.fetchone()[0]
+    c.execute('SELECT COALESCE(trial_count, 1), last_at FROM free_trials WHERE user_id=?', (user_id,))
+    row = c.fetchone()
     conn.close()
-    return count
+    return (int(row[0] or 0), row[1]) if row else (0, None)
+
+
+def check_free_trial(user_id):
+    return get_free_trial_info(user_id)[0]
 
 
 @with_db_retry
 def set_free_trial(user_id):
+    """یک تست به شمارنده‌ی کاربر اضافه می‌کنه."""
     conn = get_conn()
     c = conn.cursor()
-    c.execute('INSERT OR IGNORE INTO free_trials (user_id) VALUES (?)', (user_id,))
+    c.execute('INSERT INTO free_trials (user_id, trial_count, last_at) VALUES (?, 1, ?) '
+              'ON CONFLICT(user_id) DO UPDATE SET trial_count = COALESCE(trial_count, 1) + 1, '
+              'last_at = excluded.last_at', (user_id, datetime.now().isoformat()))
     conn.commit()
     conn.close()
+
+
+@with_db_retry
+def mark_trial_exhausted(user_id):
+    """وقتی پنل صراحتاً می‌گه این کاربر تست گرفته: شمارنده رو به سقف مجاز می‌رسونه."""
+    limit = get_trial_max_per_user()
+    if limit <= 0:
+        return   # نامحدود: چیزی ثبت نمی‌شه
+    conn = get_conn()
+    c = conn.cursor()
+    c.execute('INSERT INTO free_trials (user_id, trial_count, last_at) VALUES (?, ?, ?) '
+              'ON CONFLICT(user_id) DO UPDATE SET trial_count = MAX(COALESCE(trial_count, 1), excluded.trial_count)',
+              (user_id, limit, datetime.now().isoformat()))
+    conn.commit()
+    conn.close()
+
+
+@with_db_retry
+def user_has_purchased(user_id):
+    conn = get_conn()
+    c = conn.cursor()
+    c.execute('SELECT 1 FROM orders WHERE user_id=? LIMIT 1', (user_id,))
+    row = c.fetchone()
+    conn.close()
+    return bool(row)
 
 
 @with_db_retry
@@ -3981,17 +4064,82 @@ def action_topup_menu(chat_id):
 TRIAL_USED_PANEL_CODES = ('trial_already_used', 'trial_used', 'already_used', 'already_received', 'free_trial_used')
 
 
+def _trial_wait_text(lang, hours):
+    mins = max(1, int(round(hours * 60)))
+    if mins < 60:
+        return f'{mins} minutes' if lang == 'en' else f'{mins} دقیقه'
+    h = round(hours, 1)
+    h = int(h) if h == int(h) else h
+    return f'{h} hours' if lang == 'en' else f'{h} ساعت'
+
+
+@with_db_retry
+def get_next_trial_label():
+    """اسم ترتیبی و یکتای تست رایگان: FREE-TEST-1، FREE-TEST-2، ... (شمارنده‌ی سراسری تو دیتابیس،
+    با قفل، تا دو نفرِ هم‌زمان هیچ‌وقت شماره‌ی تکراری نگیرن). برمی‌گردونه (اسم, شماره)."""
+    with _label_counter_lock:
+        conn = get_conn()
+        c = conn.cursor()
+        c.execute("SELECT value FROM settings WHERE key='trial_label_counter'")
+        res = c.fetchone()
+        current = int(res[0]) if res and res[0] else 0
+        next_val = current + 1
+        c.execute("INSERT INTO settings (key, value) VALUES ('trial_label_counter', ?) "
+                  "ON CONFLICT(key) DO UPDATE SET value=excluded.value", (str(next_val),))
+        conn.commit()
+        conn.close()
+        return f'{get_trial_label()}-{next_val}', next_val
+
+
+@with_db_retry
+def release_trial_number(number):
+    """اگه ساخت تست ناموفق بود، شماره رو پس می‌ده تا تو ترتیب سوراخ نیفته
+    (فقط وقتی کسی بعد از ما شماره‌ی جدید نگرفته باشه)."""
+    with _label_counter_lock:
+        conn = get_conn()
+        c = conn.cursor()
+        c.execute("UPDATE settings SET value=? WHERE key='trial_label_counter' AND value=?",
+                  (str(number - 1), str(number)))
+        conn.commit()
+        conn.close()
+
+
 def action_trial(chat_id):
     if not is_feature_enabled('trial'):
         send_message(chat_id, u(chat_id, 'disabled_feature'))
         return
     lang = get_user_lang(chat_id)
-    if check_free_trial(chat_id) > 0:
+    count, last_at = get_free_trial_info(chat_id)
+    max_trials = get_trial_max_per_user()
+    if max_trials > 0 and count >= max_trials:
         send_message(chat_id, u(chat_id, 'trial_used') if lang == 'en' else get_bot_text('trial_used', DEFAULT_TRIAL_USED))
         return
+    if count > 0:
+        cooldown = get_trial_cooldown_hours()
+        if cooldown > 0 and last_at:
+            try:
+                elapsed = (datetime.now() - datetime.fromisoformat(last_at)).total_seconds() / 3600
+            except Exception:
+                elapsed = cooldown
+            if elapsed < cooldown:
+                send_message(chat_id, u(chat_id, 'trial_cooldown', wait=_trial_wait_text(lang, cooldown - elapsed)))
+                return
+    if trial_new_users_only() and user_has_purchased(chat_id):
+        send_message(chat_id, u(chat_id, 'trial_not_new'))
+        return
     send_message(chat_id, u(chat_id, 'trial_building') if lang == 'en' else get_bot_text('trial_building', DEFAULT_TRIAL_BUILDING))
-    trial_gb, trial_days, trial_label = get_trial_gb(), get_trial_days(), get_trial_label()
-    res = make_config(trial_gb, trial_label, trial_days)
+    trial_gb, trial_days = get_trial_gb(), get_trial_days()
+    proto = get_trial_proto()
+    res, trial_label = None, None
+    for attempt in range(5):
+        trial_label, number = get_next_trial_label()
+        res = make_config(trial_gb, trial_label, trial_days, proto)
+        if res['success'] and res['sub_url']:
+            break
+        if 'label_duplicate' in str(res.get('error_code') or '').lower():
+            continue   # این اسم قبلاً تو پنل اصلی بوده؛ شماره‌ی بعدی
+        release_trial_number(number)   # خطای دیگه: شماره سوخت نشه
+        break
     if res['success'] and res['sub_url']:
         set_free_trial(chat_id)
         save_user_config(chat_id, res['sub_url'], res['config_id'], trial_gb, trial_label, trial_days, 0)
@@ -4008,12 +4156,10 @@ def action_trial(chat_id):
         send_message(chat_id, trial_text)
     else:
         # فقط وقتی پنل صراحتاً بگه «این تست قبلاً گرفته شده» کاربر رو ثبت می‌کنیم.
-        # استثناهای شبکه (error_code=None) و خطاهای عمومی نباید کاربر رو برای
-        # همیشه «تست‌گرفته» کنن؛ در این حالت فقط پیام خطا نشون داده می‌شه و
-        # کاربر می‌تونه دوباره تلاش کنه.
+        # استثناهای شبکه و خطاهای عمومی (مثل label_duplicate) کاربر رو «تست‌گرفته» نمی‌کنن.
         err_code = str(res.get('error_code') or '').lower()
         if err_code and any(k in err_code for k in TRIAL_USED_PANEL_CODES):
-            set_free_trial(chat_id)
+            mark_trial_exhausted(chat_id)
             send_message(chat_id, u(chat_id, 'trial_used_on_panel'))
         else:
             print('⚠️ تست رایگان ناموفق برای', chat_id, ':', res)
@@ -6665,6 +6811,42 @@ def admin_remove_channel(chat_id, h):
     g_forget_channel(target)
     admin_channels_panel(chat_id, note=f'🗑 کانال {target} از عضویت اجباری حذف شد.')
 
+
+def apply_runtime_settings():
+    """مقدارهایی که قبلاً فقط موقع استارت از Environment خونده می‌شدن (و تغییرشون ری‌استارت می‌خواست)
+    حالا از جدول settings (پنل ادمین) هم خونده می‌شن؛ اگه تو پنل چیزی ثبت نشده باشه، مقدار Environment/کد می‌مونه."""
+    global ADMIN_ID, GATE_ENABLED, GATE_FAIL_OPEN, GATE_CACHE_TTL, GATE_SYNC_INTERVAL, DIVIDER
+    try:
+        v = get_setting('admin_id', None)
+        if v and str(v).strip().isdigit() and int(v) > 0:
+            ADMIN_ID = int(v)
+        v = get_setting('gate_enabled', None)
+        if v in ('0', '1'):
+            GATE_ENABLED = (v == '1')
+        v = get_setting('gate_fail_open', None)
+        if v in ('0', '1'):
+            GATE_FAIL_OPEN = (v == '1')
+        v = get_setting('gate_cache_ttl', None)
+        if v and str(v).strip().isdigit():
+            GATE_CACHE_TTL = max(5, int(v))
+        v = get_setting('gate_sync_interval', None)
+        if v and str(v).strip().isdigit():
+            GATE_SYNC_INTERVAL = max(5, int(v))
+        v = get_setting('divider', None)
+        if v and v.strip():
+            DIVIDER = v.strip()
+    except Exception as e:
+        print('⚠️ apply_runtime_settings:', e)
+
+
+def runtime_settings_watcher(interval=15):
+    while True:
+        time.sleep(interval)
+        apply_runtime_settings()
+
+
+apply_runtime_settings()
+threading.Thread(target=runtime_settings_watcher, daemon=True).start()
 
 g_boot_restore()
 
