@@ -4285,6 +4285,12 @@ def seller_api(method, path, payload=None):
             data = res.json()
         except Exception:
             data = {}
+        if isinstance(data, list):
+            if res.status_code in (200, 201):
+                return {'success': True, 'data': data}
+            data = {}
+        if not isinstance(data, dict):
+            data = {}
         if res.status_code in (200, 201) and data.get('ok', True) is not False:
             return {'success': True, 'data': data}
         return {'success': False, 'status': res.status_code,
@@ -4314,6 +4320,15 @@ def save_seller_account(user_id, sub_user_id, username, panel_url, password):
               'ON CONFLICT(user_id) DO UPDATE SET sub_user_id=excluded.sub_user_id, username=excluded.username, '
               'panel_url=excluded.panel_url, password=excluded.password',
               (user_id, sub_user_id, username, panel_url, datetime.now().isoformat(), password))
+    conn.commit()
+    conn.close()
+
+
+@with_db_retry
+def delete_seller_account_db(user_id):
+    conn = get_conn()
+    c = conn.cursor()
+    c.execute('DELETE FROM seller_accounts WHERE user_id=?', (user_id,))
     conn.commit()
     conn.close()
 
@@ -4368,6 +4383,13 @@ def seller_set_password(chat_id, password):
     if not acc or not acc[0]:
         return {'success': False, 'reason': 'حساب فروشندگی پیدا نشد.'}
     res = seller_api('POST', f'/resale/subs/{acc[0]}/password', {'password': password})
+    if not res['success'] and res.get('status') == 404:
+        # آیدی ذخیره‌شده قدیمیه: دوباره از روی لیست زیرمجموعه‌ها هماهنگ کن و یک بار دیگه امتحان کن
+        acc2, _checked = _sync_seller_account(chat_id)
+        if not acc2 or not acc2[0]:
+            return {'success': False, 'reason': 'حساب فروشندگی پیدا نشد.'}
+        if acc2[0] != acc[0]:
+            res = seller_api('POST', f'/resale/subs/{acc2[0]}/password', {'password': password})
     if res['success']:
         try:
             set_seller_password_db(chat_id, password)
@@ -4388,27 +4410,97 @@ def get_old_reseller_creds(user_id):
     return (row[0], row[1]) if row and row[0] else None
 
 
-def _migrate_old_reseller(chat_id):
-    """فروشنده‌ی قدیمی با همون نام کاربری و رمز قبلی روی سرویس جدید ساخته می‌شه.
-    برمی‌گردونه (حساب, پیام_داده_شد). اگه رمز قدیمی تو دسترس نباشه فقط رمز جدید می‌پرسه (نام کاربری همون می‌مونه)."""
+def _seller_list_items(data):
+    """از جواب لیست زیرمجموعه‌ها، آرایه‌ی آیتم‌ها رو درمیاره (چند شکل جواب رو تحمل می‌کنه)."""
+    if isinstance(data, list):
+        return data
+    if isinstance(data, dict):
+        for k in ('subs', 'items', 'data', 'results', 'users', 'list'):
+            v = data.get(k)
+            if isinstance(v, list):
+                return v
+            if isinstance(v, dict):
+                r = _seller_list_items(v)
+                if r:
+                    return r
+        for v in data.values():
+            if isinstance(v, list):
+                return v
+    return []
+
+
+def seller_find_sub(username):
+    """نام کاربری رو بین زیرمجموعه‌های کلید فروشنده پیدا می‌کنه.
+    برمی‌گردونه (found, sub): found = True (پیدا شد) / False (نیست) / None (ارتباط با سرویس ناموفق بود)."""
+    from urllib.parse import quote as _urlquote
+    target = (username or '').strip().lower()
+    if not target:
+        return False, None
+    path = '/resale/subs'
+    last = None
+    for _ in range(30):
+        res = seller_api('GET', path)
+        if not res['success']:
+            print('⚠️ گرفتن لیست زیرمجموعه‌ها ناموفق:', res)
+            return None, None
+        data = res['data']
+        last = data
+        for it in _seller_list_items(data):
+            if not isinstance(it, dict):
+                continue
+            nm = it.get('username') or it.get('userName') or it.get('name') or ''
+            if str(nm).strip().lower() == target:
+                return True, it
+        nxt = None
+        if isinstance(data, dict):
+            cur = data.get('nextCursor') or data.get('next_cursor')
+            if cur:
+                nxt = '/resale/subs?cursor=' + _urlquote(str(cur))
+            else:
+                try:
+                    page, tp = data.get('page'), (data.get('totalPages') or data.get('pages'))
+                    if page and tp and int(page) < int(tp):
+                        nxt = '/resale/subs?page=%d' % (int(page) + 1)
+                except Exception:
+                    nxt = None
+        if not nxt:
+            break
+        path = nxt
+    print('ℹ️ نام کاربری %r بین زیرمجموعه‌ها نبود. نمونه‌ی جواب لیست: %s' % (target, str(last)[:300]))
+    return False, None
+
+
+def _sync_seller_account(chat_id):
+    """حساب فروشنده‌ی این کاربر رو با لیست زیرمجموعه‌های سرویس هماهنگ می‌کنه.
+    نام کاربری از حساب ذخیره‌شده یا از رکورد فروشنده‌ی قدیمی گرفته می‌شه.
+    برمی‌گردونه (حساب یا None, بررسی_شد). اگه نام کاربری تو زیرمجموعه‌ها باشه، آیدی درست ذخیره می‌شه؛
+    اگه نباشه حساب ذخیره‌شده‌ی کهنه پاک می‌شه و None برمی‌گرده (یعنی باید ساخت جدید بزنه)."""
+    acc = get_seller_account(chat_id)
     old = get_old_reseller_creds(chat_id)
-    if not old:
-        return None, False
-    uname, pw = old
-    if not pw or len(pw) < RESELLER_PASSWORD_MIN or len(pw) > RESELLER_PASSWORD_MAX:
-        user_steps[str(chat_id)] = {'step': 'reseller_set_password', 'username': uname}
-        send_message(chat_id, u(chat_id, 'reseller_ask_password', min_len=RESELLER_PASSWORD_MIN),
-                     reply_markup=cancel_kb(chat_id))
+    uname = (acc[1] if acc and acc[1] else (old[0] if old else None))
+    if not uname:
+        return acc, True
+    found, sub = seller_find_sub(uname)
+    if found is None:                      # سرویس جواب نداد: با همون چیزی که داریم ادامه بده
+        return acc, False
+    if not found:
+        if acc:
+            try:
+                delete_seller_account_db(chat_id)
+            except Exception as e:
+                print('⚠️ پاک کردن حساب کهنه‌ی فروشنده ناموفق بود:', e)
         return None, True
-    res = seller_create_sub(chat_id, uname, pw)
-    if res['success']:
-        return get_seller_account(chat_id), False
-    if res.get('username_taken'):
-        send_message(chat_id, u(chat_id, 'reseller_username_taken'))
-        _reseller_creds_start(chat_id)
-    else:
-        send_message(chat_id, u(chat_id, 'seller_error', reason=res['reason']))
-    return None, True
+    sub_id = str(sub.get('userId') or sub.get('id') or sub.get('_id') or sub.get('subId') or '')
+    if not sub_id:
+        print('⚠️ آیدی زیرمجموعه تو جواب لیست نبود:', str(sub)[:300])
+        return acc, True
+    panel_url = sub.get('panelUrl') or (acc[2] if acc and acc[2] else None) or get_reseller_panel_url()
+    pw = (acc[3] if acc and acc[3] else (old[1] if old and old[1] else None))
+    try:
+        save_seller_account(chat_id, sub_id, uname, panel_url, pw)
+    except Exception as e:
+        print('⚠️ ذخیره‌ی حساب فروشنده تو دیتابیس ناموفق بود:', e)
+    return get_seller_account(chat_id) or (sub_id, uname, panel_url, pw), True
 
 
 def _reseller_creds_start(chat_id):
@@ -4428,11 +4520,12 @@ def action_reseller_menu(chat_id):
 def _action_reseller_menu(chat_id):
     """صفحه‌ی فروشندگی: اگه هنوز حساب نساخته، معرفی + دکمه‌ی ساخت (بدون پرداخت)؛
     وگرنه نام کاربری، آدرس پنل و دکمه‌ی تغییر رمز."""
-    acc = get_seller_account(chat_id)
-    if not acc:
-        acc, handled = _migrate_old_reseller(chat_id)   # فروشنده‌ی قدیمی: همون نام کاربری/رمز
-        if handled:
-            return
+    # هر بار که دکمه زده می‌شه: نام کاربری بین زیرمجموعه‌های سرویس چک می‌شه
+    acc, checked = _sync_seller_account(chat_id)
+    if not acc and not checked and get_old_reseller_creds(chat_id):
+        send_message(chat_id, u(chat_id, 'seller_error',
+                                reason='ارتباط با سرویس برقرار نشد، کمی بعد دوباره تلاش کنید.'))
+        return
     if not acc:
         send_message(
             chat_id,
@@ -5133,7 +5226,7 @@ def process_update(update):
             main_menu(chat_id)
 
         elif data == 'reseller_activate':
-            if get_seller_account(chat_id):
+            if _sync_seller_account(chat_id)[0]:
                 action_reseller_menu(chat_id)
             else:
                 _reseller_creds_start(chat_id)
