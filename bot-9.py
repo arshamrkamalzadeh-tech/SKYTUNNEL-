@@ -4747,7 +4747,7 @@ BUTTON_ACTIONS = [
     ('support', '🎧 پشتیبانی', action_support_start),
     ('guide', '📲 اپ مخصوص کانفیگ‌ها', action_guide),
     ('language', '🌐 تغییر زبان', action_language_menu),
-    ('reseller', '🧑‍💼 فروشنده شو', action_reseller_menu),
+    ('reseller', '🏪 دریافت پنل فروشندگی', action_reseller_menu),
     ('referral', '🎁 دعوت دوستان', action_referral),
 ]
 
@@ -5057,7 +5057,35 @@ def commands_watcher():
 
 
 
+@with_db_retry
+def reset_seller_text_overrides_once():
+    """فقط یک‌بار: متن‌ها و دکمه‌های قدیمیِ فروشندگی که از قبل تو settings به‌عنوان «سفارشی» ذخیره شده بودن
+    (و متن جدید رو می‌پوشوندن) پاک می‌شن تا متن‌های جدید اعمال بشن. بعد از این، هر تغییری که از پنل بدید می‌مونه."""
+    conn = get_conn()
+    c = conn.cursor()
+    c.execute("SELECT 1 FROM settings WHERE key='seller_texts_reset_v1'")
+    if c.fetchone():
+        conn.close()
+        return
+    keys = {'btn_reseller'}   # برچسب دکمه‌ی منوی اصلی (فارسی) تحت همین کلید ذخیره می‌شه
+    for k in _SELLER_ACTIVE_KEYS:
+        keys.add(ui_setting_key('fa', k))
+        keys.add(ui_setting_key('en', k))
+    for key in keys:
+        c.execute('DELETE FROM settings WHERE key=?', (key,))
+    c.execute("INSERT INTO settings (key, value) VALUES ('seller_texts_reset_v1', '1') "
+              "ON CONFLICT(key) DO UPDATE SET value=excluded.value")
+    conn.commit()
+    conn.close()
+    print(f'♻️ {len(keys)} متن/دکمه‌ی قدیمیِ فروشندگی به متن جدید برگشت.')
+
+
 init_db()
+try:
+    reset_seller_text_overrides_once()
+    _refresh_settings_cache()
+except Exception as e:
+    print('⚠️ ریست متن‌های فروشندگی انجام نشد:', e)
 sync_text_registry()
 network_diagnostic()
 delete_webhook()
