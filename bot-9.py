@@ -4265,13 +4265,21 @@ APP_DOWNLOAD_LINKS = [
 # ---------------------------------------------------------------------------
 SELLER_API_BASE = (os.getenv('SELLER_API_BASE', '').strip()
                    or CONFIG_API.rsplit('/configs', 1)[0]).rstrip('/')
+# کلید مخصوص و جدا: فقط برای ساخت حساب فروشنده (انتخاب نام کاربری/رمز) و تغییر رمز.
+# جای دیگه‌ای استفاده نمی‌شه. (اگه SELLER_API_KEY تو Environment باشه اولویت با اونه.)
+SELLER_API_KEY = (os.getenv('SELLER_API_KEY', '').strip()
+                  or 'sk_live_iIlB6uH_KSibQMUTnq2Ef6UcgWYztoQL')
 
 
 def seller_api(method, path, payload=None):
-    """درخواست به Seller API با همون کلید CONFIG_KEY. خروجی: success / status / error_code / message."""
+    """درخواست به Seller API با کلید مخصوص SELLER_API_KEY (فقط ساخت حساب و تغییر رمز فروشنده).
+    خروجی: success / status / error_code / message."""
+    if not SELLER_API_KEY:
+        return {'success': False, 'status': 0, 'error_code': None,
+                'message': 'SELLER_API_KEY تو Environment تنظیم نشده'}
     try:
         res = SESSION.request(method, SELLER_API_BASE + path,
-                              headers={'Authorization': 'Bearer ' + CONFIG_KEY},
+                              headers={'Authorization': 'Bearer ' + SELLER_API_KEY},
                               json=payload, timeout=20)
         try:
             data = res.json()
