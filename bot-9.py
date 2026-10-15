@@ -1273,6 +1273,7 @@ def with_db_retry(func):
     found')، اتصال رو ریست می‌کنه و همون عملیات رو یک بار دیگه اجرا می‌کنه؛ برای
     هر خطای دیگه، خطا رو دوباره پرتاب می‌کنه تا رفتار قبلی حفظ بشه."""
     def wrapper(*args, **kwargs):
+        _t0 = time.time()
         try:
             return func(*args, **kwargs)
         except Exception as e:
@@ -1282,6 +1283,10 @@ def with_db_retry(func):
                 reset_conn()
                 return func(*args, **kwargs)
             raise
+        finally:
+            _dt = time.time() - _t0
+            if _dt > 1.0:   # تشخیص کندی: لتنسی دیتابیس راه دور (Turso) اینجا دیده می‌شه
+                print(f'[slow-db] {func.__name__} {_dt:.1f}s')
     return wrapper
 
 
@@ -3176,11 +3181,16 @@ def send_message(chat_id, text, parse_mode='HTML', reply_markup=None):
         payload['parse_mode'] = parse_mode
     if reply_markup:
         payload['reply_markup'] = json.dumps(reply_markup)
+    _t0 = time.time()
     try:
         res = SESSION.post(url, json=payload, timeout=15)
         return res.json()
     except Exception:
         return {'ok': False}
+    finally:
+        _dt = time.time() - _t0
+        if _dt > 1.5:   # تشخیص کندی API سروش: مدت واقعی ارسال یک پیام
+            print(f'[slow-api] sendMessage chat={chat_id} {_dt:.1f}s')
 
 
 def delete_message(chat_id, message_id):
@@ -5816,7 +5826,7 @@ GATE_SESSION_NAME = "gate_session"
 GATE_CONFIG_PATH = "gate_config.json"
 GATE_CODE_TIMEOUT = 300       # چند ثانیه منتظر کد/رمز از ادمین بمونه
 GATE_LIVE_TIMEOUT = 6         # حداکثر صبر برای چک زنده‌ی یک کاربر
-GATE_SYNC_INTERVAL = max(5, int(os.getenv("GATE_SYNC_INTERVAL", "10") or 10))  # هر چند ثانیه لیست اعضا تازه بشه
+GATE_SYNC_INTERVAL = max(5, int(os.getenv("GATE_SYNC_INTERVAL", "30") or 30))  # هر چند ثانیه لیست اعضا تازه بشه
 GATE_CACHE_TTL = 60           # عضوِ تاییدشده تا این مدت دوباره چک نمی‌شه
 
 try:
@@ -6843,6 +6853,13 @@ def runtime_settings_watcher(interval=15):
     while True:
         time.sleep(interval)
         apply_runtime_settings()
+        try:   # اگه صف پردازش پیام‌ها انباشته بشه، یعنی تردها منتظر کار کندی گیر کردن
+            q_upd = UPDATE_EXECUTOR._work_queue.qsize()
+            q_bg = BG_EXECUTOR._work_queue.qsize()
+            if q_upd > 2 or q_bg > 5:
+                print(f'[perf] صف پردازش: updates={q_upd} background={q_bg}')
+        except Exception:
+            pass
 
 
 apply_runtime_settings()
