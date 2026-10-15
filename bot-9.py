@@ -1129,6 +1129,76 @@ UI_TEXT['en'].update({
     'reseller_creds_line': '👤 Panel username: <code>{username}</code>',
 })
 
+# ---- فروشندگی جدید: ساخت خودکار حساب فروشنده روی پنل سرویس‌دهنده (بدون پرداخت) ----
+UI_TEXT['fa'].update({
+    'btn_reseller': '🏪 دریافت پنل فروشندگی',
+    'btn_reseller_activate': '✅ ساخت حساب فروشندگی',
+    'reseller_intro': (
+        '🏪 <b>پنل فروشندگی</b>\n{divider}\n'
+        'با چند قدم ساده یه حساب فروشندگی مخصوص خودتون می‌گیرید و از طریق پنلش به مشتری‌هاتون سرویس می‌فروشید.\n\n'
+        'فقط کافیه یه <b>نام کاربری</b> و <b>رمز عبور</b> انتخاب کنید؛ حساب و آدرس پنل همون لحظه ساخته می‌شه.\n\n'
+        '💵 برای ساخت حساب هیچ مبلغی پرداخت نمی‌کنید.\n'
+    ),
+    'reseller_ask_password': (
+        '🔑 حالا یه <b>رمز عبور</b> بفرستید (حداقل {min_len} کاراکتر).\n'
+        'پیامی که رمز توشه بعد از ارسال حذف می‌شه.'
+    ),
+    'reseller_creds_done': (
+        '✅ <b>حساب فروشندگی شما ساخته شد!</b>\n{divider}\n'
+        '👤 نام کاربری: <code>{username}</code>\n'
+        '🔑 رمز عبور: <code>{password}</code>\n\n'
+        '🌐 آدرس پنل:\n<code>{panel_url}</code>\n\n'
+        '⚠️ اگه پنل باز نشد یا لود نمی‌شد، حتماً با <b>VPN</b> تست کنید.\n\n'
+        'هر وقت خواستید از منوی «پنل فروشندگی ← تغییر رمز عبور» رمزتون رو عوض کنید.'
+    ),
+    'reseller_dashboard': (
+        '🏪 <b>پنل فروشندگی شما</b>\n{divider}\n'
+        '{creds_line}\n'
+        '🌐 آدرس پنل:\n<code>{panel_url}</code>\n\n'
+        '⚠️ اگه پنل باز نشد یا لود نمی‌شد، حتماً با <b>VPN</b> تست کنید.'
+    ),
+    'seller_pass_line': '🔑 رمز عبور: <code>{password}</code>',
+    'seller_pass_missing': '🔑 رمز عبور: ثبت نشده — با «تغییر رمز عبور» یکی جدید بذارید.',
+    'seller_error': (
+        '⚠️ ساخت/تغییر حساب فروشندگی انجام نشد.\n{reason}\n\n'
+        'کمی بعد دوباره تلاش کنید؛ اگه تکرار شد به پشتیبانی پیام بدید.'
+    ),
+})
+UI_TEXT['en'].update({
+    'btn_reseller': '🏪 Get Seller Panel',
+    'btn_reseller_activate': '✅ Create seller account',
+    'reseller_intro': (
+        '🏪 <b>Seller panel</b>\n{divider}\n'
+        'Get your own seller account in a few steps and sell services to your customers from its panel.\n\n'
+        'Just pick a <b>username</b> and a <b>password</b>; the account and panel address are created instantly.\n\n'
+        '💵 Creating the account is free.\n'
+    ),
+    'reseller_ask_password': (
+        '🔑 Now send a <b>password</b> (at least {min_len} characters).\n'
+        'The message containing it is deleted after you send it.'
+    ),
+    'reseller_creds_done': (
+        '✅ <b>Your seller account is ready!</b>\n{divider}\n'
+        '👤 Username: <code>{username}</code>\n'
+        '🔑 Password: <code>{password}</code>\n\n'
+        '🌐 Panel address:\n<code>{panel_url}</code>\n\n'
+        '⚠️ If the panel does not open, try with a <b>VPN</b>.\n\n'
+        'You can change your password any time from the seller panel menu.'
+    ),
+    'reseller_dashboard': (
+        '🏪 <b>Your seller panel</b>\n{divider}\n'
+        '{creds_line}\n'
+        '🌐 Panel address:\n<code>{panel_url}</code>\n\n'
+        '⚠️ If the panel does not open, try with a <b>VPN</b>.'
+    ),
+    'seller_pass_line': '🔑 Password: <code>{password}</code>',
+    'seller_pass_missing': '🔑 Password: not saved — set a new one with “Change password”.',
+    'seller_error': (
+        '⚠️ Could not create/update the seller account.\n{reason}\n\n'
+        'Please try again shortly; contact support if it keeps happening.'
+    ),
+})
+
 
 # بعضی متن‌های فارسی از قبل تو پنل زیر کلیدهای قدیمی (text_*, ctype_label_*)
 # ذخیره می‌شدن؛ برای اینکه سفارشی‌سازی‌های قبلی ادمین از بین نره، همون کلیدها
@@ -1369,6 +1439,9 @@ def init_db():
     except Exception:
         pass
     c.execute('CREATE TABLE IF NOT EXISTS free_trials (user_id INTEGER PRIMARY KEY)')
+    # حساب فروشندگی روی پنل فروشنده‌ی su.randomatic.ir (بدون رمز؛ رمز فقط تو خودِ سرویس می‌مونه)
+    c.execute('''CREATE TABLE IF NOT EXISTS seller_accounts (
+        user_id INTEGER PRIMARY KEY, sub_user_id TEXT, username TEXT, panel_url TEXT, created_at TEXT, password TEXT)''')
     # سیستم دعوت (رفرال): هر کاربر دعوت‌شده فقط یک‌بار پاداش می‌ده (invitee_id کلید اصلیه)
     c.execute('''CREATE TABLE IF NOT EXISTS referral_rewards (
         invitee_id INTEGER PRIMARY KEY, inviter_id INTEGER, inviter_amount INTEGER DEFAULT 0,
@@ -1412,6 +1485,7 @@ def init_db():
         'ALTER TABLE resellers ADD COLUMN password_hash TEXT',
         'ALTER TABLE resellers ADD COLUMN password_plain TEXT',
         'ALTER TABLE free_trials ADD COLUMN trial_count INTEGER DEFAULT 1',
+        'ALTER TABLE seller_accounts ADD COLUMN password TEXT',
         'ALTER TABLE free_trials ADD COLUMN last_at TEXT',
     ):
         try:
@@ -4186,6 +4260,149 @@ APP_DOWNLOAD_LINKS = [
 ]
 
 
+# ---------------------------------------------------------------------------
+# فروشندگی: حساب فروشنده روی پنل su.randomatic.ir (Seller API → resale/subs)
+# ---------------------------------------------------------------------------
+SELLER_API_BASE = (os.getenv('SELLER_API_BASE', '').strip()
+                   or CONFIG_API.rsplit('/configs', 1)[0]).rstrip('/')
+
+
+def seller_api(method, path, payload=None):
+    """درخواست به Seller API با همون کلید CONFIG_KEY. خروجی: success / status / error_code / message."""
+    try:
+        res = SESSION.request(method, SELLER_API_BASE + path,
+                              headers={'Authorization': 'Bearer ' + CONFIG_KEY},
+                              json=payload, timeout=20)
+        try:
+            data = res.json()
+        except Exception:
+            data = {}
+        if res.status_code in (200, 201) and data.get('ok', True) is not False:
+            return {'success': True, 'data': data}
+        return {'success': False, 'status': res.status_code,
+                'error_code': data.get('error') or str(res.status_code),
+                'message': data.get('message') or ''}
+    except Exception as e:
+        return {'success': False, 'status': 0, 'error_code': None, 'message': str(e)}
+
+
+@with_db_retry
+def get_seller_account(user_id):
+    """(sub_user_id, username, panel_url, password) یا None. هر کاربر فقط یک حساب فروشندگی می‌تونه داشته باشه."""
+    conn = get_conn()
+    c = conn.cursor()
+    c.execute('SELECT sub_user_id, username, panel_url, password FROM seller_accounts WHERE user_id=?', (user_id,))
+    row = c.fetchone()
+    conn.close()
+    return (row[0], row[1], row[2], row[3]) if row else None
+
+
+@with_db_retry
+def save_seller_account(user_id, sub_user_id, username, panel_url, password):
+    conn = get_conn()
+    c = conn.cursor()
+    c.execute('INSERT INTO seller_accounts (user_id, sub_user_id, username, panel_url, created_at, password) '
+              'VALUES (?, ?, ?, ?, ?, ?) '
+              'ON CONFLICT(user_id) DO UPDATE SET sub_user_id=excluded.sub_user_id, username=excluded.username, '
+              'panel_url=excluded.panel_url, password=excluded.password',
+              (user_id, sub_user_id, username, panel_url, datetime.now().isoformat(), password))
+    conn.commit()
+    conn.close()
+
+
+@with_db_retry
+def set_seller_password_db(user_id, password):
+    conn = get_conn()
+    c = conn.cursor()
+    c.execute('UPDATE seller_accounts SET password=? WHERE user_id=?', (password, user_id))
+    conn.commit()
+    conn.close()
+
+
+def _seller_alert_admin(text):
+    try:
+        send_message(ADMIN_ID, text, parse_mode=None)
+    except Exception:
+        pass
+
+
+def _seller_reason(res):
+    """متن دلیل خطا برای کاربر: پیام خود سرویس برای خطای ورودی (400)، وگرنه پیام عمومی و خبر به ادمین."""
+    msg = (res.get('message') or '').strip()
+    if res.get('status') == 400 and msg:
+        return _html.escape(msg[:200])
+    print('⚠️ خطای Seller API:', res)
+    _seller_alert_admin(f"⚠️ خطای Seller API (فروشندگی): {res.get('status')} {res.get('error_code')} {msg[:150]}")
+    return 'مشکل موقتی از سمت سرویس پیش اومده.'
+
+
+def seller_create_sub(chat_id, username, password):
+    """حساب فروشنده رو روی سرویس می‌سازه (بدون پرداخت) و تو دیتابیس ثبت می‌کنه."""
+    res = seller_api('POST', '/resale/subs', {'username': username, 'password': password,
+                                              'note': f'telegram:{chat_id}'})
+    if res['success']:
+        d = res['data']
+        panel_url = d.get('panelUrl') or get_reseller_panel_url()
+        try:
+            save_seller_account(chat_id, str(d.get('userId') or ''), username, panel_url, password)
+        except Exception as e:
+            print('⚠️ ذخیره‌ی حساب فروشنده تو دیتابیس ناموفق بود:', e)
+        _seller_alert_admin(f'🏪 فروشنده‌ی جدید: کاربر {chat_id} — نام کاربری {username}')
+        return {'success': True, 'panel_url': panel_url}
+    code = str(res.get('error_code') or '').lower()
+    if res.get('status') == 409 or any(k in code for k in ('taken', 'exist', 'duplicate')):
+        return {'success': False, 'username_taken': True}
+    return {'success': False, 'username_taken': False, 'reason': _seller_reason(res)}
+
+
+def seller_set_password(chat_id, password):
+    acc = get_seller_account(chat_id)
+    if not acc or not acc[0]:
+        return {'success': False, 'reason': 'حساب فروشندگی پیدا نشد.'}
+    res = seller_api('POST', f'/resale/subs/{acc[0]}/password', {'password': password})
+    if res['success']:
+        try:
+            set_seller_password_db(chat_id, password)
+        except Exception as e:
+            print('⚠️ ذخیره‌ی رمز جدید فروشنده ناموفق بود:', e)
+        return {'success': True}
+    return {'success': False, 'reason': _seller_reason(res)}
+
+
+@with_db_retry
+def get_old_reseller_creds(user_id):
+    """(نام کاربری, رمز) فروشنده‌ی قدیمی؛ رمز ممکنه None باشه (اگه فقط هشش ذخیره شده بود)."""
+    conn = get_conn()
+    c = conn.cursor()
+    c.execute('SELECT username, password_plain FROM resellers WHERE user_id=?', (user_id,))
+    row = c.fetchone()
+    conn.close()
+    return (row[0], row[1]) if row and row[0] else None
+
+
+def _migrate_old_reseller(chat_id):
+    """فروشنده‌ی قدیمی با همون نام کاربری و رمز قبلی روی سرویس جدید ساخته می‌شه.
+    برمی‌گردونه (حساب, پیام_داده_شد). اگه رمز قدیمی تو دسترس نباشه فقط رمز جدید می‌پرسه (نام کاربری همون می‌مونه)."""
+    old = get_old_reseller_creds(chat_id)
+    if not old:
+        return None, False
+    uname, pw = old
+    if not pw or len(pw) < RESELLER_PASSWORD_MIN or len(pw) > RESELLER_PASSWORD_MAX:
+        user_steps[str(chat_id)] = {'step': 'reseller_set_password', 'username': uname}
+        send_message(chat_id, u(chat_id, 'reseller_ask_password', min_len=RESELLER_PASSWORD_MIN),
+                     reply_markup=cancel_kb(chat_id))
+        return None, True
+    res = seller_create_sub(chat_id, uname, pw)
+    if res['success']:
+        return get_seller_account(chat_id), False
+    if res.get('username_taken'):
+        send_message(chat_id, u(chat_id, 'reseller_username_taken'))
+        _reseller_creds_start(chat_id)
+    else:
+        send_message(chat_id, u(chat_id, 'seller_error', reason=res['reason']))
+    return None, True
+
+
 def _reseller_creds_start(chat_id):
     """مرحله‌ی ۱: گرفتن نام کاربری (بعد از اون رمز). تا کامل نشه، تو منو دکمه‌ی تغییر هست."""
     user_steps[str(chat_id)] = {'step': 'reseller_set_username'}
@@ -4201,32 +4418,31 @@ def action_reseller_menu(chat_id):
 
 
 def _action_reseller_menu(chat_id):
-    """صفحه‌ی فروشندگی: اگه هنوز فروشنده نشده، پیشنهاد فعال‌سازی؛ وگرنه
-    پنل کوچیکش (موجودی استخر، کلید API، افزایش استخر)."""
-    row = get_reseller(chat_id)
-    if not row:
-        activation_price = round(get_reseller_min_gb() * get_reseller_price_per_gb())
+    """صفحه‌ی فروشندگی: اگه هنوز حساب نساخته، معرفی + دکمه‌ی ساخت (بدون پرداخت)؛
+    وگرنه نام کاربری، آدرس پنل و دکمه‌ی تغییر رمز."""
+    acc = get_seller_account(chat_id)
+    if not acc:
+        acc, handled = _migrate_old_reseller(chat_id)   # فروشنده‌ی قدیمی: همون نام کاربری/رمز
+        if handled:
+            return
+    if not acc:
         send_message(
             chat_id,
-            u(chat_id, 'reseller_intro', divider=DIVIDER, price_per_gb=f'{get_reseller_price_per_gb():,}',
-              min_gb=get_reseller_min_gb(), activation_price=f'{activation_price:,}'),
+            u(chat_id, 'reseller_intro', divider=DIVIDER),
             reply_markup={'inline_keyboard': [[
                 {'text': u(chat_id, 'btn_reseller_activate'), 'callback_data': 'reseller_activate'}
             ]]}
         )
         return
-    _, _api_key, _secret_hash, gb_balance, price_per_gb, status, _created = row
-    uname = get_reseller_username(chat_id)
-    creds_line = (u(chat_id, 'reseller_creds_line', username=uname) if uname else u(chat_id, 'reseller_creds_missing'))
-    status_label = u(chat_id, 'reseller_status_active') if status == 'active' else u(chat_id, 'reseller_status_blocked')
+    _sub_id, uname, panel_url, pw = acc
     send_message(
         chat_id,
-        u(chat_id, 'reseller_dashboard', divider=DIVIDER, gb_balance=('%g' % gb_balance),
-          price_per_gb=reseller_price_range_text(chat_id), status=status_label, creds_line=creds_line,
-          panel_url=get_reseller_panel_url()),
+        u(chat_id, 'reseller_dashboard', divider=DIVIDER,
+          creds_line=u(chat_id, 'reseller_creds_line', username=uname) + '\n' + (
+              u(chat_id, 'seller_pass_line', password=_html.escape(pw)) if pw else u(chat_id, 'seller_pass_missing')),
+          panel_url=panel_url or get_reseller_panel_url()),
         reply_markup={'inline_keyboard': [
-            [{'text': u(chat_id, 'btn_reseller_topup'), 'callback_data': 'reseller_topup'}],
-            [{'text': u(chat_id, 'btn_reseller_regen'), 'callback_data': 'reseller_creds'}],
+            [{'text': u(chat_id, 'btn_change_password'), 'callback_data': 'reseller_cred_pass'}],
         ]}
     )
 
@@ -4866,22 +5082,10 @@ def process_update(update):
             main_menu(chat_id)
 
         elif data == 'reseller_activate':
-            if get_reseller(chat_id):
+            if get_seller_account(chat_id):
                 action_reseller_menu(chat_id)
             else:
-                activation_gb = get_reseller_min_gb()
-                activation_price = round(activation_gb * get_reseller_price_per_gb())
-                user_steps[str(chat_id)] = {'step': 'reseller_activate_confirm', 'gb': activation_gb,
-                                            'price': activation_price}
-                send_message(
-                    chat_id,
-                    u(chat_id, 'reseller_activate_confirm_title', divider=DIVIDER, gb=activation_gb,
-                      price_per_gb=f'{get_reseller_price_per_gb():,}', price=f'{activation_price:,}'),
-                    reply_markup={'inline_keyboard': [[
-                        {'text': u(chat_id, 'btn_confirm_pay'), 'callback_data': 'reseller_activate_confirm'},
-                        {'text': u(chat_id, 'btn_cancel'), 'callback_data': 'menu'},
-                    ]]}
-                )
+                _reseller_creds_start(chat_id)
 
         elif data == 'reseller_activate_confirm':
             s_ = user_steps.get(str(chat_id), {})
@@ -4952,30 +5156,16 @@ def process_update(update):
             else:
                 main_menu(chat_id)
 
-        elif data == 'reseller_creds':
-            if not get_reseller(chat_id):
-                action_reseller_menu(chat_id)
-            else:
-                uname = get_reseller_username(chat_id)
-                if not uname:                      # هنوز تنظیم نشده → مسیر کامل (نام کاربری + رمز)
-                    _reseller_creds_start(chat_id)
-                else:
-                    send_message(chat_id, u(chat_id, 'reseller_creds_menu', divider=DIVIDER, username=uname),
-                                 reply_markup={'inline_keyboard': [
-                                     [{'text': u(chat_id, 'btn_change_username'), 'callback_data': 'reseller_cred_user'}],
-                                     [{'text': u(chat_id, 'btn_change_password'), 'callback_data': 'reseller_cred_pass'}],
-                                 ]})
-
-        elif data == 'reseller_cred_user':
-            if get_reseller(chat_id):
-                user_steps[str(chat_id)] = {'step': 'reseller_chg_username'}
-                send_message(chat_id, u(chat_id, 'reseller_ask_new_username'), reply_markup=cancel_kb(chat_id))
+        elif data in ('reseller_creds', 'reseller_cred_user'):
+            action_reseller_menu(chat_id)
 
         elif data == 'reseller_cred_pass':
-            if get_reseller(chat_id):
+            if get_seller_account(chat_id):
                 user_steps[str(chat_id)] = {'step': 'reseller_chg_password'}
                 send_message(chat_id, u(chat_id, 'reseller_ask_new_password', min_len=RESELLER_PASSWORD_MIN),
                              reply_markup=cancel_kb(chat_id))
+            else:
+                action_reseller_menu(chat_id)
 
         elif data.startswith('reord_'):
             try:
@@ -5475,8 +5665,6 @@ def process_update(update):
             uname = (text or '').strip().lower()
             if not RESELLER_USERNAME_RE.match(uname):
                 send_message(chat_id, u(chat_id, 'reseller_username_bad'))
-            elif reseller_username_taken(uname, chat_id):
-                send_message(chat_id, u(chat_id, 'reseller_username_taken'))
             else:
                 user_steps[str(chat_id)] = {'step': 'reseller_set_password', 'username': uname}
                 send_message(chat_id, u(chat_id, 'reseller_ask_password', min_len=RESELLER_PASSWORD_MIN),
@@ -5491,34 +5679,26 @@ def process_update(update):
             if (len(pw) < RESELLER_PASSWORD_MIN or len(pw) > RESELLER_PASSWORD_MAX or pw != pw.strip()):
                 send_message(chat_id, u(chat_id, 'reseller_password_bad', min_len=RESELLER_PASSWORD_MIN,
                                          max_len=RESELLER_PASSWORD_MAX))
+            elif get_seller_account(chat_id):
+                user_steps[str(chat_id)] = {}
+                action_reseller_menu(chat_id)
             else:
                 uname = step.get('username')
-                try:
-                    set_reseller_credentials_db(chat_id, uname, hash_reseller_password(pw), pw)
-                except Exception as e:
-                    print('⚠️ ذخیره‌ی نام کاربری/رمز فروشنده ناموفق بود:', e)
+                res = seller_create_sub(chat_id, uname, pw)
+                if res['success']:
+                    user_steps[str(chat_id)] = {}
+                    send_message(chat_id, u(chat_id, 'reseller_creds_done', divider=DIVIDER, username=uname,
+                                             panel_url=res['panel_url'], password=_html.escape(pw)))
+                elif res.get('username_taken'):
                     user_steps[str(chat_id)] = {'step': 'reseller_set_username'}
                     send_message(chat_id, u(chat_id, 'reseller_username_taken'))
                 else:
                     user_steps[str(chat_id)] = {}
-                    send_message(chat_id, u(chat_id, 'reseller_creds_done', divider=DIVIDER, username=uname,
-                                             panel_url=get_reseller_panel_url()))
+                    send_message(chat_id, u(chat_id, 'seller_error', reason=res['reason']))
 
         elif step.get('step') == 'reseller_chg_username':
-            uname = (text or '').strip().lower()
-            if not RESELLER_USERNAME_RE.match(uname):
-                send_message(chat_id, u(chat_id, 'reseller_username_bad'))
-            elif reseller_username_taken(uname, chat_id):
-                send_message(chat_id, u(chat_id, 'reseller_username_taken'))
-            else:
-                try:
-                    set_reseller_username_db(chat_id, uname)
-                except Exception as e:
-                    print('⚠️ تغییر نام کاربری فروشنده ناموفق بود:', e)
-                    send_message(chat_id, u(chat_id, 'reseller_username_taken'))
-                else:
-                    user_steps[str(chat_id)] = {}
-                    send_message(chat_id, u(chat_id, 'reseller_username_changed', username=uname))
+            user_steps[str(chat_id)] = {}   # تغییر نام کاربری تو Seller API نیست؛ فقط رمز قابل تغییره
+            action_reseller_menu(chat_id)
 
         elif step.get('step') == 'reseller_chg_password':
             pw = text or ''
@@ -5530,15 +5710,13 @@ def process_update(update):
                 send_message(chat_id, u(chat_id, 'reseller_password_bad', min_len=RESELLER_PASSWORD_MIN,
                                          max_len=RESELLER_PASSWORD_MAX))
             else:
-                try:
-                    set_reseller_password_db(chat_id, hash_reseller_password(pw), pw)
-                except Exception as e:
-                    print('⚠️ تغییر رمز فروشنده ناموفق بود:', e)
-                    send_message(chat_id, u(chat_id, 'reseller_password_bad', min_len=RESELLER_PASSWORD_MIN,
-                                             max_len=RESELLER_PASSWORD_MAX))
-                else:
-                    user_steps[str(chat_id)] = {}
+                res = seller_set_password(chat_id, pw)
+                user_steps[str(chat_id)] = {}
+                if res['success']:
                     send_message(chat_id, u(chat_id, 'reseller_password_changed'))
+                    action_reseller_menu(chat_id)
+                else:
+                    send_message(chat_id, u(chat_id, 'seller_error', reason=res['reason']))
 
         elif step.get('step') == 'reseller_topup_gb':
             try:
