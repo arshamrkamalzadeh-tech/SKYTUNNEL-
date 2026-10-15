@@ -520,25 +520,6 @@ def get_all_user_ids():
 
 
 @with_db_retry
-def toggle_reseller_status(user_id):
-    conn = get_conn()
-    c = conn.cursor()
-    c.execute("UPDATE resellers SET status = CASE WHEN status='active' THEN 'blocked' ELSE 'active' END "
-              "WHERE user_id=?", (user_id,))
-    conn.commit()
-    conn.close()
-
-
-@with_db_retry
-def update_reseller_price(user_id, price):
-    conn = get_conn()
-    c = conn.cursor()
-    c.execute("UPDATE resellers SET price_per_gb=? WHERE user_id=?", (price, user_id))
-    conn.commit()
-    conn.close()
-
-
-@with_db_retry
 def get_tickets(status_filter=None, limit=50):
     conn = get_conn()
     c = conn.cursor()
@@ -946,8 +927,7 @@ def get_all_resellers():
         SELECT r.user_id, r.username,
                CASE WHEN r.password_hash IS NOT NULL AND r.password_hash <> '' THEN 1 ELSE 0 END,
                r.gb_balance, r.price_per_gb, r.status,
-               COALESCE((SELECT SUM(price) FROM reseller_pool_log WHERE user_id = r.user_id), 0),
-               COALESCE((SELECT COUNT(*) FROM reseller_api_configs WHERE reseller_id = r.user_id AND active = 1), 0),
+               0, 0,
                u.username, u.first_name
         FROM resellers r LEFT JOIN users u ON u.user_id = r.user_id
         ORDER BY r.created_at DESC
@@ -955,45 +935,6 @@ def get_all_resellers():
     res = c.fetchall()
     conn.close()
     return res
-
-
-@with_db_retry
-def get_reseller(user_id):
-    rows = [r for r in get_all_resellers() if r[0] == user_id]
-    return rows[0] if rows else None
-
-
-@with_db_retry
-def get_reseller_created(user_id):
-    conn = get_conn()
-    c = conn.cursor()
-    c.execute("SELECT created_at FROM resellers WHERE user_id=?", (user_id,))
-    r = c.fetchone()
-    conn.close()
-    return r[0] if r else None
-
-
-@with_db_retry
-def reseller_username_taken(username, except_user_id):
-    conn = get_conn()
-    c = conn.cursor()
-    c.execute("SELECT 1 FROM resellers WHERE username=? AND user_id<>?", (username, except_user_id))
-    r = c.fetchone()
-    conn.close()
-    return bool(r)
-
-
-@with_db_retry
-def set_reseller_login(user_id, username=None, password_hash=None, password_plain=None):
-    conn = get_conn()
-    c = conn.cursor()
-    if username is not None:
-        c.execute("UPDATE resellers SET username=? WHERE user_id=?", (username, user_id))
-    if password_hash is not None:
-        c.execute("UPDATE resellers SET password_hash=?, password_plain=? WHERE user_id=?",
-                  (password_hash, password_plain, user_id))
-    conn.commit()
-    conn.close()
 
 
 @with_db_retry
@@ -1012,62 +953,7 @@ def get_reseller_plain_passwords():
     return res
 
 
-@with_db_retry
-def add_reseller_gb(user_id, delta):
-    conn = get_conn()
-    c = conn.cursor()
-    c.execute("UPDATE resellers SET gb_balance = MAX(0, gb_balance + ?) WHERE user_id=?", (delta, user_id))
-    conn.commit()
-    conn.close()
-
-
-@with_db_retry
-def get_reseller_configs(reseller_id, limit=100):
-    conn = get_conn()
-    c = conn.cursor()
-    c.execute("SELECT label, type, gb, days, active, created_at, source, config_id "
-              "FROM reseller_api_configs WHERE reseller_id=? ORDER BY id DESC LIMIT ?", (reseller_id, limit))
-    res = c.fetchall()
-    conn.close()
-    return res
-
-
-@with_db_retry
-def get_reseller_api_keys(reseller_id):
-    """کلیدهای API برنامه‌نویسی فروشنده (جدول seller_api_keys که پنل فروشندگان می‌سازه). فقط پیشوند نمایش داده می‌شه."""
-    conn = get_conn()
-    c = conn.cursor()
-    try:
-        c.execute("SELECT id, name, prefix, created_at, last_used, COALESCE(revoked,0) FROM seller_api_keys "
-                  "WHERE reseller_id=? ORDER BY created_at DESC", (reseller_id,))
-        res = c.fetchall()
-    except Exception as e:
-        if "stream" in str(e).lower():
-            raise
-        res = []
-    conn.close()
-    return res
-
-
-@with_db_retry
-def revoke_reseller_api_key(reseller_id, key_id):
-    conn = get_conn()
-    c = conn.cursor()
-    c.execute("UPDATE seller_api_keys SET revoked=1 WHERE id=? AND reseller_id=?", (key_id, reseller_id))
-    conn.commit()
-    conn.close()
-
-
-RESELLER_USERNAME_RE = re.compile(r"^[A-Za-z0-9_.]{3,20}$")
 RESELLER_PASSWORD_MIN, RESELLER_PASSWORD_MAX = 6, 64
-_PBKDF2_ITERS = 200_000
-
-
-def hash_reseller_password(password):
-    """همون فرمتی که bot.py و پنل فروشندگان (app.py) انتظار دارن: pbkdf2_sha256$تکرار$salt$hash"""
-    salt = secrets.token_hex(16)
-    dk = hashlib.pbkdf2_hmac("sha256", password.encode("utf-8"), salt.encode("utf-8"), _PBKDF2_ITERS)
-    return f"pbkdf2_sha256${_PBKDF2_ITERS}${salt}${dk.hex()}"
 
 
 def secret_widget(value, label_hint=""):
@@ -1087,6 +973,223 @@ def copy_widget(value):
 def login_info_text(username, password):
     panel = get_setting("reseller_panel_url", DEFAULT_RESELLER_PANEL_URL)
     return f"پنل: {panel}\nنام کاربری: {username}\nرمز عبور: {password}"
+
+
+# ---------------------------------------------------------------------------
+# فروشندگان روی سرویس (Seller API → resale/subs)
+# حجم، قیمت، وضعیت و رمز هر فروشنده مستقیم روی سرویس اصلی خونده و تغییر داده می‌شه؛
+# دیتابیس قدیمی خود ربات (استخر محلی) دیگه تغییر نمی‌کنه.
+# ---------------------------------------------------------------------------
+
+SELLER_API_BASE = (os.getenv("SELLER_API_BASE", "").strip() or "https://su.randomatic.ir/api/v1").rstrip("/")
+SELLER_API_KEY = (os.getenv("SELLER_API_KEY", "").strip()
+                  or "sk_live_iIlB6uH_KSibQMUTnq2Ef6UcgWYztoQL")
+
+
+def seller_api(method, path, payload=None, params=None):
+    """درخواست به Seller API. خروجی: success / data  یا  success=False / status / error_code / message."""
+    if not SELLER_API_KEY:
+        return {"success": False, "status": 0, "error_code": None, "message": "SELLER_API_KEY تنظیم نشده"}
+    try:
+        res = SESSION.request(method, SELLER_API_BASE + path,
+                              headers={"Authorization": "Bearer " + SELLER_API_KEY},
+                              json=payload, params=params, timeout=20)
+        try:
+            data = res.json()
+        except Exception:
+            data = {}
+        if not isinstance(data, dict):
+            data = {}
+        if res.status_code in (200, 201) and data.get("ok", True) is not False:
+            return {"success": True, "data": data}
+        return {"success": False, "status": res.status_code,
+                "error_code": data.get("error") or str(res.status_code),
+                "message": data.get("message") or ""}
+    except Exception as e:
+        return {"success": False, "status": 0, "error_code": None, "message": str(e)}
+
+
+def seller_reason(res):
+    """متن فارسی دلیل خطا برای نمایش تو پنل."""
+    msg = (res.get("message") or "").strip()
+    st = res.get("status")
+    if st == 0:
+        return "ارتباط با سرویس برقرار نشد؛ کمی بعد دوباره تلاش کنید."
+    if st == 404:
+        return "این فروشنده تو سرویس پیدا نشد."
+    if st == 429:
+        return "تعداد درخواست‌ها زیاد بود؛ چند ثانیه بعد دوباره تلاش کنید."
+    if st in (401, 403):
+        return "کلید سرویس معتبر نیست یا دسترسی نداره."
+    return (msg[:200] or f"خطای سرویس ({st} {res.get('error_code')})")
+
+
+_SUBS_CACHE = {"at": 0.0, "rows": None}
+
+
+def invalidate_subs_cache():
+    _SUBS_CACHE["rows"] = None
+
+
+def fetch_service_subs(force=False):
+    """لیست کامل زیرمجموعه‌های سرویس (rows)، یا None اگه سرویس جواب نداد. ۱۵ ثانیه کش می‌شه."""
+    if not force and _SUBS_CACHE["rows"] is not None and time.time() - _SUBS_CACHE["at"] < 15:
+        return _SUBS_CACHE["rows"]
+    rows, skip = [], 0
+    for _ in range(200):
+        res = seller_api("GET", "/resale/subs", params={"skip": skip, "limit": 50})
+        if not res["success"]:
+            print("⚠️ گرفتن لیست زیرمجموعه‌ها ناموفق:", res)
+            return None
+        part = res["data"].get("rows") or []
+        rows.extend(p for p in part if isinstance(p, dict))
+        skip += len(part)
+        total = to_int(res["data"].get("total"), 0) or 0
+        if not part or skip >= total:
+            break
+    _SUBS_CACHE["rows"], _SUBS_CACHE["at"] = rows, time.time()
+    return rows
+
+
+@with_db_retry
+def get_seller_accounts():
+    """[(telegram_id, sub_user_id, username, panel_url, password)] از جدول seller_accounts بات."""
+    try:
+        conn = get_conn()
+        c = conn.cursor()
+        c.execute("SELECT user_id, sub_user_id, username, panel_url, password FROM seller_accounts")
+        rows = c.fetchall()
+        conn.close()
+        return rows
+    except Exception as e:
+        if "no such table" in str(e).lower():
+            return []
+        raise
+
+
+@with_db_retry
+def get_tg_users(ids):
+    ids = [int(i) for i in ids if i]
+    if not ids:
+        return {}
+    conn = get_conn()
+    c = conn.cursor()
+    c.execute("SELECT user_id, username, first_name FROM users WHERE user_id IN (%s)" % ",".join("?" * len(ids)), ids)
+    res = {r[0]: (r[1], r[2]) for r in c.fetchall()}
+    conn.close()
+    return res
+
+
+@with_db_retry
+def save_seller_password_local(tg_id, sub_id, username, panel_url, password):
+    """رمز (متن ساده) رو تو seller_accounts بات هم نگه می‌داره تا فروشنده تو بات ببینتش."""
+    conn = get_conn()
+    c = conn.cursor()
+    c.execute("INSERT INTO seller_accounts (user_id, sub_user_id, username, panel_url, created_at, password) "
+              "VALUES (?, ?, ?, ?, ?, ?) "
+              "ON CONFLICT(user_id) DO UPDATE SET sub_user_id=excluded.sub_user_id, username=excluded.username, "
+              "panel_url=COALESCE(seller_accounts.panel_url, excluded.panel_url), password=excluded.password",
+              (tg_id, sub_id, username, panel_url, datetime.now().isoformat(), password))
+    conn.commit()
+    conn.close()
+
+
+@with_db_retry
+def set_old_reseller_status(user_id, status):
+    conn = get_conn()
+    c = conn.cursor()
+    c.execute("UPDATE resellers SET status=? WHERE user_id=?", (status, user_id))
+    conn.commit()
+    conn.close()
+
+
+def build_vendors():
+    """(لیست فروشنده‌ها, سرویس_جواب_داد؟). هر فروشنده یه dict:
+    key, sub_id, tg_id, name, status (active/suspended), credit, price, purchases, paid, panel_url,
+    password, tg_user, tg_name, on_service."""
+    subs = fetch_service_subs()
+    accounts = get_seller_accounts()
+    old = get_all_resellers()
+    plain = get_reseller_plain_passwords()
+    by_sub = {str(a[1]): a for a in accounts if a[1]}
+    acc_by_tg = {a[0]: a for a in accounts}
+    old_by_tg = {r[0]: r for r in old}
+    by_uname = {}
+    for a in accounts:
+        if a[2]:
+            by_uname[str(a[2]).lower()] = a[0]
+    for r in old:
+        if r[1]:
+            by_uname.setdefault(str(r[1]).lower(), r[0])
+    vendors, used_tg = [], set()
+    for s in (subs or []):
+        sid = str(s.get("userId") or "")
+        name = str(s.get("displayName") or "")
+        a = by_sub.get(sid)
+        tg = a[0] if a else by_uname.get(name.lower())
+        if tg in used_tg:
+            tg = None
+        if tg:
+            used_tg.add(tg)
+        pw = (a[4] if a and a[4] else (plain.get(tg) if tg else None))
+        price = s.get("gbTomanOverride") if s.get("modeOverride") == "price" and s.get("gbTomanOverride") else None
+        vendors.append({
+            "key": sid, "sub_id": sid, "tg_id": tg, "name": name,
+            "status": "suspended" if s.get("status") == "suspended" else "active",
+            "credit": float(s.get("creditGb") or 0), "price": price,
+            "purchases": to_int(s.get("purchases"), 0) or 0, "paid": to_int(s.get("paidToman"), 0) or 0,
+            "panel_url": (a[3] if a else None), "password": pw, "on_service": True,
+        })
+    for tg in sorted((set(acc_by_tg) | set(old_by_tg)) - used_tg):
+        a, r = acc_by_tg.get(tg), old_by_tg.get(tg)
+        name = (a[2] if a and a[2] else (r[1] if r and r[1] else ""))
+        vendors.append({
+            "key": f"tg{tg}", "sub_id": None, "tg_id": tg, "name": name or "—",
+            "status": "suspended" if (r and r[5] != "active") else "active",
+            "credit": None, "price": None, "purchases": 0, "paid": 0,
+            "panel_url": (a[3] if a else None),
+            "password": (a[4] if a and a[4] else plain.get(tg)), "on_service": False,
+        })
+    tgu = get_tg_users([v["tg_id"] for v in vendors])
+    for v in vendors:
+        v["tg_user"], v["tg_name"] = tgu.get(v["tg_id"], (None, None)) if v["tg_id"] else (None, None)
+    return vendors, subs is not None
+
+
+def find_vendor(vkey):
+    for v in build_vendors()[0]:
+        if v["key"] == str(vkey):
+            return v
+    return None
+
+
+def parse_gb_delta(raw):
+    """«۲۰» یا «-5» یا «2,5» → float (یا None اگه نامعتبر بود)."""
+    t = str(raw or "").strip().translate(str.maketrans("۰۱۲۳۴۵۶۷۸۹٠١٢٣٤٥٦٧٨٩", "01234567890123456789"))
+    t = t.replace("٫", ".").replace(",", ".").replace("−", "-")
+    try:
+        v = float(t)
+    except ValueError:
+        return None
+    return v if v == v and abs(v) != float("inf") else None
+
+
+def apply_service_pool(sub_id, delta):
+    """حجم رو روی سرویس کم/زیاد می‌کنه: delta>0 → give (از اعتبار حساب اصلی به فروشنده)،
+    delta<0 → take (از فروشنده به حساب اصلی). خروجی: (ok, پیام، موجودی_جدید)."""
+    gb = round(abs(delta), 3)
+    gb = int(gb) if gb == int(gb) else gb
+    res = seller_api("POST", f"/resale/subs/{sub_id}/transfer",
+                     {"direction": "give" if delta > 0 else "take", "gb": gb, "units": 0, "note": "پنل ادمین"})
+    invalidate_subs_cache()
+    if res["success"]:
+        return True, "", res["data"].get("subCreditGb")
+    return False, seller_reason(res), None
+
+
+def vendor_login_text(v):
+    panel = v.get("panel_url") or get_setting("reseller_panel_url", DEFAULT_RESELLER_PANEL_URL)
+    return f"پنل: {panel}\nنام کاربری: {v['name']}\nرمز عبور: {v['password']}"
 
 
 # ---------------------------------------------------------------------------
@@ -1469,30 +1572,6 @@ BASE_HTML = """<!DOCTYPE html>
   .toast { position: fixed; bottom: 96px; left: 50%; transform: translate(-50%, 20px); background: var(--grad); color: #fff; padding: 10px 22px; border-radius: 999px; font-weight: 700; font-size: 13.5px; box-shadow: var(--glow); opacity: 0; pointer-events: none; transition: .3s; z-index: 99; }
   .toast.show { opacity: 1; transform: translate(-50%, 0); }
 
-  /* ---------- انتخاب تم پنل فروشندگان ---------- */
-  .theme-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(170px, 1fr)); gap: 14px; }
-  .theme-card { display: block; margin: 0; cursor: pointer; position: relative; }
-  .theme-card input { position: absolute; opacity: 0; pointer-events: none; }
-  .theme-card .tc-box { border: 2px solid var(--border); border-radius: 18px; padding: 10px; background: var(--surface); transition: .18s; }
-  .theme-card:hover .tc-box { transform: translateY(-3px); border-color: var(--brand); }
-  .theme-card input:checked + .tc-box { border-color: var(--brand); box-shadow: var(--glow); }
-  .theme-card input:checked + .tc-box::after { content: '✓ فعال'; position: absolute; top: 14px; left: 14px; background: var(--grad); color: #fff; font-size: 11.5px; font-weight: 700; padding: 1px 10px; border-radius: 999px; }
-  .theme-card input:focus-visible + .tc-box { outline: 3px solid var(--brand); outline-offset: 2px; }
-  .tc-name { font-weight: 700; font-size: 14px; color: var(--ink); display: block; margin-top: 8px; text-align: center; }
-  .tc-prev { border-radius: 12px; padding: 10px 9px 9px; height: 112px; position: relative; overflow: hidden; }
-  .tc-prev .tc-credit { height: 38px; border-radius: 11px; margin-bottom: 7px; }
-  .tc-prev .tc-row { display: flex; gap: 6px; }
-  .tc-prev .tc-c { flex: 1; height: 26px; border-radius: 9px; border: 1px solid transparent; }
-  .tc-prev .tc-btn { height: 12px; border-radius: 999px; width: 42%; margin-top: 8px; }
-  .lay-card .tc-box { padding: 10px; }
-  .lay-desc { display: block; font-size: 12px; color: var(--muted); text-align: center; margin-top: 4px; line-height: 1.7; }
-  .lay-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(150px, 1fr)); gap: 14px; }
-  .font-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(190px, 1fr)); gap: 14px; margin-bottom: 18px; }
-  .font-prev { height: 88px; border-radius: 12px; background: var(--surface-2); border: 1px solid var(--border); display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 4px; padding: 8px; text-align: center; }
-  .font-prev b { font-size: 15.5px; font-weight: 700; line-height: 1.6; }
-  .font-prev span { font-size: 12.5px; color: var(--muted); line-height: 1.6; }
-  input[type=color] { width: 58px; height: 44px; padding: 3px; border-radius: 12px; border: 1.5px solid var(--border); background: var(--surface-2); cursor: pointer; }
-
   /* ---------- ورود ---------- */
   .login-wrap { min-height: 100vh; display: flex; align-items: center; justify-content: center; padding: 24px 16px; position: relative; overflow: hidden; }
   .orb { position: absolute; border-radius: 50%; filter: blur(60px); opacity: .55; animation: floaty 12s ease-in-out infinite; pointer-events: none; }
@@ -1568,7 +1647,6 @@ ICONS = {
     "settings": '<circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.7 1.7 0 0 0 .3 1.8l.1.1a2 2 0 1 1-2.8 2.8l-.1-.1a1.7 1.7 0 0 0-1.8-.3 1.7 1.7 0 0 0-1 1.5V21a2 2 0 1 1-4 0v-.1a1.7 1.7 0 0 0-1.1-1.5 1.7 1.7 0 0 0-1.8.3l-.1.1a2 2 0 1 1-2.8-2.8l.1-.1a1.7 1.7 0 0 0 .3-1.8 1.7 1.7 0 0 0-1.5-1H3a2 2 0 1 1 0-4h.1a1.7 1.7 0 0 0 1.5-1.1 1.7 1.7 0 0 0-.3-1.8l-.1-.1a2 2 0 1 1 2.8-2.8l.1.1a1.7 1.7 0 0 0 1.8.3H9a1.7 1.7 0 0 0 1-1.5V3a2 2 0 1 1 4 0v.1a1.7 1.7 0 0 0 1 1.5 1.7 1.7 0 0 0 1.8-.3l.1-.1a2 2 0 1 1 2.8 2.8l-.1.1a1.7 1.7 0 0 0-.3 1.8V9a1.7 1.7 0 0 0 1.5 1H21a2 2 0 1 1 0 4h-.1a1.7 1.7 0 0 0-1.5 1z"/>',
     "texts": '<path d="M4 6h16M4 12h16M4 18h10"/>',
     "appearance": '<circle cx="13.5" cy="6.5" r="1.5"/><circle cx="17.5" cy="10.5" r="1.5"/><circle cx="8.5" cy="7.5" r="1.5"/><circle cx="6.5" cy="12.5" r="1.5"/><path d="M12 2a10 10 0 1 0 0 20c1.1 0 2-.9 2-2 0-.5-.2-1-.5-1.3-.3-.4-.5-.8-.5-1.3 0-1.1.9-2 2-2h2.4a4.6 4.6 0 0 0 4.6-4.6C22 6 17.5 2 12 2z"/>',
-    "sellertheme": '<rect x="3" y="3" width="18" height="18" rx="4"/><path d="M3 9h18M9 21V9"/>',
     "crypto": '<circle cx="12" cy="12" r="9"/><path d="M9.5 8.5h4a1.8 1.8 0 0 1 0 3.6H9.5m0 0h4.4a1.8 1.8 0 0 1 0 3.6H9.5M9.5 7v10M12 6v2m0 8v2"/>',
     "salenotify": '<path d="M4 4h16v12H8l-4 4z"/><path d="M8 9h8M8 12h5"/>',
     "more": '<path d="M4 7h16M4 12h16M4 17h16"/>',
@@ -1588,8 +1666,7 @@ NAV = [
               ("crypto", "رمزارزها", "crypto_page"), ("broadcast", "پیام همگانی", "broadcast"),
               ("salenotify", "اعلان فروش", "sale_notify_page")]),
     ("ربات", [("settings", "تنظیمات ربات", "settings_page"), ("texts", "متن‌های ربات", "texts_page"),
-              ("appearance", "دکمه‌ها و ظاهر", "appearance_page"),
-              ("sellertheme", "ظاهر پنل فروشندگان", "seller_theme_page")]),
+              ("appearance", "دکمه‌ها و ظاهر", "appearance_page")]),
 ]
 BOTTOM = [("dashboard", "داشبورد", "dashboard"), ("users", "کاربران", "users"), ("tickets", "تیکت‌ها", "tickets")]
 
@@ -2517,539 +2594,258 @@ def toggle_maintenance():
 
 # ---------- فروشنده‌ها (ورود با نام کاربری و رمز) ----------
 
+def _vendor_back(vkey):
+    return redirect(url_for("reseller_detail", vkey=vkey))
+
+
+def _status_badge(status):
+    return '<span class="badge on">فعال</span>' if status == "active" else '<span class="badge off">مسدود</span>'
+
+
+def _credit_text(v):
+    return f"{v['credit']:g} گیگ" if v["credit"] is not None else "—"
+
+
 @app.route("/resellers")
 @login_required
 def resellers_page():
-    rows = get_all_resellers()
-    plain = get_reseller_plain_passwords()
-    total_pool = sum(float(r[3] or 0) for r in rows)
-    total_rev = sum(int(r[6] or 0) for r in rows)
-    active_cnt = sum(1 for r in rows if r[5] == "active")
+    vendors, svc_ok = build_vendors()
+    total_pool = sum(v["credit"] or 0 for v in vendors)
+    total_paid = sum(v["paid"] or 0 for v in vendors)
+    active_cnt = sum(1 for v in vendors if v["status"] == "active")
+    warn = "" if svc_ok else ('<div class="alert">⚠️ ارتباط با سرویس برقرار نشد؛ حجم و قیمت‌ها نمایش داده نمی‌شن و '
+                              'تغییر حجم/وضعیت/قیمت فعلاً کار نمی‌کنه. چند لحظه بعد صفحه رو دوباره باز کنید.</div>')
     rows_html = ""
-    for user_id, login_name, has_pw, gb_balance, price_per_gb, status, revenue, configs_count, tg_user, tg_name in rows:
-        badge = '<span class="badge on">فعال</span>' if status == "active" else '<span class="badge off">مسدود</span>'
-        login_cell = copy_widget(login_name) if login_name else '<span class="badge open">تعیین نشده</span>'
-        pw_plain = plain.get(user_id)
-        if pw_plain:
-            pw_cell = secret_widget(pw_plain)
-        elif has_pw:
-            pw_cell = '<span class="badge open" title="این رمز قبل از آپدیت پنل ثبت شده و فقط هش اون ذخیره‌ست؛ برای دیدنش یه رمز جدید بذارید.">ثبت نشده (ریست کنید)</span>'
+    for v in vendors:
+        vk = v["key"]
+        tg_cell = (f'{user_display(v["tg_name"], v["tg_user"], v["tg_id"])}<br><small class="muted num">{v["tg_id"]}</small>'
+                   if v["tg_id"] else '<span class="badge open">هنوز به تلگرام وصل نشده</span>')
+        login_cell = copy_widget(v["name"]) if v["name"] and v["name"] != "—" else '<span class="badge open">تعیین نشده</span>'
+        if v["password"]:
+            pw_cell = secret_widget(v["password"])
         else:
-            pw_cell = '<span class="badge off">تنظیم نشده</span>'
+            pw_cell = '<span class="badge open" title="رمز تو دیتابیس ربات ثبت نشده؛ با تغییر رمز از جزئیات ثبت می‌شه.">ثبت نشده</span>'
         both = ""
-        if login_name and pw_plain:
-            both = (f'<button type="button" class="secondary sm" data-copy="{esc(login_info_text(login_name, pw_plain))}" '
+        if v["name"] and v["password"]:
+            both = (f'<button type="button" class="secondary sm" data-copy="{esc(vendor_login_text(v))}" '
                     f'onclick="copyFrom(this)">📋 کپی ورود</button>')
+        if v["on_service"]:
+            actions = f"""
+              <form method="post" action="{url_for('reseller_pool', vkey=vk)}" class="flex" onsubmit="return confirm('حجم روی سرویس اصلی اعمال می‌شه. ادامه بدیم؟');">
+                <input type="hidden" name="next" value="list">
+                <input type="text" name="delta" inputmode="decimal" placeholder="+20 یا -5" style="width:90px;" required>
+                <button type="submit" class="secondary sm">اعمال حجم</button>
+              </form>
+              <form method="post" action="{url_for('reseller_toggle', vkey=vk)}">
+                <input type="hidden" name="next" value="list">
+                <button type="submit" class="{'danger' if v['status'] == 'active' else ''} sm">{'مسدود کن' if v['status'] == 'active' else 'فعال کن'}</button>
+              </form>"""
+        else:
+            actions = '<small class="muted">تو سرویس نیست</small>'
+        price_txt = f"{int(v['price']):,}" if v["price"] else "پیش‌فرض"
         rows_html += f"""
         <tr>
-          <td data-label="فروشنده" class="wrap">{user_display(tg_name, tg_user, user_id)}<br><small class="muted num">{user_id}</small></td>
+          <td data-label="فروشنده" class="wrap">{tg_cell}</td>
           <td data-label="نام کاربری">{login_cell}</td>
           <td data-label="رمز عبور">{pw_cell}</td>
-          <td data-label="استخر باقیمانده" class="num">{float(gb_balance or 0):g} گیگ</td>
-          <td data-label="قیمت هر گیگ" class="num">{int(price_per_gb or 0):,}</td>
-          <td data-label="درآمد" class="num">{int(revenue or 0):,}</td>
-          <td data-label="کانفیگ فعال" class="num">{configs_count}</td>
-          <td data-label="وضعیت">{badge}</td>
-          <td data-label="عملیات">
-            <div class="flex">
-              {both}
-              <form method="post" action="{url_for('reseller_price', user_id=user_id)}" class="flex">
-                <input type="hidden" name="next" value="list">
-                <input type="number" name="price_per_gb" value="{int(price_per_gb or 0)}" min="1" style="width:100px;" required>
-                <button type="submit" class="secondary sm">ذخیره</button>
-              </form>
-              <form method="post" action="{url_for('reseller_toggle', user_id=user_id)}">
-                <input type="hidden" name="next" value="list">
-                <button type="submit" class="{'danger' if status == 'active' else ''} sm">{'مسدود کن' if status == 'active' else 'فعال کن'}</button>
-              </form>
-              <a class="btn secondary sm" href="{url_for('reseller_detail', user_id=user_id)}">جزئیات / ورود</a>
-            </div></td>
+          <td data-label="حجم روی سرویس" class="num">{_credit_text(v)}</td>
+          <td data-label="قیمت هر گیگ" class="num">{price_txt}</td>
+          <td data-label="خرید" class="num">{v['purchases']}</td>
+          <td data-label="پرداختی (تومان)" class="num">{int(v['paid'] or 0):,}</td>
+          <td data-label="وضعیت">{_status_badge(v['status'])}</td>
+          <td data-label="عملیات"><div class="flex">{both}{actions}
+              <a class="btn secondary sm" href="{url_for('reseller_detail', vkey=vk)}">جزئیات</a></div></td>
         </tr>"""
     content = f"""
+    {warn}
     <div class="stats">
-      <div class="stat"><span>👥 کل فروشنده‌ها</span><b class="num">{len(rows):,}</b></div>
+      <div class="stat"><span>👥 کل فروشنده‌ها</span><b class="num">{len(vendors):,}</b></div>
       <div class="stat"><span>✅ فعال</span><b class="num">{active_cnt:,}</b></div>
-      <div class="stat"><span>📦 مجموع استخر گیگ</span><b class="num">{total_pool:,.1f}</b><small>گیگ</small></div>
-      <div class="stat"><span>💰 مجموع درآمد</span><b class="num">{total_rev:,}</b><small>تومان</small></div>
+      <div class="stat"><span>📦 مجموع حجم فروشنده‌ها</span><b class="num">{total_pool:,.1f}</b><small>گیگ</small></div>
+      <div class="stat"><span>💰 مجموع پرداختی‌ها</span><b class="num">{total_paid:,}</b><small>تومان</small></div>
     </div>
-    <div class="card"><small class="muted">فروشنده‌ها با <b>نام کاربری و رمز عبور</b> وارد پنل فروشندگان می‌شن که خودشون از داخل ربات می‌سازن.
-    اینجا نام کاربری و رمز هر فروشنده رو می‌بینید (با 👁 نمایش و با 📋 کپی کنید). رمزهایی که قبل از این آپدیت ساخته شدن فقط به‌صورت هش ذخیره شدن و قابل نمایش نیستن؛
-    با ریست از صفحه‌ی «جزئیات / ورود» یا وقتی فروشنده رمزش رو عوض کنه، از اون به بعد نمایش داده می‌شن.</small></div>
+    <div class="card"><small class="muted">حجم، قیمت و وضعیت هر فروشنده <b>مستقیم روی سرویس اصلی</b> خونده و تغییر داده می‌شه (نه استخر قدیمی ربات).
+    «+۲۰» حجم رو از اعتبار حساب اصلی به فروشنده می‌ده و «-۵» از فروشنده پس می‌گیره و به حساب اصلی برمی‌گردونه.</small></div>
     <div class="flex" style="margin-bottom:14px;">
       <div class="search-box"><input type="search" placeholder="جستجو: نام، آیدی، نام کاربری…" oninput="filterRows(this,'resellers-table')" autocomplete="off"></div>
     </div>
     <table class="rt" id="resellers-table">
-      <thead><tr><th>فروشنده</th><th>نام کاربری ورود</th><th>رمز عبور</th><th>استخر</th><th>قیمت هر گیگ</th><th>درآمد (تومان)</th><th>کانفیگ فعال</th><th>وضعیت</th><th>عملیات</th></tr></thead>
-      <tbody>{rows_html if rows_html else '<tr><td colspan="9">هنوز فروشنده‌ای فعال نشده.</td></tr>'}</tbody>
+      <thead><tr><th>فروشنده</th><th>نام کاربری ورود</th><th>رمز عبور</th><th>حجم</th><th>قیمت هر گیگ</th><th>خرید</th><th>پرداختی</th><th>وضعیت</th><th>عملیات</th></tr></thead>
+      <tbody>{rows_html if rows_html else '<tr><td colspan="9">هنوز فروشنده‌ای ثبت نشده.</td></tr>'}</tbody>
     </table>"""
     return render_page("فروشنده‌ها", "resellers", content)
 
 
-@app.route("/resellers/<int:user_id>")
+@app.route("/resellers/<vkey>")
 @login_required
-def reseller_detail(user_id):
-    r = get_reseller(user_id)
-    if not r:
+def reseller_detail(vkey):
+    v = find_vendor(vkey)
+    if not v:
         flash("⚠️ فروشنده پیدا نشد.")
         return redirect(url_for("resellers_page"))
-    _uid, login_name, has_pw, gb_balance, price_per_gb, status, revenue, configs_count, tg_user, tg_name = r
-    created = get_reseller_created(user_id)
-    pw_plain = get_reseller_plain_passwords().get(user_id)
-    configs = get_reseller_configs(user_id)
-    keys = get_reseller_api_keys(user_id)
+    tg_id = v["tg_id"]
 
-    cfg_rows = ""
-    for label, ctype, gb, days, active, created_at, source, config_id in configs:
-        badge = '<span class="badge on">فعال</span>' if active else '<span class="badge off">حذف‌شده</span>'
-        src = "🛠 از تو بات" if source == "bot" else "🔌 از طریق API"
-        cfg_rows += f"""
-        <tr><td data-label="لیبل">{esc(label)}</td><td data-label="نوع">{esc(ctype)}</td>
-        <td data-label="حجم" class="num">{float(gb or 0):g} گیگ</td><td data-label="مدت" class="num">{days} روز</td>
-        <td data-label="منبع">{src}</td><td data-label="تاریخ ساخت"><small class="muted">{fmt_dt(created_at)}</small></td>
-        <td data-label="وضعیت">{badge}</td></tr>"""
-
-    key_rows = ""
-    for kid, kname, prefix, kcreated, klast, krevoked in keys:
-        state = '<span class="badge off">ابطال‌شده</span>' if krevoked else '<span class="badge on">فعال</span>'
-        action = "" if krevoked else f"""
-            <form method="post" action="{url_for('reseller_revoke_key', user_id=user_id, key_id=kid)}" onsubmit="return confirm('این کلید API ابطال بشه؟');">
-              <button type="submit" class="danger sm">ابطال</button></form>"""
-        key_rows += f"""
-        <tr><td data-label="نام">{esc(kname or '-')}</td><td data-label="کلید"><code>{esc(prefix)}…</code></td>
-        <td data-label="ساخت"><small class="muted">{fmt_dt(kcreated, with_time=False)}</small></td>
-        <td data-label="آخرین استفاده"><small class="muted">{fmt_dt(klast) if klast else '—'}</small></td>
-        <td data-label="وضعیت">{state}</td><td data-label="">{action}</td></tr>"""
+    tg_line = (user_display(v["tg_name"], v["tg_user"], tg_id) if tg_id else '<span class="badge open">هنوز به تلگرام وصل نشده</span>')
+    pw_html = secret_widget(v["password"]) if v["password"] else '<span class="badge open">تو دیتابیس ربات ثبت نشده؛ با تغییر رمز ثبت می‌شه</span>'
+    copy_all = (f'<div><span>همه‌ی اطلاعات</span><button type="button" class="secondary sm" data-copy="{esc(vendor_login_text(v))}" '
+                f'onclick="copyFrom(this)">📋 کپی آدرس پنل + نام کاربری + رمز</button></div>') if (v["name"] and v["password"]) else ""
+    if v["on_service"]:
+        manage = f"""
+    <div class="card">
+      <h3>🔐 رمز ورود به پنل فروشنده</h3>
+      <small class="muted">نام کاربری روی سرویس قابل تغییر نیست؛ فقط رمز عوض می‌شه (مستقیم روی سرویس).</small>
+      <form method="post" action="{url_for('reseller_credentials', vkey=vkey)}" autocomplete="off">
+        <label for="new_password">رمز عبور جدید ({RESELLER_PASSWORD_MIN} تا {RESELLER_PASSWORD_MAX} کاراکتر)</label>
+        <div class="flex"><input id="new_password" type="password" name="password" dir="ltr" autocomplete="new-password" style="flex:1;min-width:180px;" required>
+          <button type="button" class="secondary" onclick="genPw('new_password')">🎲 ساخت رمز تصادفی</button></div>
+        {'<label style="display:flex;align-items:center;gap:8px;cursor:pointer;margin-top:14px;"><input type="checkbox" name="notify" value="1"> <span>رمز جدید رو تو ربات برای خود فروشنده هم بفرست (به‌صورت متن ساده تو چت می‌ره)</span></label>' if tg_id else ''}
+        <div style="margin-top:14px;"><button type="submit">💾 ذخیره‌ی رمز</button></div>
+      </form>
+    </div>
+    <div class="grid cols-2">
+      <div class="card"><h3>قیمت هر گیگ فروشنده (تومان)</h3>
+        <form method="post" action="{url_for('reseller_price', vkey=vkey)}" class="flex">
+          <input type="number" name="price_per_gb" value="{int(v['price']) if v['price'] else ''}" min="0" placeholder="۰ = قیمت پیش‌فرض خودت" style="flex:1;min-width:120px;" required>
+          <button type="submit">ذخیره</button></form></div>
+      <div class="card"><h3>تغییر حجم</h3>
+        <form method="post" action="{url_for('reseller_pool', vkey=vkey)}" class="flex" onsubmit="return confirm('حجم روی سرویس اصلی اعمال می‌شه. ادامه بدیم؟');">
+          <input type="text" name="delta" inputmode="decimal" placeholder="مثلاً 20 یا -5 (گیگ)" style="flex:1;min-width:120px;" required>
+          <button type="submit">اعمال روی سرویس</button></form>
+        <small class="muted">عدد مثبت از اعتبار حساب اصلی به فروشنده منتقل می‌شه و عدد منفی از فروشنده پس گرفته می‌شه.</small></div>
+    </div>
+    <div class="card"><h3>وضعیت حساب</h3>
+      <form method="post" action="{url_for('reseller_toggle', vkey=vkey)}" class="flex">
+        <button type="submit" class="{'danger' if v['status'] == 'active' else ''}">{'⛔ مسدود کردن فروشنده' if v['status'] == 'active' else '✅ فعال کردن فروشنده'}</button>
+        <small class="muted">فروشنده‌ی مسدود نمی‌تونه از پنل سرویس استفاده کنه.</small></form></div>"""
+    else:
+        manage = """
+    <div class="card"><small class="muted">این فروشنده هنوز تو لیست زیرمجموعه‌های سرویس نیست، برای همین حجم و تنظیماتش از اینجا قابل تغییر نیست.
+    وقتی نام کاربری‌ش رو تو سرویس اضافه کنید یا خودش از ربات حساب بسازه، اینجا مدیریت می‌شه.</small></div>"""
 
     content = f"""
     <p><a class="btn secondary sm" href="{url_for('resellers_page')}">‹ بازگشت به فروشنده‌ها</a></p>
     <div class="card"><div class="kv">
-      <div><span>فروشنده</span><b>{user_display(tg_name, tg_user, user_id)}</b></div>
-      <div><span>آیدی عددی</span><b class="num">{user_id}</b></div>
-      <div><span>وضعیت</span><b>{'<span class="badge on">فعال</span>' if status == 'active' else '<span class="badge off">مسدود</span>'}</b></div>
-      <div><span>استخر باقیمانده</span><b class="num">{float(gb_balance or 0):g} گیگ</b></div>
-      <div><span>درآمد از فروشندگی</span><b class="num">{int(revenue or 0):,} تومان</b></div>
-      <div><span>کانفیگ فعال</span><b class="num">{configs_count}</b></div>
-      <div><span>تاریخ فعال‌سازی</span><b>{fmt_dt(created)}</b></div>
+      <div><span>فروشنده</span><b>{tg_line}</b></div>
+      <div><span>آیدی عددی</span><b class="num">{tg_id or '—'}</b></div>
+      <div><span>وضعیت</span><b>{_status_badge(v['status'])}</b></div>
+      <div><span>حجم روی سرویس</span><b class="num">{_credit_text(v)}</b></div>
+      <div><span>پرداختی‌ها</span><b class="num">{int(v['paid'] or 0):,} تومان</b></div>
+      <div><span>تعداد خرید</span><b class="num">{v['purchases']}</b></div>
+      <div><span>نام کاربری</span><b>{copy_widget(v['name']) if v['name'] and v['name'] != '—' else '— تعیین نشده —'}</b></div>
+      <div><span>رمز عبور</span><b>{pw_html}</b></div>
+      {copy_all}
     </div></div>
-
-    <div class="card">
-      <h3>🔐 اطلاعات ورود به پنل فروشندگان</h3>
-      <div class="cred-box">
-        <div><span>نام کاربری</span><b>{copy_widget(login_name) if login_name else '— تعیین نشده —'}</b></div>
-        <div><span>رمز عبور</span><b>{secret_widget(pw_plain) if pw_plain else ('<span class="badge open">قبل از آپدیت ثبت شده — فقط هش موجوده؛ رمز جدید بذارید</span>' if has_pw else '<span class="badge off">هنوز تنظیم نشده</span>')}</b></div>
-        {f'<div><span>همه‌ی اطلاعات</span><button type="button" class="secondary sm" data-copy="{esc(login_info_text(login_name, pw_plain))}" onclick="copyFrom(this)">📋 کپی آدرس پنل + نام کاربری + رمز</button></div>' if (login_name and pw_plain) else ''}
-      </div>
-      <form method="post" action="{url_for('reseller_credentials', user_id=user_id)}" autocomplete="off">
-        <label for="new_username">نام کاربری جدید (اختیاری — حرف انگلیسی، عدد، _ و نقطه؛ ۳ تا ۲۰ کاراکتر)</label>
-        <input id="new_username" type="text" name="username" dir="ltr" autocapitalize="off" spellcheck="false" placeholder="{esc(login_name or 'مثلاً ali_shop')}">
-        <label for="new_password">رمز عبور جدید (اختیاری — {RESELLER_PASSWORD_MIN} تا {RESELLER_PASSWORD_MAX} کاراکتر)</label>
-        <div class="flex"><input id="new_password" type="password" name="password" dir="ltr" autocomplete="new-password" style="flex:1;min-width:180px;">
-          <button type="button" class="secondary" onclick="genPw('new_password')">🎲 ساخت رمز تصادفی</button></div>
-        <label style="display:flex;align-items:center;gap:8px;cursor:pointer;margin-top:14px;">
-          <input type="checkbox" name="notify" value="1"> <span>اطلاعات جدید رو توی ربات برای خود فروشنده هم بفرست (رمز به‌صورت متن ساده تو چت می‌ره)</span></label>
-        <div style="margin-top:14px;"><button type="submit">💾 ذخیره‌ی اطلاعات ورود</button></div>
-      </form>
-    </div>
-
-    <div class="grid cols-2">
-      <div class="card"><h3>قیمت هر گیگ فروشنده</h3>
-        <form method="post" action="{url_for('reseller_price', user_id=user_id)}" class="flex">
-          <input type="number" name="price_per_gb" value="{int(price_per_gb or 0)}" min="1" style="flex:1;min-width:120px;" required>
-          <button type="submit">ذخیره</button></form></div>
-      <div class="card"><h3>تغییر استخر گیگ</h3>
-        <form method="post" action="{url_for('reseller_pool', user_id=user_id)}" class="flex">
-          <input type="text" name="delta" inputmode="decimal" placeholder="مثلاً 20 یا -5 (گیگ)" style="flex:1;min-width:120px;" required>
-          <button type="submit">اعمال</button></form></div>
-    </div>
-    <div class="card"><h3>وضعیت حساب</h3>
-      <form method="post" action="{url_for('reseller_toggle', user_id=user_id)}" class="flex">
-        <button type="submit" class="{'danger' if status == 'active' else ''}">{'⛔ مسدود کردن فروشنده' if status == 'active' else '✅ فعال کردن فروشنده'}</button>
-        <small class="muted">فروشنده‌ی مسدود نمی‌تونه وارد پنل بشه یا کانفیگ بسازه.</small></form></div>
-
-    <h3>کلیدهای API برنامه‌نویسی</h3>
-    <p class="muted" style="margin-top:-6px;font-size:12.5px;">این‌ها جدا از ورود به پنل هستن؛ فروشنده خودش از پنل فروشندگان می‌سازه و فقط پیشوند اون‌ها نمایش داده می‌شه.</p>
-    <table class="rt"><thead><tr><th>نام</th><th>کلید</th><th>ساخت</th><th>آخرین استفاده</th><th>وضعیت</th><th></th></tr></thead>
-      <tbody>{key_rows if key_rows else '<tr><td colspan="6">این فروشنده کلید API نساخته.</td></tr>'}</tbody></table>
-
-    <h3>کانفیگ‌های ساخته‌شده</h3>
-    <table class="rt"><thead><tr><th>لیبل</th><th>نوع</th><th>حجم</th><th>مدت</th><th>منبع</th><th>تاریخ ساخت</th><th>وضعیت</th></tr></thead>
-      <tbody>{cfg_rows if cfg_rows else '<tr><td colspan="7">این فروشنده هنوز کانفیگی نساخته.</td></tr>'}</tbody></table>
+    {manage}
     """
-    return render_page(f"فروشنده {user_id}", "resellers", content)
+    return render_page(f"فروشنده {v['name'] or vkey}", "resellers", content)
 
 
-@app.route("/resellers/<int:user_id>/credentials", methods=["POST"])
-@login_required
-def reseller_credentials(user_id):
-    back = redirect(url_for("reseller_detail", user_id=user_id))
-    r = get_reseller(user_id)
-    if not r:
+def _need_service_vendor(vkey):
+    """فروشنده‌ای که روی سرویس هست یا (None و flash)."""
+    v = find_vendor(vkey)
+    if not v:
         flash("⚠️ فروشنده پیدا نشد.")
-        return redirect(url_for("resellers_page"))
-    current_username = r[1]
-    new_username = request.form.get("username", "").strip().lower()
-    new_password = request.form.get("password", "")
-    if not new_username and not new_password:
-        flash("⚠️ چیزی برای ذخیره وارد نکردید.")
-        return back
-    if new_username:
-        if not RESELLER_USERNAME_RE.match(new_username):
-            flash("⚠️ نام کاربری معتبر نیست (فقط حرف انگلیسی، عدد، _ و نقطه؛ ۳ تا ۲۰ کاراکتر).")
-            return back
-        if reseller_username_taken(new_username, user_id):
-            flash("⚠️ این نام کاربری قبلاً برای فروشنده‌ی دیگه‌ای ثبت شده.")
-            return back
-    if new_password and not (RESELLER_PASSWORD_MIN <= len(new_password) <= RESELLER_PASSWORD_MAX):
-        flash(f"⚠️ رمز باید بین {RESELLER_PASSWORD_MIN} تا {RESELLER_PASSWORD_MAX} کاراکتر باشه.")
-        return back
-    if new_password and not (new_username or current_username):
-        flash("⚠️ این فروشنده هنوز نام کاربری نداره؛ همراه رمز یه نام کاربری هم وارد کنید.")
-        return back
-    set_reseller_login(user_id, username=new_username or None,
-                       password_hash=hash_reseller_password(new_password) if new_password else None,
-                       password_plain=new_password if new_password else None)
-    done = []
-    if new_username:
-        done.append("نام کاربری")
-    if new_password:
-        done.append("رمز عبور")
-    flash(" و ".join(done) + " فروشنده‌ی " + str(user_id) + " ذخیره شد.")
-    if request.form.get("notify") == "1":
-        lines = ["🔐 <b>اطلاعات ورود شما به پنل فروشندگان بروزرسانی شد:</b>", ""]
-        lines.append(f"👤 نام کاربری: <code>{esc(new_username or current_username)}</code>")
-        if new_password:
-            lines.append(f"🔑 رمز عبور: <code>{esc(new_password)}</code>")
-        lines.append("\nبعد از ورود، رمز رو تو جای امن نگه دارید.")
-        flash("پیام اطلاعات ورود برای فروشنده ارسال شد." if send_telegram_message(user_id, "\n".join(lines))
-              else "⚠️ اطلاعات ذخیره شد ولی ارسال پیام به فروشنده ناموفق بود.")
-    return back
+        return None
+    if not v["sub_id"]:
+        flash("⚠️ این فروشنده تو لیست زیرمجموعه‌های سرویس نیست؛ تغییر ممکن نیست.")
+        return None
+    return v
 
 
-@app.route("/resellers/<int:user_id>/toggle", methods=["POST"])
-@login_required
-def reseller_toggle(user_id):
-    toggle_reseller_status(user_id)
-    flash(f"وضعیت فروشنده {user_id} تغییر کرد.")
+def _after_vendor_action(vkey):
     if request.form.get("next") == "list":
         return redirect(url_for("resellers_page"))
-    return redirect(url_for("reseller_detail", user_id=user_id))
+    return _vendor_back(vkey)
 
 
-@app.route("/resellers/<int:user_id>/price", methods=["POST"])
+@app.route("/resellers/<vkey>/credentials", methods=["POST"])
 @login_required
-def reseller_price(user_id):
-    price = to_int(request.form.get("price_per_gb"))
-    if price is None or price <= 0:
-        flash("⚠️ قیمت هر گیگ باید عدد صحیح مثبت باشد.")
+def reseller_credentials(vkey):
+    v = _need_service_vendor(vkey)
+    if not v:
+        return redirect(url_for("resellers_page"))
+    pw = request.form.get("password", "")
+    if not (RESELLER_PASSWORD_MIN <= len(pw) <= RESELLER_PASSWORD_MAX) or pw != pw.strip():
+        flash(f"⚠️ رمز باید بین {RESELLER_PASSWORD_MIN} تا {RESELLER_PASSWORD_MAX} کاراکتر و بدون فاصله‌ی اول/آخر باشه.")
+        return _vendor_back(vkey)
+    res = seller_api("POST", f"/resale/subs/{v['sub_id']}/password", {"password": pw})
+    if not res["success"]:
+        flash("⚠️ رمز تغییر نکرد: " + seller_reason(res))
+        return _vendor_back(vkey)
+    if v["tg_id"]:
+        try:
+            save_seller_password_local(v["tg_id"], v["sub_id"], v["name"], v["panel_url"], pw)
+        except Exception as e:
+            print("⚠️ ذخیره‌ی رمز تو دیتابیس ناموفق بود:", e)
+    flash(f"رمز فروشنده {v['name']} روی سرویس تغییر کرد.")
+    if request.form.get("notify") == "1" and v["tg_id"]:
+        text = (f"🔐 <b>رمز ورود شما به پنل فروشندگی تغییر کرد:</b>\n\n👤 نام کاربری: <code>{esc(v['name'])}</code>\n"
+                f"🔑 رمز عبور: <code>{esc(pw)}</code>\n\nبعد از ورود، رمز رو تو جای امن نگه دارید.")
+        flash("پیام رمز جدید برای فروشنده ارسال شد." if send_telegram_message(v["tg_id"], text)
+              else "⚠️ رمز تغییر کرد ولی ارسال پیام به فروشنده ناموفق بود.")
+    return _vendor_back(vkey)
+
+
+@app.route("/resellers/<vkey>/toggle", methods=["POST"])
+@login_required
+def reseller_toggle(vkey):
+    v = _need_service_vendor(vkey)
+    if not v:
+        return redirect(url_for("resellers_page"))
+    new_status = "suspended" if v["status"] == "active" else "active"
+    res = seller_api("PATCH", f"/resale/subs/{v['sub_id']}", {"status": new_status})
+    invalidate_subs_cache()
+    if res["success"]:
+        if v["tg_id"]:
+            try:
+                set_old_reseller_status(v["tg_id"], "active" if new_status == "active" else "blocked")
+            except Exception:
+                pass
+        flash(f"فروشنده {v['name']} {'فعال' if new_status == 'active' else 'مسدود'} شد.")
     else:
-        update_reseller_price(user_id, price)
-        flash(f"قیمت هر گیگ فروشنده {user_id} به {price:,} تومان تغییر کرد.")
-    if request.form.get("next") == "list":
-        return redirect(url_for("resellers_page"))
-    return redirect(url_for("reseller_detail", user_id=user_id))
+        flash("⚠️ وضعیت تغییر نکرد: " + seller_reason(res))
+    return _after_vendor_action(vkey)
 
 
-@app.route("/resellers/<int:user_id>/pool", methods=["POST"])
+@app.route("/resellers/<vkey>/price", methods=["POST"])
 @login_required
-def reseller_pool(user_id):
-    try:
-        delta = float(request.form.get("delta", "").replace(",", ".").strip())
-    except ValueError:
+def reseller_price(vkey):
+    v = _need_service_vendor(vkey)
+    if not v:
+        return redirect(url_for("resellers_page"))
+    price = to_int(request.form.get("price_per_gb"))
+    if price is None or price < 0:
+        flash("⚠️ قیمت هر گیگ باید عدد صحیح (۰ یا بیشتر) باشه.")
+        return _after_vendor_action(vkey)
+    res = seller_api("PATCH", f"/resale/subs/{v['sub_id']}", {"modeOverride": "price", "gbTomanOverride": price})
+    invalidate_subs_cache()
+    if res["success"]:
+        flash(f"قیمت هر گیگ فروشنده {v['name']} " + (f"به {price:,} تومان تغییر کرد." if price else "به قیمت پیش‌فرض برگشت."))
+    else:
+        flash("⚠️ قیمت تغییر نکرد: " + seller_reason(res))
+    return _after_vendor_action(vkey)
+
+
+@app.route("/resellers/<vkey>/pool", methods=["POST"])
+@login_required
+def reseller_pool(vkey):
+    v = _need_service_vendor(vkey)
+    if not v:
+        return redirect(url_for("resellers_page"))
+    delta = parse_gb_delta(request.form.get("delta"))
+    if delta is None:
         flash("⚠️ مقدار گیگ باید عدد باشه (مثلاً 20 یا -5).")
-        return redirect(url_for("reseller_detail", user_id=user_id))
+        return _after_vendor_action(vkey)
     if delta == 0 or abs(delta) > 100000:
         flash("⚠️ مقدار نامعتبره.")
+        return _after_vendor_action(vkey)
+    ok, reason, new_credit = apply_service_pool(v["sub_id"], delta)
+    if ok:
+        tail = f" حجم جدید روی سرویس: {float(new_credit):g} گیگ." if new_credit is not None else ""
+        flash(f"حجم فروشنده {v['name']} روی سرویس به اندازه‌ی {delta:+g} گیگ تغییر کرد." + tail)
     else:
-        add_reseller_gb(user_id, delta)
-        flash(f"استخر فروشنده {user_id} به اندازه‌ی {delta:+g} گیگ تغییر کرد.")
-    return redirect(url_for("reseller_detail", user_id=user_id))
-
-
-@app.route("/resellers/<int:user_id>/keys/<key_id>/revoke", methods=["POST"])
-@login_required
-def reseller_revoke_key(user_id, key_id):
-    revoke_reseller_api_key(user_id, key_id)
-    flash("کلید API ابطال شد.")
-    return redirect(url_for("reseller_detail", user_id=user_id))
-
-
-# ---------------------------------------------------------------------------
-# تم‌ها — از «پنل ادمین ← تم پنل فروشندگان» انتخاب می‌شن. تم «default» همون ظاهر اصلیه
-# و هیچ تغییری روی CSS/HTML اعمال نمی‌کنه.
-# ⚠️ این بلوک (THEMES) باید در web_panel.py و app.py دقیقاً یکی باشه.
-# برای اضافه‌کردن تم جدید فقط یه آیتم به THEMES اضافه کن (در هر دو فایل):
-#   کلید = شناسه‌ی انگلیسی، name = اسم فارسی، dark = تیره؟، p = رنگ اصلی،
-#   bg = پس‌زمینه، card = کارت‌ها، ink = رنگ متن، mut = متن کم‌رنگ، line = خط‌ها
-# بقیه‌ی رنگ‌ها (سایه‌ها، گرادینت‌ها، دکمه‌ها، …) خودکار از همین‌ها ساخته می‌شن.
-# ---------------------------------------------------------------------------
-THEMES = {
-    'default':  {'name': 'بنفش (پیش‌فرض)', 'dark': False, 'p': '#6a3df0', 'bg': '#f7f6fd', 'card': '#ffffff', 'ink': '#14112b', 'mut': '#7d7a94', 'line': '#ebe9f5'},
-    'ocean':    {'name': 'آبی اقیانوسی',   'dark': False, 'p': '#0b6fe0', 'bg': '#f1f6fd', 'card': '#ffffff', 'ink': '#0e1a30', 'mut': '#667895', 'line': '#e2eaf5'},
-    'emerald':  {'name': 'سبز زمردی',      'dark': False, 'p': '#0d9467', 'bg': '#f0f9f5', 'card': '#ffffff', 'ink': '#0d2219', 'mut': '#5f7a6e', 'line': '#dcefe6'},
-    'sunset':   {'name': 'غروب نارنجی',    'dark': False, 'p': '#e4531a', 'bg': '#fff6f0', 'card': '#ffffff', 'ink': '#2a150b', 'mut': '#8a6d5f', 'line': '#f5e4d9'},
-    'rose':     {'name': 'صورتی شکوفه',    'dark': False, 'p': '#d6336c', 'bg': '#fff4f8', 'card': '#ffffff', 'ink': '#2b0f1a', 'mut': '#8f6577', 'line': '#f6dfe7'},
-    'midnight': {'name': 'شب‌ستاره (تیره)', 'dark': True,  'p': '#7061f2', 'bg': '#0c1122', 'card': '#151c34', 'ink': '#e8edff', 'mut': '#8e9bc2', 'line': '#242d4d'},
-    'cyber':    {'name': 'سایبر (تیره)',    'dark': True,  'p': '#0891b2', 'bg': '#060d14', 'card': '#0e1822', 'ink': '#e3f6ff', 'mut': '#7fa0b4', 'line': '#1a2d3b'},
-    'graphite': {'name': 'گرافیت (تیره)',   'dark': True,  'p': '#5b6cf0', 'bg': '#111214', 'card': '#1a1c1f', 'ink': '#ececf0', 'mut': '#9a9aa6', 'line': '#2a2c31'},
-    'sanaei':   {'name': 'ثنایی (سبز‌آبی)',  'dark': False, 'p': '#008771', 'bg': '#f0f2f5', 'card': '#ffffff', 'ink': '#1f2933', 'mut': '#6b7785', 'line': '#e3e7ec'},
-    'sanaeidark': {'name': 'ثنایی تیره',    'dark': True,  'p': '#0a9d84', 'bg': '#0a1222', 'card': '#131d31', 'ink': '#e6ebf3', 'mut': '#8793a8', 'line': '#223048'},
-    'pasarguard': {'name': 'پاسارگاد (روشن)', 'dark': False, 'p': '#4f46e5', 'bg': '#fafafa', 'card': '#ffffff', 'ink': '#09090b', 'mut': '#71717a', 'line': '#e4e4e7'},
-    'pasarguarddark': {'name': 'پاسارگاد (تیره)', 'dark': True, 'p': '#6366f1', 'bg': '#09090b', 'card': '#131316', 'ink': '#fafafa', 'mut': '#a1a1aa', 'line': '#27272a'},
-}
-
-
-SELLER_THEME_ORDER = [k for k in THEMES]
-
-
-# ⚠️ باید با LAYOUTS داخل app.py (پنل فروشندگان) یکی باشه (CSS و رندرها فقط اون‌جاست)
-LAYOUTS = {
-    'default':    {'name': 'مدرن گرد (پیش‌فرض)', 'suggest': '',
-                   'desc': 'همون ظاهر فعلی: کارت‌های گرد، گرادینت و منوی پایین.'},
-    'sanaei':     {'name': 'ثنایی (جدولی)', 'suggest': 'sanaei',
-                   'desc': 'الهام‌گرفته از پنل ثنایی: نوار بالای تیره، کاشی‌های وضعیت و کانفیگ‌ها داخل جدول. بدون منوی پایین (منو از دکمه‌ی بالا).'},
-    'pasarguard': {'name': 'پاسارگاد (ریل کناری)', 'suggest': 'pasarguard',
-                   'desc': 'الهام‌گرفته از پاسارگاد: ریل آیکونی کنار صفحه، کارت‌های خط‌دار و کانفیگ‌ها به‌شکل کاشی‌های دوستونه با نوار مصرف.'},
-    'bento':      {'name': 'موزاییک (Bento)', 'suggest': '',
-                   'desc': 'پس‌زمینه‌ی رنگی محو، کاشی‌های شیشه‌ای با اندازه‌های مختلف و کانفیگ‌ها به‌صورت کارت‌های بزرگِ افقی (با کشیدن ورق می‌خورن).'},
-    'console':    {'name': 'کنسول (ترمینال)', 'suggest': '',
-                   'desc': 'مشکی و سبز با فونت مونو و بدون گوشه‌ی گرد؛ هر کانفیگ یه خط با نوار مصرف. پالت ثابته و به تم رنگی کاری نداره.'},
-    'poster':     {'name': 'پوستر (بولد)', 'suggest': '',
-                   'desc': 'حاشیه‌ی ضخیم و سایه‌ی سخت؛ هر کانفیگ یه بلوک رنگی با عدد درشتِ روزهای مانده و اعتبار با عدد غول‌پیکر.'},
-}
-LAYOUT_ORDER = list(LAYOUTS)
-_LAYOUT_ALIAS = {'glass': 'bento', 'compact': 'console', 'brutal': 'poster'}   # اسم‌های نسخه‌ی قبل
-
-
-# ⚠️ باید با FONTS داخل app.py (پنل فروشندگان) یکی باشه.
-# فایل‌های فونت (woff2/woff/ttf/otf) رو با اسم «Family-Weight.woff2» (مثلاً Shabnam-Bold.woff2) بذار تو پوشه‌ی fonts کنار برنامه.
-# اگه فایل یه فونت نباشه، پنل خودکار با وزیرمتن/فونت سیستم نمایش داده می‌شه.
-FONTS = {
-    'vazirmatn': {'name': 'وزیرمتن (پیش‌فرض)', 'family': 'Vazirmatn'},
-    'estedad':   {'name': 'استعداد',           'family': 'Estedad'},
-    'shabnam':   {'name': 'شبنم',              'family': 'Shabnam'},
-    'sahel':     {'name': 'ساحل',              'family': 'Sahel'},
-    'samim':     {'name': 'صمیم',              'family': 'Samim'},
-    'tanha':     {'name': 'تنها',              'family': 'Tanha'},
-    'gandom':    {'name': 'گندم (سریف)',        'family': 'Gandom'},
-}
-FONT_ORDER = list(FONTS)
-
-FONT_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), os.getenv("PANEL_FONT_DIR", "fonts"))
-_FONT_EXT = {".woff2": "woff2", ".woff": "woff", ".ttf": "truetype", ".otf": "opentype"}
-_FONT_MIME = {".woff2": "font/woff2", ".woff": "font/woff", ".ttf": "font/ttf", ".otf": "font/otf"}
-_FONT_W = sorted([("thin", 100), ("extralight", 200), ("ultralight", 200), ("light", 300), ("regular", 400),
-                  ("medium", 500), ("semibold", 600), ("demibold", 600), ("extrabold", 800), ("ultrabold", 800),
-                  ("bold", 700), ("black", 900), ("heavy", 900)], key=lambda kv: -len(kv[0]))
-
-
-def _font_face_css():
-    """@font-face برای فونت‌هایی که فایلشون تو پوشه‌ی fonts هست (فقط برای پیش‌نمایش داخل پنل ادمین)."""
-    known = {F["family"].lower(): F["family"] for F in FONTS.values()}
-    faces = []
-    try:
-        names = sorted(os.listdir(FONT_DIR))
-    except OSError:
-        return ""
-    for fn in names:
-        ext = os.path.splitext(fn)[1].lower()
-        m = re.match(r"[A-Za-z]+", fn)
-        if ext not in _FONT_EXT or not m or m.group(0).lower() not in known:
-            continue
-        low = fn.lower()
-        if any(k in low for k in ("variable", "wght", "-vf", "_vf")):
-            w = "100 900"
-        else:
-            w = "400"
-            for k, v in _FONT_W:
-                if k in low:
-                    w = str(v)
-                    break
-        faces.append(f"@font-face{{font-family:'{known[m.group(0).lower()]}';src:url('{url_for('panel_font', name=fn)}') "
-                     f"format('{_FONT_EXT[ext]}');font-weight:{w};font-style:normal;font-display:swap}}")
-    return "\n".join(faces)
-
-
-@app.route("/_/font/<path:name>")
-def panel_font(name):
-    name = os.path.basename(name)
-    ext = os.path.splitext(name)[1].lower()
-    fp = os.path.join(FONT_DIR, name)
-    if ext not in _FONT_EXT or not os.path.isfile(fp):
-        abort(404)
-    from flask import send_file
-    resp = send_file(fp, mimetype=_FONT_MIME[ext], max_age=31536000)
-    resp.headers["Cache-Control"] = "public, max-age=31536000, immutable"
-    return resp
-
-
-def _layout_preview(key, t):
-    """پیش‌نمایش کوچیک ساختار هر طراحی (فقط از مقادیر validate‌شده ساخته می‌شه)."""
-    bg, card, line, p, ink = t["bg"], t["card"], t["line"], t["p"], t["ink"]
-    A = "position:absolute;"
-    def d(style, inner=""):
-        return f'<div style="{A}{style}">{inner}</div>'
-    if key == "sanaei":      # نوار تیره + کاشی + جدول
-        body = (d("top:0;left:0;right:0;height:14px;background:#0b1a33") +
-                "".join(d(f"top:20px;right:{6 + i * 25}%;width:22%;height:16px;border-radius:2px;background:{card};border:1px solid {line}") for i in range(4)) +
-                d(f"top:42px;left:6px;right:6px;bottom:6px;border-radius:2px;background:{card};border:1px solid {line}",
-                  "".join(d(f"top:{4 + i * 14}px;left:4px;right:4px;height:1px;background:{line}") + d(f"top:{8 + i * 14}px;right:6px;width:30%;height:5px;border-radius:2px;background:{ink}44") + d(f"top:{8 + i * 14}px;left:6px;width:22%;height:5px;border-radius:2px;background:{p}") for i in range(4))))
-    elif key == "pasarguard":  # ریل کناری + کاشی دوستونه
-        body = (d(f"top:0;bottom:0;right:0;width:15%;background:{card};border-left:1px solid {line}") +
-                "".join(d(f"top:{8 + i * 17}px;right:3.5%;width:8%;height:9px;border-radius:3px;background:{p if i == 0 else line}") for i in range(4)) +
-                "".join(d(f"top:{10 + (i // 2) * 50}px;{'right:20%' if i % 2 == 0 else 'left:7px'};width:34%;height:44px;border-radius:7px;background:{card};border:1px solid {line}",
-                          d(f"bottom:14px;left:5px;right:5px;height:4px;border-radius:2px;background:{p}") + d(f"top:6px;right:6px;width:40%;height:5px;border-radius:2px;background:{ink}55")) for i in range(4)))
-    elif key == "bento":     # کاشی‌های مختلف + کارت افقی
-        g = "background:rgba(255,255,255,.4);border:1px solid rgba(255,255,255,.8)"
-        body = (d(f"top:-18px;left:-10px;width:70px;height:70px;border-radius:50%;filter:blur(14px);background:{p}88") +
-                d("bottom:-24px;right:-10px;width:80px;height:70px;border-radius:50%;filter:blur(16px);background:#ff78aa66") +
-                d(f"top:8px;right:8px;left:8px;height:34px;border-radius:14px;background:linear-gradient(135deg,{p},{p}99)") +
-                d(f"top:48px;right:8px;width:30%;height:26px;border-radius:12px;{g}") +
-                d(f"top:48px;right:35%;width:30%;height:26px;border-radius:12px;{g}") +
-                d(f"top:80px;right:8px;width:46%;height:24px;border-radius:14px;{g}") +
-                d(f"top:80px;left:-14px;width:46%;height:24px;border-radius:14px;{g}"))
-    elif key == "console":   # مشکی/سبز با خطوط
-        body = d("inset:0;background:#070b08") + "".join(
-            d(f"top:{10 + i * 20}px;left:8px;right:8px;height:14px;border-bottom:1px dashed #1f3626",
-              d("right:0;top:3px;width:26%;height:6px;background:#c8f7d2aa") +
-              d("right:34%;top:4px;width:34%;height:5px;background:repeating-linear-gradient(90deg,#39ff7a 0 4px,transparent 4px 6px)") +
-              d("left:0;top:3px;width:8px;height:8px;background:#39ff7a")) for i in range(5))
-    elif key == "poster":    # بلوک رنگی + عدد درشت
-        b = f"2px solid {ink}"
-        body = "".join(d(f"top:{8 + i * 50}px;right:9px;left:13px;height:42px;background:{card};border:{b};box-shadow:3px 3px 0 {ink}",
-                         d(f"top:0;bottom:0;right:0;width:30%;background:{p if i == 0 else '#e8a317'};border-left:{b}") +
-                         d(f"top:8px;left:8px;width:34%;height:6px;background:{ink}") + d(f"top:22px;left:8px;width:50%;height:7px;border:{b}")) for i in range(2))
-    else:                    # پیش‌فرض
-        body = (d(f"top:10px;right:9px;left:9px;height:38px;border-radius:12px;background:linear-gradient(160deg,{p},{p}99)") +
-                d(f"top:56px;right:9px;width:42%;height:26px;border-radius:10px;background:{card};border:1px solid {line}") +
-                d(f"top:56px;left:9px;width:42%;height:26px;border-radius:10px;background:{card};border:1px solid {line}") +
-                d(f"bottom:6px;right:9px;width:42%;height:10px;border-radius:999px;background:{p}"))
-    return f'<div class="tc-prev" style="background:{bg}">{body}</div>'
-
-
-def _theme_preview(t):
-    """پیش‌نمایش کوچیک یه تم (فقط از مقادیر validate‌شده‌ی خودمون ساخته می‌شه)."""
-    return (f'<div class="tc-prev" style="background:{t["bg"]}">'
-            f'<div class="tc-credit" style="background:linear-gradient(160deg,{t["p"]},{t["p"]}99)"></div>'
-            f'<div class="tc-row"><div class="tc-c" style="background:{t["card"]};border-color:{t["line"]}"></div>'
-            f'<div class="tc-c" style="background:{t["card"]};border-color:{t["line"]}"></div></div>'
-            f'<div class="tc-btn" style="background:{t["p"]}"></div></div>')
-
-
-@app.route("/seller-theme")
-@login_required
-def seller_theme_page():
-    settings = get_all_settings()
-    current = settings.get("seller_theme", "default")
-    if current != "custom" and current not in THEMES:
-        current = "default"
-    try:
-        custom = json.loads(settings.get("seller_theme_custom") or "{}")
-    except Exception:
-        custom = {}
-    cp = custom.get("p") if re.match(r"^#[0-9a-fA-F]{6}$", str(custom.get("p", ""))) else "#6a3df0"
-    cdark = bool(custom.get("dark"))
-
-    cards = ""
-    for tid in SELLER_THEME_ORDER:
-        t = THEMES[tid]
-        cards += (f'<label class="theme-card"><input type="radio" name="theme" value="{tid}"{" checked" if current == tid else ""}>'
-                  f'<div class="tc-box">{_theme_preview(t)}<span class="tc-name">{esc(t["name"])}</span></div></label>')
-    custom_prev = _theme_preview({"bg": "#f6f4ff", "card": "#ffffff", "line": "#e6e1fb", "p": cp})
-    cards += (f'<label class="theme-card"><input type="radio" name="theme" value="custom"{" checked" if current == "custom" else ""}>'
-              f'<div class="tc-box">{custom_prev}<span class="tc-name">🎨 سفارشی (رنگ دلخواه)</span></div></label>')
-
-    cur_layout = settings.get("seller_layout", "default")
-    cur_layout = _LAYOUT_ALIAS.get(cur_layout, cur_layout)
-    if cur_layout not in LAYOUTS:
-        cur_layout = "default"
-    prev_t = THEMES.get(current, THEMES["default"]) if current != "custom" else {"bg": "#f6f4ff", "card": "#ffffff", "line": "#e6e1fb", "p": cp, "ink": "#14112b"}
-    prev_t = dict({"ink": "#14112b"}, **prev_t)
-    lay_cards = ""
-    for lid in LAYOUT_ORDER:
-        L = LAYOUTS[lid]
-        sug = f' <span class="muted" style="font-size:11.5px">(رنگ پیشنهادی: {esc(THEMES[L["suggest"]]["name"])})</span>' if L["suggest"] else ""
-        lay_cards += (f'<label class="theme-card lay-card"><input type="radio" name="layout" value="{lid}"{" checked" if cur_layout == lid else ""}>'
-                      f'<div class="tc-box">{_layout_preview(lid, prev_t)}<span class="tc-name">{esc(L["name"])}</span>'
-                      f'<span class="lay-desc">{esc(L["desc"])}{sug}</span></div></label>')
-
-    cur_font = settings.get("seller_font", "vazirmatn")
-    if cur_font not in FONTS:
-        cur_font = "vazirmatn"
-    font_cards = ""
-    for fid in FONT_ORDER:
-        F = FONTS[fid]
-        font_cards += (f'<label class="theme-card font-card"><input type="radio" name="font" value="{fid}"{" checked" if cur_font == fid else ""}>'
-                       f'<div class="tc-box"><div class="font-prev" style="font-family:\'{F["family"]}\',Vazirmatn,Tahoma,sans-serif">'
-                       f'<b>سلام، به پنل خوش اومدی</b><span>۱۲۳ GB · ۳۰ روز · Abc</span></div>'
-                       f'<span class="tc-name">{esc(F["name"])}</span></div></label>')
-
-    content = f"""
-    <style>{_font_face_css()}</style>
-    <div class="card"><h3>🧩 طراحی کلی پنل</h3>
-    <small class="muted">شکل و چیدمان پنل فروشندگان (کارت‌ها، منو، فاصله‌ها). با تم رنگی پایین مستقل کار می‌کنه و با هر رنگی ترکیب می‌شه.</small></div>
-    <form method="post" action="{url_for('seller_theme_save')}" id="themeform">
-      <div class="lay-grid">{lay_cards}</div>
-      <label style="display:flex;align-items:center;gap:8px;margin:14px 2px 18px;cursor:pointer;">
-        <input type="checkbox" name="apply_colors" value="1" checked style="width:auto;margin:0;">
-        <span>همراه طراحیِ «ثنایی» یا «پاسارگاد»، رنگ‌بندی پیشنهادیشون هم اعمال بشه <span class="muted">(برای طراحی‌های دیگه اثری نداره)</span></span>
-      </label>
-      <div class="card"><h3>🔤 فونت متن‌ها</h3>
-      <small class="muted">فونتِ همه‌ی متن‌های پنل فروشندگان (با هر ۶ طراحی کار می‌کنه). اگه فایل فونت انتخابی کنار برنامه (پوشه‌ی fonts) نباشه، پنل با وزیرمتن نمایش داده می‌شه.</small></div>
-      <div class="font-grid">{font_cards}</div>
-      <div class="card"><h3>🎨 تم رنگی</h3></div>
-    <div class="card"><small class="muted">تمی که اینجا انتخاب کنید ظاهر <b>پنل فروشندگان</b> (همون سایتی که فروشنده‌ها باهاش وارد می‌شن) رو برای همه عوض می‌کنه.
-    تغییر ظرف حدود ۲۰ ثانیه روی پنل فروشندگان اعمال می‌شه. «بنفش (پیش‌فرض)» همون ظاهر اصلیه و هر وقت خواستید می‌تونید برگردید.</small></div>
-      <div class="theme-grid">{cards}</div>
-      <div class="card" style="margin-top:16px;">
-        <h3>🎨 تم سفارشی</h3>
-        <small class="muted">فقط اگه گزینه‌ی «سفارشی» رو انتخاب کنید استفاده می‌شه. بقیه‌ی رنگ‌ها (پس‌زمینه، کارت‌ها، گرادینت‌ها) خودکار با رنگ اصلی هماهنگ می‌شن.</small>
-        <div class="flex" style="margin-top:12px;gap:18px;">
-          <div><label for="custom_p" style="margin-top:0;">رنگ اصلی</label>
-            <input id="custom_p" type="color" name="custom_p" value="{esc(cp)}"></div>
-          <div><label style="margin-top:0;">حالت</label>
-            <div class="flex">
-              <label style="display:flex;align-items:center;gap:6px;margin:0;cursor:pointer;"><input type="radio" name="custom_mode" value="light"{"" if cdark else " checked"}> روشن</label>
-              <label style="display:flex;align-items:center;gap:6px;margin:0;cursor:pointer;"><input type="radio" name="custom_mode" value="dark"{" checked" if cdark else ""}> تیره</label>
-            </div></div>
-        </div>
-      </div>
-      <div class="savebar"><button type="submit" class="block">💾 ذخیره و اعمال</button></div>
-    </form>"""
-    return render_page("ظاهر پنل فروشندگان", "sellertheme", content)
-
-
-@app.route("/seller-theme/save", methods=["POST"])
-@login_required
-def seller_theme_save():
-    theme = request.form.get("theme", "default")
-    layout = request.form.get("layout", "default")
-    if layout not in LAYOUTS:
-        flash("⚠️ طراحی نامعتبره.")
-        return redirect(url_for("seller_theme_page"))
-    sug = LAYOUTS[layout]["suggest"]
-    # اگه ادمین طراحی ثنایی/پاسارگاد رو تازه انتخاب کرده و تیک «رنگ پیشنهادی» روشنه، رنگ هم عوض می‌شه
-    old_layout = _LAYOUT_ALIAS.get(get_all_settings().get("seller_layout", "default"), get_all_settings().get("seller_layout", "default"))
-    if sug and request.form.get("apply_colors") and layout != old_layout:
-        theme = sug
-    if theme != "custom" and theme not in THEMES:
-        flash("⚠️ تم نامعتبره.")
-        return redirect(url_for("seller_theme_page"))
-    if theme == "custom":
-        p = request.form.get("custom_p", "").strip()
-        if not re.match(r"^#[0-9a-fA-F]{6}$", p):
-            flash("⚠️ رنگ اصلی نامعتبره.")
-            return redirect(url_for("seller_theme_page"))
-        set_setting("seller_theme_custom", json.dumps({"p": p.lower(), "dark": request.form.get("custom_mode") == "dark"}))
-    font = request.form.get("font") or get_all_settings().get("seller_font", "vazirmatn")
-    if font not in FONTS:
-        flash("⚠️ فونت نامعتبره.")
-        return redirect(url_for("seller_theme_page"))
-    set_setting("seller_theme", theme)
-    set_setting("seller_layout", layout)
-    set_setting("seller_font", font)
-    name = "سفارشی" if theme == "custom" else THEMES[theme]["name"]
-    flash(f"ظاهر پنل فروشندگان تنظیم شد (طراحی: «{LAYOUTS[layout]['name']}»، رنگ: «{name}»، فونت: «{FONTS[font]['name']}»)؛ تا ~۲۰ ثانیه‌ی دیگه اعمال می‌شه.")
-    return redirect(url_for("seller_theme_page"))
+        flash("⚠️ حجم تغییر نکرد: " + reason)
+    return _after_vendor_action(vkey)
 
 
 # ---------- پیام همگانی ----------

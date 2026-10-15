@@ -4271,7 +4271,7 @@ SELLER_API_KEY = (os.getenv('SELLER_API_KEY', '').strip()
                   or 'sk_live_iIlB6uH_KSibQMUTnq2Ef6UcgWYztoQL')
 
 
-def seller_api(method, path, payload=None):
+def seller_api(method, path, payload=None, params=None):
     """درخواست به Seller API با کلید مخصوص SELLER_API_KEY (فقط ساخت حساب و تغییر رمز فروشنده).
     خروجی: success / status / error_code / message."""
     if not SELLER_API_KEY:
@@ -4280,7 +4280,7 @@ def seller_api(method, path, payload=None):
     try:
         res = SESSION.request(method, SELLER_API_BASE + path,
                               headers={'Authorization': 'Bearer ' + SELLER_API_KEY},
-                              json=payload, timeout=20)
+                              json=payload, params=params, timeout=20)
         try:
             data = res.json()
         except Exception:
@@ -4410,62 +4410,32 @@ def get_old_reseller_creds(user_id):
     return (row[0], row[1]) if row and row[0] else None
 
 
-def _seller_list_items(data):
-    """از جواب لیست زیرمجموعه‌ها، آرایه‌ی آیتم‌ها رو درمیاره (چند شکل جواب رو تحمل می‌کنه)."""
-    if isinstance(data, list):
-        return data
-    if isinstance(data, dict):
-        for k in ('subs', 'items', 'data', 'results', 'users', 'list'):
-            v = data.get(k)
-            if isinstance(v, list):
-                return v
-            if isinstance(v, dict):
-                r = _seller_list_items(v)
-                if r:
-                    return r
-        for v in data.values():
-            if isinstance(v, list):
-                return v
-    return []
-
-
 def seller_find_sub(username):
-    """نام کاربری رو بین زیرمجموعه‌های کلید فروشنده پیدا می‌کنه.
+    """نام کاربری رو بین زیرمجموعه‌های کلید فروشنده پیدا می‌کنه (GET /resale/subs با q، skip و limit).
+    جواب سرویس: {rows: [{userId, displayName, creditGb, ...}], total, skip, limit}.
     برمی‌گردونه (found, sub): found = True (پیدا شد) / False (نیست) / None (ارتباط با سرویس ناموفق بود)."""
-    from urllib.parse import quote as _urlquote
     target = (username or '').strip().lower()
     if not target:
         return False, None
-    path = '/resale/subs'
-    last = None
-    for _ in range(30):
-        res = seller_api('GET', path)
+    skip, limit, last = 0, 50, None
+    for _ in range(40):
+        res = seller_api('GET', '/resale/subs', params={'q': target, 'skip': skip, 'limit': limit})
         if not res['success']:
             print('⚠️ گرفتن لیست زیرمجموعه‌ها ناموفق:', res)
             return None, None
-        data = res['data']
+        data = res['data'] if isinstance(res['data'], dict) else {}
         last = data
-        for it in _seller_list_items(data):
-            if not isinstance(it, dict):
-                continue
-            nm = it.get('username') or it.get('userName') or it.get('name') or ''
-            if str(nm).strip().lower() == target:
+        rows = data.get('rows') or []
+        for it in rows:
+            if isinstance(it, dict) and str(it.get('displayName') or '').strip().lower() == target:
                 return True, it
-        nxt = None
-        if isinstance(data, dict):
-            cur = data.get('nextCursor') or data.get('next_cursor')
-            if cur:
-                nxt = '/resale/subs?cursor=' + _urlquote(str(cur))
-            else:
-                try:
-                    page, tp = data.get('page'), (data.get('totalPages') or data.get('pages'))
-                    if page and tp and int(page) < int(tp):
-                        nxt = '/resale/subs?page=%d' % (int(page) + 1)
-                except Exception:
-                    nxt = None
-        if not nxt:
+        skip += len(rows)
+        try:
+            total = int(data.get('total') or 0)
+        except Exception:
+            total = 0
+        if not rows or skip >= total:
             break
-        path = nxt
     print('ℹ️ نام کاربری %r بین زیرمجموعه‌ها نبود. نمونه‌ی جواب لیست: %s' % (target, str(last)[:300]))
     return False, None
 
@@ -4490,7 +4460,7 @@ def _sync_seller_account(chat_id):
             except Exception as e:
                 print('⚠️ پاک کردن حساب کهنه‌ی فروشنده ناموفق بود:', e)
         return None, True
-    sub_id = str(sub.get('userId') or sub.get('id') or sub.get('_id') or sub.get('subId') or '')
+    sub_id = str(sub.get('userId') or '')
     if not sub_id:
         print('⚠️ آیدی زیرمجموعه تو جواب لیست نبود:', str(sub)[:300])
         return acc, True
