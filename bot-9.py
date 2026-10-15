@@ -4903,7 +4903,7 @@ import string as _string
 
 _TEXT_GROUP_RULES = [
     (('menu_btn_', 'ctype_btn_'), '🔘 دکمه‌های منوی اصلی و نوع سرویس'),
-    (('reseller_', 'btn_reseller', 'tier_line', 'price_range'), '🧑‍💼 فروشندگی (ریسلر)'),
+    (('reseller_', 'btn_reseller', 'tier_line', 'price_range', 'seller_', 'btn_change_'), '🏪 فروشندگی (پنل فروشنده)'),
     (('referral_', 'btn_referral'), '🎁 دعوت دوستان'),
     (('admin_', 'config_note', 'no_username', 'disabled_feature'), '🛠 پیام‌های ادمین و سیستمی'),
     (('qty_', 'btn_qty', 'ask_label', 'invoice_', 'btn_confirm_purchase', 'btn_cancel_purchase', 'btn_apply_discount',
@@ -4926,8 +4926,23 @@ _TEXT_GROUP_RULES = [
 _GROUP_DISPLAY_ORDER = [
     '🔘 دکمه‌های منوی اصلی و نوع سرویس', '🏠 منوی اصلی و خوش‌آمدگویی', '🛍 خرید، فاکتور و سفارشات', '🗂 کانفیگ‌های من و مدیریت', '🗑 حذف کانفیگ',
     '🧪 تست رایگان', '💠 شارژ کیف پول', '🎧 پشتیبانی', '👤 حساب من', '📲 اپ و دانلود', '🌐 زبان',
-    '🧑‍💼 فروشندگی (ریسلر)', '🎁 دعوت دوستان', '🛠 پیام‌های ادمین و سیستمی', '🔢 واحدها', '🔘 دکمه‌ها و سایر',
+    '🏪 فروشندگی (پنل فروشنده)', '🎁 دعوت دوستان', '🛠 پیام‌های ادمین و سیستمی', '🔢 واحدها', '🔘 دکمه‌ها و سایر',
 ]
+
+
+# کلیدهای متنِ فروشندگیِ جدید (ساخت خودکار حساب روی سرویس). بقیه‌ی کلیدهای قدیمیِ ریسلر
+# (استخر گیگ، قیمت، افزایش موجودی و...) دیگه جایی استفاده نمی‌شن و تو پنل نشون داده نمی‌شن.
+_SELLER_ACTIVE_KEYS = {
+    'btn_reseller', 'btn_reseller_activate', 'btn_change_password', 'reseller_intro', 'reseller_dashboard',
+    'reseller_creds_line', 'reseller_ask_username', 'reseller_username_bad', 'reseller_username_taken',
+    'reseller_ask_password', 'reseller_password_bad', 'reseller_creds_done', 'reseller_ask_new_password',
+    'reseller_password_changed', 'seller_pass_line', 'seller_pass_missing', 'seller_error',
+}
+
+
+def _is_obsolete_seller_key(key):
+    return (key.startswith(('reseller_', 'btn_reseller', 'tier_line', 'price_range', 'btn_change_username'))
+            and key not in _SELLER_ACTIVE_KEYS)
 
 
 def _text_group(key):
@@ -4972,14 +4987,14 @@ def build_text_registry():
         fa_items.append({'k': 'ctype_btn_' + key, 's': 'ctype_label_' + key, 'd': default_label, 'p': [],
                          'g': _text_group('ctype_btn_' + key)})
     for k, v in fa_defaults.items():
-        if k in skip_fa or k.startswith('svc_'):
+        if k in skip_fa or k.startswith('svc_') or _is_obsolete_seller_key(k):
             continue
         fa_items.append({'k': k, 's': ui_setting_key('fa', k), 'd': v, 'p': _tpl_fields(v), 'g': _text_group(k)})
 
     en_items = []
     en_keys = list(UI_TEXT['en'].keys()) + [k for k in fa_defaults if k not in UI_TEXT['en']]
     for k in en_keys:
-        if k.startswith('admin_') or k in ('config_note', 'no_username'):
+        if k.startswith('admin_') or k in ('config_note', 'no_username') or _is_obsolete_seller_key(k):
             continue
         d = UI_TEXT['en'].get(k, '')
         ref = fa_defaults.get(k, '')
