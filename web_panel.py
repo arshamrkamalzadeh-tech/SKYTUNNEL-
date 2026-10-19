@@ -910,12 +910,133 @@ def get_extra_stats():
 
 @with_db_retry
 def get_topups(limit=60):
+    """(id, user_id, amount, status, created_at, method, coin_symbol, coin_qty, tx_hash, matched_tx)
+    درخواست‌های در انتظار اول می‌آن."""
     conn = get_conn()
     c = conn.cursor()
-    c.execute("SELECT id, user_id, amount, status, created_at FROM topup_requests ORDER BY id DESC LIMIT ?", (limit,))
+    c.execute("SELECT id, user_id, amount, status, created_at, method, coin_symbol, coin_qty, tx_hash, matched_tx "
+              "FROM topup_requests ORDER BY (CASE WHEN status='pending' THEN 0 ELSE 1 END), id DESC LIMIT ?", (limit,))
     res = c.fetchall()
     conn.close()
     return res
+
+
+@with_db_retry
+def get_topup_row(req_id):
+    conn = get_conn()
+    c = conn.cursor()
+    c.execute("SELECT id, user_id, amount, status, method, matched_tx FROM topup_requests WHERE id=?", (req_id,))
+    row = c.fetchone()
+    conn.close()
+    return row
+
+
+@with_db_retry
+def claim_topup(req_id, new_status):
+    """اتمیک: فقط اگه هنوز pending باشه وضعیت رو عوض می‌کنه و True برمی‌گردونه.
+    این‌طوری حتی اگه همزمان از بات (دکمه‌ی تلگرام) هم تایید بشه، فقط یکی‌شون برنده می‌شه و شارژ دوبار انجام نمی‌شه."""
+    conn = get_conn()
+    c = conn.cursor()
+    try:
+        c.execute("UPDATE topup_requests SET status=? WHERE id=? AND status='pending' RETURNING id", (new_status, req_id))
+        won = c.fetchone() is not None
+    except Exception as e:
+        if "stream" in str(e).lower():
+            raise
+        c.execute("UPDATE topup_requests SET status=? WHERE id=? AND status='pending'", (new_status, req_id))
+        won = (c.rowcount or 0) > 0
+    conn.commit()
+    conn.close()
+    return won
+
+
+@with_db_retry
+def mark_deposit_used(tx, req_id):
+    if not tx:
+        return
+    conn = get_conn()
+    c = conn.cursor()
+    c.execute("CREATE TABLE IF NOT EXISTS crypto_deposits_used (tx TEXT PRIMARY KEY, req_id INTEGER, created_at TEXT)")
+    c.execute("INSERT OR IGNORE INTO crypto_deposits_used (tx, req_id, created_at) VALUES (?, ?, ?)",
+              (tx, req_id, datetime.now().isoformat()))
+    conn.commit()
+    conn.close()
+
+
+_TOPUP_TEXTS = {
+    "fa": {
+        "topup_approved": "✅ کیف پول شما به مبلغ <b>{credited}</b> تومان شارژ شد.",
+        "topup_approved_mult": "✅ کیف پول شما به مبلغ <b>{credited}</b> تومان شارژ شد (واریزی {amount} تومان × ضریب {multiplier}).",
+        "topup_rejected": "❌ رسید واریز شما رد شد. لطفاً با پشتیبانی در ارتباط باشید.",
+    },
+    "en": {
+        "topup_approved": "✅ Your wallet was topped up by <b>{credited}</b> Toman.",
+        "topup_approved_mult": "✅ Your wallet was topped up by <b>{credited}</b> Toman (deposit {amount} Toman × multiplier {multiplier}).",
+        "topup_rejected": "❌ Your deposit receipt was rejected. Please contact support.",
+    },
+}
+
+
+def topup_user_text(user_id, key, **kwargs):
+    """همون متنی که بات می‌فرسته (با احترام به متن‌های ویرایش‌شده از پنل و زبان کاربر)."""
+    u = None
+    try:
+        u = get_user(user_id)
+    except Exception:
+        pass
+    lang = (u[7] if u and u[7] in ("fa", "en") else "fa")
+    text = _TOPUP_TEXTS[lang][key]
+    override = get_setting("ui_%s_%s" % (lang, key), None)
+    for cand in ((override, text) if override else (text,)):
+        try:
+            return cand.format(**kwargs)
+        except Exception:
+            continue
+    return text
+
+
+def panel_approve_topup(req_id):
+    """(ok, پیام). منطق دقیقاً مثل approve_topup_request توی بات: رمزارز بدون ضریب، کارت‌به‌کارت با ضریب واریزی."""
+    req = get_topup_row(req_id)
+    if not req:
+        return False, "درخواست پیدا نشد."
+    _id, user_id, amount, status, method, matched_tx = req
+    if status != "pending":
+        return False, "این درخواست قبلاً بررسی شده."
+    multiplier = 1.0
+    if (method or "card") != "crypto":
+        try:
+            multiplier = float(get_setting("topup_multiplier", "1"))
+        except (TypeError, ValueError):
+            multiplier = 1.0
+    credited = int(round((amount or 0) * multiplier))
+    if not claim_topup(req_id, "approved"):
+        return False, "این درخواست همین الان جای دیگه (مثلاً تو بات) بررسی شد."
+    update_wallet(user_id, credited)
+    try:
+        mark_deposit_used(matched_tx, req_id)
+    except Exception as e:
+        print("⚠️ ثبت واریز استفاده‌شده ناموفق:", e)
+    if multiplier != 1:
+        msg = topup_user_text(user_id, "topup_approved_mult", credited=f"{credited:,}",
+                              amount=f"{int(amount or 0):,}", multiplier=("%g" % multiplier))
+    else:
+        msg = topup_user_text(user_id, "topup_approved", credited=f"{credited:,}")
+    sent = send_telegram_message(user_id, msg)
+    return True, (f"درخواست #{req_id} تایید شد و {credited:,} تومان به کیف پول کاربر اضافه شد."
+                  + ("" if sent else " ⚠️ ولی ارسال پیام به کاربر ناموفق بود."))
+
+
+def panel_reject_topup(req_id):
+    req = get_topup_row(req_id)
+    if not req:
+        return False, "درخواست پیدا نشد."
+    if req[3] != "pending":
+        return False, "این درخواست قبلاً بررسی شده."
+    if not claim_topup(req_id, "rejected"):
+        return False, "این درخواست همین الان جای دیگه (مثلاً تو بات) بررسی شد."
+    sent = send_telegram_message(req[1], topup_user_text(req[1], "topup_rejected"))
+    return True, f"درخواست #{req_id} رد شد." + ("" if sent else " ⚠️ ولی ارسال پیام به کاربر ناموفق بود.")
 
 
 @with_db_retry
@@ -2179,29 +2300,73 @@ def ticket_close(ticket_id):
     return redirect(url_for("tickets"))
 
 
-# ---------- شارژهای کیف پول (فقط مشاهده) ----------
+# ---------- شارژهای کیف پول (تایید/رد از پنل) ----------
 
 @app.route("/topups")
 @login_required
 def topups_page():
     rows = get_topups()
     rows_html = ""
-    for rid, user_id, amount, status, created_at in rows:
+    for rid, user_id, amount, status, created_at, method, coin_symbol, coin_qty, tx_hash, matched_tx in rows:
+        is_crypto = (method == "crypto")
+        kind = "🪙 رمزارز" if is_crypto else "💳 کارت‌به‌کارت"
+        detail = ""
+        if is_crypto:
+            try:
+                qty_txt = f"{float(coin_qty):g}" if coin_qty else ""
+            except (TypeError, ValueError):
+                qty_txt = str(coin_qty or "")
+            detail = f"<br><small class=\"muted\">{esc(qty_txt)} {esc((coin_symbol or '').upper())}</small>"
+            if tx_hash:
+                detail += f"<br><small class=\"muted num\" dir=\"ltr\" style=\"word-break:break-all;\">{esc(tx_hash)}</small>"
+            if matched_tx:
+                detail += "<br><small class=\"muted\">✔️ واریز در نوبیتکس پیدا شده</small>"
+        if status == "pending":
+            actions = f"""
+            <form method="post" action="{url_for('topup_approve', req_id=rid)}" style="display:inline;"
+                  onsubmit="return confirm('شارژ #{rid} تایید بشه و مبلغ به کیف پول کاربر اضافه بشه؟');">
+              <button type="submit" class="sm">✅ تایید</button>
+            </form>
+            <form method="post" action="{url_for('topup_reject', req_id=rid)}" style="display:inline;"
+                  onsubmit="return confirm('شارژ #{rid} رد بشه؟');">
+              <button type="submit" class="danger sm">❌ رد</button>
+            </form>"""
+        else:
+            actions = "—"
         rows_html += f"""
         <tr>
           <td data-label="شماره">#{rid}</td>
           <td data-label="کاربر"><a class="num" href="{url_for('user_detail', user_id=user_id)}">{user_id}</a></td>
+          <td data-label="نوع">{kind}{detail}</td>
           <td data-label="مبلغ" class="num">{int(amount or 0):,} تومان</td>
           <td data-label="وضعیت"><span class="badge {esc(status)}">{esc({'pending': 'در انتظار', 'approved': 'تایید شده', 'rejected': 'رد شده'}.get(status, status))}</span></td>
           <td data-label="تاریخ"><small class="muted">{fmt_dt(created_at)}</small></td>
+          <td data-label="عملیات">{actions}</td>
         </tr>"""
     content = f"""
     <table class="rt">
-      <thead><tr><th>شماره</th><th>کاربر</th><th>مبلغ واریزی</th><th>وضعیت</th><th>تاریخ</th></tr></thead>
-      <tbody>{rows_html if rows_html else '<tr><td colspan="5">درخواستی ثبت نشده.</td></tr>'}</tbody>
+      <thead><tr><th>شماره</th><th>کاربر</th><th>نوع</th><th>مبلغ واریزی</th><th>وضعیت</th><th>تاریخ</th><th>عملیات</th></tr></thead>
+      <tbody>{rows_html if rows_html else '<tr><td colspan="7">درخواستی ثبت نشده.</td></tr>'}</tbody>
     </table>
-    <p><small class="muted">تایید یا رد رسیدها همچنان از طریق پیام ادمین داخل خود ربات انجام می‌شود (دکمه‌های تایید/رد)؛ این صفحه فقط برای مشاهده‌ی تاریخچه است.</small></p>"""
+    <p><small class="muted">تایید/رد از همین‌جا با دکمه‌ی داخل ربات یکی‌ه و پیام نتیجه برای کاربر هم فرستاده می‌شه. هر درخواست فقط یک‌بار قابل بررسیه (اگه تو ربات تایید شده باشه، اینجا دوباره شارژ نمی‌شه).
+    عکس رسید کارت‌به‌کارت فقط داخل پیام ادمین تو ربات هست؛ قبل از تایید، رسید رو اون‌جا چک کن.</small></p>"""
     return render_page("شارژهای کیف پول", "topups", content)
+
+
+@app.route("/topups/<int:req_id>/approve", methods=["POST"])
+@login_required
+def topup_approve(req_id):
+    ok, msg = panel_approve_topup(req_id)
+    flash(msg if ok else "⚠️ " + msg)
+    return redirect(url_for("topups_page"))
+
+
+@app.route("/topups/<int:req_id>/reject", methods=["POST"])
+@login_required
+def topup_reject(req_id):
+    ok, msg = panel_reject_topup(req_id)
+    flash(msg if ok else "⚠️ " + msg)
+    return redirect(url_for("topups_page"))
 
 
 # ---------- رمزارزها (شارژ کیف پول با رمزارز) ----------

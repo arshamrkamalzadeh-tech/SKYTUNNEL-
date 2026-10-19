@@ -2276,7 +2276,8 @@ def approve_topup_request(req_id, auto=False, reason='hash_ok'):
         # شارژ رمزارزی دقیقاً همون مبلغی‌ه که کاربر وارد کرده (ضریب واریزی فقط برای کارت‌به‌کارت)
         multiplier = 1.0 if get_topup_method(req_id) == 'crypto' else get_topup_multiplier()
         credited = int(round(req[2] * multiplier))
-        update_topup_status(req_id, 'approved')
+        if not claim_topup_pending(req_id, 'approved'):
+            return False           # همزمان از پنل وب تایید/رد شد
         update_wallet_db(req[1], credited)
         try:
             _st = user_steps.get(str(req[1])) or {}
@@ -2983,6 +2984,24 @@ def get_topup_method(req_id):
         return (row[0] if row and row[0] else 'card')
     except Exception:
         return 'card'
+
+
+@with_db_retry
+def claim_topup_pending(req_id, new_status):
+    """اتمیک: فقط اگه هنوز pending باشه وضعیت عوض می‌شه (True). از تایید/رد همزمان بات و پنل وب جلوگیری می‌کنه."""
+    conn = get_conn()
+    c = conn.cursor()
+    try:
+        c.execute("UPDATE topup_requests SET status=? WHERE id=? AND status='pending' RETURNING id", (new_status, req_id))
+        won = c.fetchone() is not None
+    except Exception as e:
+        if 'stream' in str(e).lower():
+            raise
+        c.execute("UPDATE topup_requests SET status=? WHERE id=? AND status='pending'", (new_status, req_id))
+        won = (c.rowcount or 0) > 0
+    conn.commit()
+    conn.close()
+    return won
 
 
 @with_db_retry
@@ -5694,8 +5713,7 @@ def process_update(update):
         elif data.startswith('topup_rej_') and chat_id == ADMIN_ID:     # رد کردن فقط با خود ادمینه، بات هیچ‌وقت خودش رد نمی‌کنه
             req_id = int(data.split('_')[2])
             req = get_topup_request(req_id)
-            if req and req[3] == 'pending':
-                update_topup_status(req_id, 'rejected')
+            if req and req[3] == 'pending' and claim_topup_pending(req_id, 'rejected'):
                 send_message(req[1], u(req[1], 'topup_rejected'))
                 send_message(ADMIN_ID, u('fa', 'admin_topup_rejected', req_id=str(req_id)))
             else:
