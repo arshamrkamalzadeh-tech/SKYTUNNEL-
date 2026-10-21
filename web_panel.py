@@ -2162,6 +2162,7 @@ def user_detail(user_id):
     </div>
 
     {trial_card}
+    <p><a class="btn" href="{url_for('user_configs_admin', user_id=user_id)}">⚙️ مدیریت کانفیگ‌های این کاربر (تمدید، توقف، حذف، ساخت هدیه)</a></p>
 
     <h3>کانفیگ‌های کاربر</h3>
     <table class="rt">
@@ -3730,6 +3731,707 @@ def delete_discount(code):
     return redirect(url_for("discount_codes"))
 
 
+
+
+# ===========================================================================
+# افزونه‌ها: پست‌گذاری در کانال‌ها، مدیریت کانفیگ کاربران، سفارش‌ها، بکاپ و خروجی
+# هدف: هر کاری که ادمین تو سروش می‌کرد، از همین پنل هم قابل انجام باشه.
+# ===========================================================================
+import csv
+import io
+from concurrent.futures import ThreadPoolExecutor
+from flask import Response
+
+CONFIG_API = os.getenv("CONFIG_API", "https://su.randomatic.ir/api/v1/configs")
+CONFIG_KEY = os.getenv("CONFIG_KEY", "").strip()
+
+ICONS.update({
+    "channels": '<path d="M3 11v2a1 1 0 0 0 1 1h3l6 4V6L7 10H4a1 1 0 0 0-1 1z"/><path d="M17 8.5a5 5 0 0 1 0 7M19.5 6a8.5 8.5 0 0 1 0 12"/>',
+    "orders": '<path d="M6 3h12l2 4v13H4V7z"/><path d="M4 7h16M9 11h6"/>',
+    "backup": '<path d="M12 3v12m0 0l-4-4m4 4l4-4"/><path d="M4 17v3h16v-3"/>',
+})
+NAV[1][1].append(("orders", "سفارش‌ها", "orders_page"))
+NAV[2][1].append(("channels", "کانال‌ها و پست", "channels_page"))
+NAV[3][1].append(("backup", "بکاپ و خروجی", "backup_page"))
+
+PANEL_CH_KEY = "panel_channels"
+PANEL_POST_LOG_KEY = "panel_post_log"
+DEFAULT_GATE_LINK = os.getenv("CHANNEL_LINK", "https://splus.ir/skytunnel").strip()
+
+
+def _load_json_setting(key, default):
+    try:
+        v = json.loads(get_setting(key, "") or "")
+    except Exception:
+        return default
+    return v if isinstance(v, type(default)) else default
+
+
+def norm_target(raw):
+    """لینک عمومی / @یوزرنیم / آیدی عددی → هدف Bot API (یا None اگه نامعتبر)."""
+    s = str(raw or "").strip()
+    if not s:
+        return None
+    if re.fullmatch(r"-?\d{5,20}", s):
+        return int(s)
+    s = s.split("?")[0].rstrip("/")
+    name = s.split("/")[-1].lstrip("@")
+    if "+" in s or "joinchat" in s.lower() or not re.fullmatch(r"[A-Za-z0-9_.\-]{3,64}", name):
+        return None
+    return "@" + name
+
+
+def gate_links():
+    raw = get_setting("gate_channels", None)
+    if raw is None:
+        return [DEFAULT_GATE_LINK] if DEFAULT_GATE_LINK else []
+    try:
+        data = json.loads(raw)
+    except Exception:
+        return []
+    return [str(x).strip() for x in data if str(x).strip()] if isinstance(data, list) else []
+
+
+def channel_list():
+    out, seen = [], set()
+    for c in _load_json_setting(PANEL_CH_KEY, []):
+        if isinstance(c, dict) and c.get("target"):
+            out.append({"id": str(c.get("id")), "title": str(c.get("title") or c["target"]),
+                        "target": c["target"], "src": "panel"})
+            seen.add(str(c["target"]).lower())
+    for lk in gate_links():
+        t = norm_target(lk)
+        if t and str(t).lower() not in seen:
+            out.append({"id": "g" + hashlib.md5(str(lk).encode()).hexdigest()[:6], "title": str(t),
+                        "target": t, "src": "gate"})
+            seen.add(str(t).lower())
+    return out
+
+
+def bot_call(method, payload=None, files=None):
+    if not BOT_TOKEN:
+        return {"ok": False, "description": "BOT_TOKEN تنظیم نشده"}
+    try:
+        if files:
+            r = SESSION.post(BASE_URL + "/" + method, data=payload, files=files, timeout=45)
+        else:
+            r = SESSION.post(BASE_URL + "/" + method, json=payload, timeout=20)
+        return r.json()
+    except Exception as e:
+        return {"ok": False, "description": str(e)[:200]}
+
+
+def _send_to(target, text, photo, btn_text, btn_url):
+    markup = {"inline_keyboard": [[{"text": btn_text, "url": btn_url}]]} if (btn_text and btn_url) else None
+    if photo:
+        payload = {"chat_id": str(target), "parse_mode": "HTML"}
+        if text:
+            payload["caption"] = text
+        if markup:
+            payload["reply_markup"] = json.dumps(markup)
+        return bot_call("sendPhoto", payload, files={"photo": photo})
+    payload = {"chat_id": target, "text": text, "parse_mode": "HTML"}
+    if markup:
+        payload["reply_markup"] = markup
+    return bot_call("sendMessage", payload)
+
+
+@app.route("/channels")
+@login_required
+def channels_page():
+    chans = channel_list()
+    log = _load_json_setting(PANEL_POST_LOG_KEY, [])
+
+    boxes = "".join(
+        f'<label class="flex" style="cursor:pointer;margin:6px 0;"><input type="checkbox" name="t" value="{esc(c["id"])}">'
+        f'<span>{esc(c["title"])} <small class="muted" dir="ltr">{esc(c["target"])}</small></span></label>'
+        for c in chans) or '<p class="empty-note">کانالی ثبت نشده؛ پایین یکی اضافه کنید یا آدرس دلخواه بنویسید.</p>'
+
+    manage = ""
+    for c in chans:
+        if c["src"] == "panel":
+            manage += (f'<div class="switch-row"><div><b>{esc(c["title"])}</b> <small class="muted" dir="ltr">{esc(c["target"])}</small></div>'
+                       f'<form method="post" action="{url_for("channel_delete", cid=c["id"])}" onsubmit="return confirm(\'حذف از لیست؟\');">'
+                       f'<button type="submit" class="danger sm">حذف</button></form></div>')
+        else:
+            manage += (f'<div class="switch-row"><div><b>{esc(c["title"])}</b> <small class="muted">(از لیست عضویت اجباری)</small></div></div>')
+
+    log_html = ""
+    for i in range(len(log) - 1, -1, -1):
+        e = log[i]
+        log_html += (f'<tr><td data-label="کانال" dir="ltr">{esc(e.get("title"))}</td>'
+                     f'<td data-label="نوع">{"🖼 عکس" if e.get("kind") == "photo" else "💬 متن"}</td>'
+                     f'<td data-label="متن" class="wrap">{esc(e.get("preview"))}</td>'
+                     f'<td data-label="زمان"><small class="muted">{fmt_dt(e.get("ts"))}</small></td>'
+                     f'<td data-label=""><form method="post" action="{url_for("channel_log_delete", idx=i)}" '
+                     f'onsubmit="return confirm(\'پیام از کانال هم پاک بشه؟\');"><button type="submit" class="danger sm">حذف از کانال</button></form></td></tr>')
+
+    gate_rows = ""
+    for lk in gate_links():
+        h = hashlib.md5(lk.encode()).hexdigest()[:8]
+        gate_rows += (f'<div class="switch-row"><div dir="ltr">{esc(lk)}</div>'
+                      f'<form method="post" action="{url_for("gate_delete", h=h)}" onsubmit="return confirm(\'از عضویت اجباری حذف بشه؟\');">'
+                      f'<button type="submit" class="danger sm">حذف</button></form></div>')
+    if not gate_rows:
+        gate_rows = '<p class="empty-note">عضویت اجباری کانالی ندارد.</p>'
+
+    content = f"""
+    {'' if BOT_TOKEN else '<div class="alert">⚠️ BOT_TOKEN تنظیم نشده؛ ارسال پیام کار نمی‌کنه.</div>'}
+    <div class="card">
+      <h3>✍️ ارسال پست در کانال‌ها</h3>
+      <small class="muted">ربات باید تو کانال ادمین (با اجازه‌ی ارسال پیام) باشه. HTML تلگرام مجازه: &lt;b&gt; &lt;i&gt; &lt;code&gt; &lt;a href&gt;</small>
+      <form method="post" action="{url_for('channels_post')}" enctype="multipart/form-data">
+        <label>کانال‌ها</label>{boxes}
+        <label for="extra">یا آدرس دلخواه (@یوزرنیم، لینک عمومی یا آیدی عددی)</label>
+        <input id="extra" name="extra" dir="ltr" placeholder="@mychannel">
+        <label for="ptext">متن پست</label>
+        <textarea id="ptext" name="text" placeholder="متن (برای عکس تا ۱۰۲۴ کاراکتر)"></textarea>
+        <label for="pphoto">عکس (اختیاری، حداکثر ۱۰ مگابایت)</label>
+        <input id="pphoto" type="file" name="photo" accept="image/*">
+        <div class="grid cols-2">
+          <div><label for="btext">متن دکمه‌ی لینک‌دار (اختیاری)</label><input id="btext" name="btn_text" maxlength="40"></div>
+          <div><label for="burl">لینک دکمه</label><input id="burl" name="btn_url" dir="ltr" placeholder="https://..."></div>
+        </div>
+        <div style="margin-top:14px;"><button type="submit" onclick="return confirm('پست ارسال بشه؟');">📤 ارسال</button></div>
+      </form>
+    </div>
+
+    <div class="card"><h3>📺 کانال‌های ذخیره‌شده</h3>{manage if manage else '<p class="empty-note">—</p>'}
+      <form method="post" action="{url_for('channel_add')}" class="flex" style="margin-top:12px;">
+        <input name="title" placeholder="اسم نمایشی (اختیاری)" style="width:180px;">
+        <input name="target" dir="ltr" placeholder="@mychannel یا لینک" style="flex:1;min-width:180px;" required>
+        <button type="submit">➕ افزودن</button>
+      </form></div>
+
+    <h3>📜 آخرین پست‌های ارسال‌شده از پنل</h3>
+    <table class="rt"><thead><tr><th>کانال</th><th>نوع</th><th>متن</th><th>زمان</th><th></th></tr></thead>
+      <tbody>{log_html if log_html else '<tr><td colspan="5">هنوز پستی از پنل ارسال نشده.</td></tr>'}</tbody></table>
+
+    <div class="card"><h3>🔒 کانال‌های عضویت اجباری</h3>
+      {gate_rows}
+      <form method="post" action="{url_for('gate_add')}" class="flex" style="margin-top:12px;">
+        <input name="link" dir="ltr" placeholder="https://splus.ir/mychannel" style="flex:1;min-width:200px;" required>
+        <button type="submit">➕ افزودن</button></form>
+      <p class="muted" style="margin:8px 0 0;"><small>ربات این لیست رو فقط موقع روشن‌شدن می‌خونه؛ بعد از هر تغییر ربات رو ری‌استارت کنید. اکانت گیت باید تو کانال جدید ادمین باشه، وگرنه عضویت‌ها درست چک نمی‌شن. لاگین اکانت گیت (کد تأیید) فقط داخل خود ربات ممکنه.</small></p>
+    </div>"""
+    return render_page("کانال‌ها و پست‌گذاری", "channels", content)
+
+
+@app.route("/channels/add", methods=["POST"])
+@login_required
+def channel_add():
+    t = norm_target(request.form.get("target"))
+    if t is None:
+        flash("⚠️ آدرس کانال نامعتبره (لینک دعوت خصوصی پشتیبانی نمی‌شه).")
+        return redirect(url_for("channels_page"))
+    lst = _load_json_setting(PANEL_CH_KEY, [])
+    if any(str(c.get("target")).lower() == str(t).lower() for c in lst if isinstance(c, dict)):
+        flash("⚠️ این کانال از قبل تو لیسته.")
+    else:
+        lst.append({"id": secrets.token_hex(3), "title": (request.form.get("title") or "").strip()[:40] or str(t), "target": t})
+        set_setting(PANEL_CH_KEY, json.dumps(lst, ensure_ascii=False))
+        flash("کانال اضافه شد.")
+    return redirect(url_for("channels_page"))
+
+
+@app.route("/channels/<cid>/delete", methods=["POST"])
+@login_required
+def channel_delete(cid):
+    lst = [c for c in _load_json_setting(PANEL_CH_KEY, []) if not (isinstance(c, dict) and str(c.get("id")) == cid)]
+    set_setting(PANEL_CH_KEY, json.dumps(lst, ensure_ascii=False))
+    flash("کانال از لیست حذف شد.")
+    return redirect(url_for("channels_page"))
+
+
+@app.route("/channels/post", methods=["POST"])
+@login_required
+def channels_post():
+    text = request.form.get("text", "").strip()
+    btn_text, btn_url = request.form.get("btn_text", "").strip(), request.form.get("btn_url", "").strip()
+    back = redirect(url_for("channels_page"))
+    f = request.files.get("photo")
+    photo = None
+    if f and f.filename:
+        data = f.read()
+        if not (f.mimetype or "").startswith("image/") or len(data) > 10 * 1024 * 1024 or not data:
+            flash("⚠️ فایل باید عکس و حداکثر ۱۰ مگابایت باشه.")
+            return back
+        photo = (f.filename, data, f.mimetype)
+    if not text and not photo:
+        flash("⚠️ متن یا عکس لازمه.")
+        return back
+    if len(text) > (1024 if photo else 4096):
+        flash("⚠️ متن بلنده (برای عکس حداکثر ۱۰۲۴، برای متن ۴۰۹۶ کاراکتر).")
+        return back
+    if bool(btn_text) != bool(btn_url) or (btn_url and not re.match(r"^https?://\S+$", btn_url)):
+        flash("⚠️ برای دکمه، هم متن و هم لینک (با http/https) لازمه.")
+        return back
+    chans = {c["id"]: c for c in channel_list()}
+    targets = [(chans[i]["title"], chans[i]["target"]) for i in request.form.getlist("t") if i in chans]
+    extra_raw = request.form.get("extra", "").strip()
+    if extra_raw:
+        et = norm_target(extra_raw)
+        if et is None:
+            flash("⚠️ آدرس دلخواه نامعتبره.")
+            return back
+        if all(str(et).lower() != str(t[1]).lower() for t in targets):
+            targets.append((str(et), et))
+    if not targets:
+        flash("⚠️ حداقل یک کانال انتخاب کنید.")
+        return back
+    log = _load_json_setting(PANEL_POST_LOG_KEY, [])
+    ok_n, errs = 0, []
+    for title, target in targets:
+        res = _send_to(target, text, photo, btn_text, btn_url)
+        if res.get("ok"):
+            ok_n += 1
+            log.append({"ts": datetime.now(timezone.utc).isoformat(timespec="seconds"), "title": title, "target": target,
+                        "message_id": (res.get("result") or {}).get("message_id"),
+                        "kind": "photo" if photo else "text", "preview": (text or "[عکس]")[:80]})
+        else:
+            errs.append(f"{title}: {str(res.get('description') or 'خطا')[:120]}")
+    set_setting(PANEL_POST_LOG_KEY, json.dumps(log[-40:], ensure_ascii=False))
+    if ok_n:
+        flash(f"پست در {ok_n} کانال ارسال شد.")
+    for e in errs[:6]:
+        flash("⚠️ ارسال نشد — " + e)
+    return back
+
+
+@app.route("/channels/log/<int:idx>/delete", methods=["POST"])
+@login_required
+def channel_log_delete(idx):
+    log = _load_json_setting(PANEL_POST_LOG_KEY, [])
+    if not (0 <= idx < len(log)):
+        flash("⚠️ مورد پیدا نشد.")
+        return redirect(url_for("channels_page"))
+    e = log[idx]
+    res = bot_call("deleteMessage", {"chat_id": e.get("target"), "message_id": e.get("message_id")})
+    if res.get("ok"):
+        log.pop(idx)
+        set_setting(PANEL_POST_LOG_KEY, json.dumps(log, ensure_ascii=False))
+        flash("پیام از کانال حذف شد.")
+    else:
+        flash("⚠️ حذف نشد: " + str(res.get("description") or "خطا")[:150])
+    return redirect(url_for("channels_page"))
+
+
+@app.route("/channels/gate/add", methods=["POST"])
+@login_required
+def gate_add():
+    t = norm_target(request.form.get("link"))
+    if not t or isinstance(t, int):
+        flash("⚠️ فقط لینک/یوزرنیم عمومی کانال مجازه.")
+        return redirect(url_for("channels_page"))
+    link = "https://splus.ir/" + t[1:]
+    links = gate_links()
+    if any(norm_target(x) == t for x in links):
+        flash("⚠️ این کانال از قبل تو لیسته.")
+    else:
+        set_setting("gate_channels", json.dumps(links + [link], ensure_ascii=False))
+        flash("به لیست عضویت اجباری اضافه شد؛ ربات رو ری‌استارت کنید.")
+    return redirect(url_for("channels_page"))
+
+
+@app.route("/channels/gate/<h>/delete", methods=["POST"])
+@login_required
+def gate_delete(h):
+    links = gate_links()
+    new = [x for x in links if hashlib.md5(x.encode()).hexdigest()[:8] != h]
+    set_setting("gate_channels", json.dumps(new, ensure_ascii=False))
+    flash("از عضویت اجباری حذف شد؛ ربات رو ری‌استارت کنید.")
+    return redirect(url_for("channels_page"))
+
+
+# ---------- مدیریت کانفیگ‌های یک کاربر ----------
+
+PROTO_TO_TYPE = {"xray": "config", "wireguard": "wireguard", "both": "both", "openvpn": "openvpn", "dns": "dns"}
+
+
+def cfg_call(method, suffix, config_id, body=None):
+    if not CONFIG_KEY:
+        return {"success": False, "error": "CONFIG_KEY تو Environment پنل تنظیم نشده"}
+    try:
+        res = SESSION.request(method, CONFIG_API + "/" + str(config_id) + suffix,
+                              headers={"Authorization": "Bearer " + CONFIG_KEY}, json=body, timeout=20)
+        try:
+            data = res.json()
+        except Exception:
+            data = {}
+        if res.status_code in (200, 201, 204):
+            return {"success": True, "data": data if isinstance(data, dict) else {}}
+        return {"success": False, "error": (res.text or str(res.status_code))[:200]}
+    except Exception as e:
+        return {"success": False, "error": str(e)[:200]}
+
+
+def cfg_usage_gb(config_id):
+    if not config_id:
+        return None
+    r = cfg_call("GET", "", config_id)
+    if not r["success"]:
+        return None
+    d = r["data"]
+    if isinstance(d.get("configs"), list) and d["configs"]:
+        d = d["configs"][0]
+    try:
+        return float(d["usedGb"]) if d.get("usedGb") is not None else None
+    except (TypeError, ValueError):
+        return None
+
+
+@with_db_retry
+def db_run(sql, params=()):
+    conn = get_conn()
+    c = conn.cursor()
+    c.execute(sql, params)
+    conn.commit()
+    rid = c.lastrowid
+    conn.close()
+    return rid
+
+
+@with_db_retry
+def db_rows(sql, params=()):
+    conn = get_conn()
+    c = conn.cursor()
+    c.execute(sql, params)
+    rows = c.fetchall()
+    conn.close()
+    return rows
+
+
+_CFG_COLS = "id, sub_url, config_id, gb, label, days, price, type, status, created_at, expires_at"
+
+
+def get_cfg_row(user_id, rid):
+    rows = db_rows(f"SELECT {_CFG_COLS} FROM user_configs WHERE user_id=? AND id=?", (user_id, rid))
+    return rows[0] if rows else None
+
+
+def _notify(user_id, text):
+    return send_telegram_message(user_id, text)
+
+
+@app.route("/users/<int:user_id>/configs")
+@login_required
+def user_configs_admin(user_id):
+    u = get_user(user_id)
+    if not u:
+        flash("⚠️ کاربر پیدا نشد.")
+        return redirect(url_for("users"))
+    rows = db_rows(f"SELECT {_CFG_COLS} FROM user_configs WHERE user_id=? ORDER BY id DESC LIMIT 60", (user_id,))
+    with ThreadPoolExecutor(max_workers=8) as ex:
+        usage = list(ex.map(lambda r: cfg_usage_gb(r[2]), rows)) if (rows and CONFIG_KEY) else [None] * len(rows)
+    cards = ""
+    for r, used in zip(rows, usage):
+        rid, sub_url, config_id, gb, label, days, price, ctype, status, created_at, expires_at = r
+        exp = parse_ts(expires_at)
+        left = max(0, (exp - datetime.now(timezone.utc)).days) if exp else 0
+        paused = (status or "active") == "paused"
+        state = "متوقف" if paused else ("منقضی" if left <= 0 else "فعال")
+        used_txt = f"{used:.2f} گیگ" if used is not None else "نامشخص"
+        base = url_for("user_config_action", user_id=user_id, rid=rid, action="x")[:-1]
+        cards += f"""
+        <div class="card">
+          <h3>{esc(label)} <span class="badge {'off' if paused or left <= 0 else 'on'}">{state}</span></h3>
+          <div class="kv">
+            <div><span>نوع</span><b>{esc(ctype or '-')}</b></div>
+            <div><span>حجم کل</span><b class="num">{float(gb or 0):g} گیگ</b></div>
+            <div><span>مصرف</span><b class="num">{used_txt}</b></div>
+            <div><span>روز باقی‌مانده</span><b class="num">{left}</b></div>
+            <div><span>پرداختی</span><b class="num">{int(price or 0):,}</b></div>
+            <div><span>ساخت</span><b>{fmt_dt(created_at, with_time=False)}</b></div>
+            <div style="grid-column:1/-1;"><span>لینک</span>{copy_widget(sub_url or '')}</div>
+          </div>
+          <div class="grid cols-2" style="margin-top:12px;">
+            <form method="post" action="{base}extend" class="flex">
+              <input type="text" name="gb" inputmode="decimal" placeholder="گیگ +" style="width:90px;">
+              <input type="number" name="days" min="0" placeholder="روز +" style="width:90px;">
+              <label class="flex" style="margin:0;"><input type="checkbox" name="notify" value="1"> اطلاع به کاربر</label>
+              <button type="submit" class="sm">➕ تمدید</button></form>
+            <form method="post" action="{base}rename" class="flex">
+              <input type="text" name="label" placeholder="نام جدید" style="flex:1;min-width:120px;" required>
+              <button type="submit" class="secondary sm">✏️ تغییر نام</button></form>
+          </div>
+          <div class="flex" style="margin-top:10px;">
+            <form method="post" action="{base}{'resume' if paused else 'pause'}"><button type="submit" class="secondary sm">{'▶️ ازسرگیری' if paused else '⏸ توقف'}</button></form>
+            <form method="post" action="{base}rotate" onsubmit="return confirm('لینک عوض بشه؟ لینک قبلی از کار می‌افته.');">
+              <input type="hidden" name="notify" value="1"><button type="submit" class="secondary sm">🔄 تغییر لینک + ارسال به کاربر</button></form>
+            <form method="post" action="{base}delete" class="flex" onsubmit="return confirm('کانفیگ حذف بشه؟ غیرقابل بازگشته.');">
+              <input type="number" name="refund" min="0" placeholder="بازگشت وجه (تومان)" style="width:150px;">
+              <label class="flex" style="margin:0;"><input type="checkbox" name="force" value="1"> حتی با خطای پنل از دیتابیس پاک شه</label>
+              <button type="submit" class="danger sm">🗑 حذف</button></form>
+          </div>
+        </div>"""
+    if not cards:
+        cards = '<div class="card"><p class="empty-note">این کاربر کانفیگی ندارد.</p></div>'
+    warn = "" if CONFIG_KEY else '<div class="alert">⚠️ متغیر CONFIG_KEY تو Environment پنل ست نشده؛ عملیات روی پنل اصلی (تمدید، توقف، حذف، ساخت) کار نمی‌کنه.</div>'
+    content = f"""
+    <p><a class="btn secondary sm" href="{url_for('user_detail', user_id=user_id)}">‹ بازگشت به کاربر</a></p>
+    {warn}
+    <div class="card"><h3>🎁 ساخت کانفیگ هدیه / دستی برای {user_display(u[2], u[1], user_id)}</h3>
+      <form method="post" action="{url_for('user_config_create', user_id=user_id)}" class="flex">
+        <input type="text" name="gb" inputmode="decimal" placeholder="حجم (گیگ)" style="width:110px;" required>
+        <input type="number" name="days" min="1" placeholder="روز" style="width:90px;" required>
+        <input type="text" name="label" placeholder="نام (اختیاری)" style="width:150px;">
+        <select name="proto" style="width:150px;">
+          <option value="both">هر دو</option><option value="xray">فقط کانفیگ</option><option value="wireguard">وایرگارد</option>
+          <option value="openvpn">OpenVPN</option><option value="dns">DNS بازی</option></select>
+        <label class="flex" style="margin:0;"><input type="checkbox" name="notify" value="1" checked> لینک برای کاربر ارسال بشه</label>
+        <button type="submit">ساخت</button></form>
+      <small class="muted">این عملیات از موجودی کاربر کم نمی‌کنه و قیمتش صفر ثبت می‌شه.</small></div>
+    {cards}
+    <p><small class="muted">تغییرات این صفحه مستقیم روی پنل اصلی و دیتابیس ربات اعمال می‌شه و از کیف پول کاربر چیزی کم نمی‌شه.</small></p>"""
+    return render_page(f"کانفیگ‌های کاربر {user_id}", "users", content)
+
+
+@app.route("/users/<int:user_id>/configs/create", methods=["POST"])
+@login_required
+def user_config_create(user_id):
+    back = redirect(url_for("user_configs_admin", user_id=user_id))
+    gb, days = parse_gb_delta(request.form.get("gb")), to_int(request.form.get("days"))
+    proto = request.form.get("proto", "both")
+    if gb is None or gb <= 0 or gb > 100000 or not days or not (1 <= days <= 3650) or proto not in PROTO_TO_TYPE:
+        flash("⚠️ حجم، روز یا نوع نامعتبره.")
+        return back
+    if not CONFIG_KEY:
+        flash("⚠️ CONFIG_KEY تنظیم نشده.")
+        return back
+    label = clean = re.sub(r"[<>&]", "", request.form.get("label", "")).strip()[:40] or "GIFT-" + secrets.token_hex(3).upper()
+    try:
+        res = SESSION.post(CONFIG_API, headers={"Authorization": "Bearer " + CONFIG_KEY},
+                           json={"gb": gb, "label": label, "expiryDays": days, "proto": proto}, timeout=25)
+        data = res.json() if res.status_code in (200, 201) else {}
+    except Exception as e:
+        flash("⚠️ ساخت ناموفق: " + str(e)[:120])
+        return back
+    sub_url = data.get("subUrl")
+    if not sub_url:
+        flash(f"⚠️ پنل کانفیگ نساخت (کد {res.status_code}): {res.text[:120]}")
+        return back
+    cid = data.get("id") or data.get("uuid") or data.get("username")
+    now = datetime.now()
+    db_run("INSERT INTO user_configs (user_id, sub_url, config_id, gb, label, days, price, type, status, created_at, expires_at) "
+           "VALUES (?, ?, ?, ?, ?, ?, 0, ?, 'active', ?, ?)",
+           (user_id, sub_url, cid, gb, label, days, PROTO_TO_TYPE[proto], now.isoformat(), (now + timedelta(days=days)).isoformat()))
+    cfg_call("PUT", "/note", cid, {"note": "ساخته‌شده از پنل وب (هدیه/دستی)"})
+    flash(f"کانفیگ «{label}» ساخته شد.")
+    if request.form.get("notify") == "1":
+        sent = _notify(user_id, f"🎁 <b>یک کانفیگ برای شما ساخته شد</b>\n📶 {gb:g} گیگ — ⏳ {days} روز\n🔗 <code>{esc(sub_url)}</code>")
+        flash("لینک برای کاربر ارسال شد." if sent else "⚠️ ارسال پیام به کاربر ناموفق بود.")
+    return back
+
+
+@app.route("/users/<int:user_id>/configs/<int:rid>/<action>", methods=["POST"])
+@login_required
+def user_config_action(user_id, rid, action):
+    back = redirect(url_for("user_configs_admin", user_id=user_id))
+    row = get_cfg_row(user_id, rid)
+    if not row:
+        flash("⚠️ کانفیگ پیدا نشد.")
+        return back
+    _id, sub_url, config_id, gb, label, days, price, ctype, status, created_at, expires_at = row
+    notify = request.form.get("notify") == "1"
+
+    if action == "extend":
+        egb = parse_gb_delta(request.form.get("gb")) or 0
+        edays = to_int(request.form.get("days"), 0) or 0
+        if egb < 0 or edays < 0 or (egb == 0 and edays == 0) or egb > 100000 or edays > 3650:
+            flash("⚠️ حجم/روز نامعتبره (هر دو نمی‌تونن صفر باشن).")
+            return back
+        r = cfg_call("POST", "/extend", config_id, {"gb": egb, "days": edays})
+        if not r["success"]:
+            flash("⚠️ تمدید روی پنل ناموفق: " + r["error"])
+            return back
+        base = parse_ts(expires_at)
+        base = base.replace(tzinfo=None) if base else datetime.now()
+        db_run("UPDATE user_configs SET gb=?, days=?, expires_at=? WHERE id=?",
+               ((gb or 0) + egb, (days or 0) + edays, (base + timedelta(days=edays)).isoformat(), rid))
+        flash(f"تمدید شد: +{egb:g} گیگ، +{edays} روز.")
+        if notify:
+            _notify(user_id, f"✅ کانفیگ «{esc(label)}» تمدید شد: +{egb:g} گیگ، +{edays} روز.")
+    elif action == "rename":
+        new = re.sub(r"[<>&]", "", request.form.get("label", "")).strip()[:40]
+        if not new:
+            flash("⚠️ نام خالیه.")
+            return back
+        r = cfg_call("PUT", "/label", config_id, {"label": new})
+        if not r["success"]:
+            flash("⚠️ تغییر نام روی پنل ناموفق: " + r["error"])
+            return back
+        db_run("UPDATE user_configs SET label=? WHERE id=?", (new, rid))
+        flash("نام تغییر کرد (برای اعمال تو لینک، «تغییر لینک» رو هم بزنید).")
+    elif action in ("pause", "resume"):
+        r = cfg_call("POST", "/" + action, config_id)
+        if not r["success"]:
+            flash("⚠️ عملیات روی پنل ناموفق: " + r["error"])
+            return back
+        db_run("UPDATE user_configs SET status=? WHERE id=?", ("paused" if action == "pause" else "active", rid))
+        flash("کانفیگ متوقف شد." if action == "pause" else "کانفیگ ازسرگرفته شد.")
+    elif action == "rotate":
+        r = cfg_call("POST", "/rotate-link", config_id)
+        if not r["success"]:
+            flash("⚠️ تغییر لینک ناموفق: " + r["error"])
+            return back
+        d = r["data"]
+        new_url = d.get("sub_url") or d.get("subUrl") or d.get("url")
+        if new_url:
+            db_run("UPDATE user_configs SET sub_url=? WHERE id=?", (new_url, rid))
+            flash("لینک تغییر کرد.")
+            if notify:
+                _notify(user_id, f"🔄 لینک کانفیگ «{esc(label)}» تغییر کرد:\n<code>{esc(new_url)}</code>")
+        else:
+            flash("لینک تغییر کرد ولی پنل لینک جدید رو برنگردوند.")
+    elif action == "delete":
+        r = cfg_call("DELETE", "", config_id)
+        if not r["success"] and request.form.get("force") != "1":
+            flash("⚠️ حذف روی پنل ناموفق: " + r["error"] + " (برای حذف فقط از دیتابیس، گزینه‌ی اجباری رو تیک بزنید)")
+            return back
+        db_run("DELETE FROM user_configs WHERE id=?", (rid,))
+        refund = to_int(request.form.get("refund"), 0) or 0
+        if refund > 0:
+            update_wallet(user_id, refund)
+        flash("کانفیگ حذف شد" + (f" و {refund:,} تومان به کیف پول برگشت." if refund > 0 else "."))
+        if not r["success"]:
+            flash("⚠️ توجه: روی پنل اصلی حذف نشد: " + r["error"])
+    else:
+        abort(404)
+    return back
+
+
+# ---------- سفارش‌ها ----------
+
+@app.route("/orders")
+@login_required
+def orders_page():
+    q = to_int(request.args.get("q"))
+    offset = max(0, to_int(request.args.get("offset"), 0))
+    where, params = ("WHERE user_id=?", [q]) if q else ("", [])
+    rows = db_rows(f"SELECT id, user_id, label, gb, days, price, type, created_at FROM orders {where} "
+                   "ORDER BY id DESC LIMIT 30 OFFSET ?", params + [offset])
+    tot = (db_rows(f"SELECT COUNT(*), COALESCE(SUM(price),0), COALESCE(SUM(gb),0) FROM orders {where}", params) or [(0, 0, 0)])[0]
+    body = "".join(
+        f'<tr><td data-label="#">{r[0]}</td><td data-label="کاربر"><a class="num" href="{url_for("user_detail", user_id=r[1])}">{r[1]}</a></td>'
+        f'<td data-label="نام">{esc(r[2])}</td><td data-label="نوع">{esc(r[6])}</td>'
+        f'<td data-label="حجم" class="num">{float(r[3] or 0):g}</td><td data-label="روز" class="num">{r[4]}</td>'
+        f'<td data-label="مبلغ" class="num">{int(r[5] or 0):,}</td><td data-label="زمان"><small class="muted">{fmt_dt(r[7])}</small></td></tr>'
+        for r in rows)
+    pager = ""
+    if offset > 0:
+        pager += f'<a class="btn secondary" href="{url_for("orders_page", q=q or "", offset=max(0, offset - 30))}">‹ قبل</a>'
+    if offset + 30 < tot[0]:
+        pager += f'<a class="btn secondary" href="{url_for("orders_page", q=q or "", offset=offset + 30)}">بعد ›</a>'
+    content = f"""
+    <div class="stats">
+      <div class="stat"><span>تعداد سفارش</span><b class="num">{tot[0]:,}</b></div>
+      <div class="stat"><span>مجموع فروش</span><b class="num">{int(tot[1]):,}</b><small>تومان</small></div>
+      <div class="stat"><span>مجموع حجم</span><b class="num">{float(tot[2]):,.1f}</b><small>گیگ</small></div>
+    </div>
+    <div class="card"><form method="get" class="flex">
+      <input type="number" name="q" value="{q or ''}" placeholder="فیلتر با آیدی عددی کاربر" style="flex:1;min-width:200px;">
+      <button type="submit">فیلتر</button></form></div>
+    <table class="rt"><thead><tr><th>#</th><th>کاربر</th><th>نام</th><th>نوع</th><th>حجم</th><th>روز</th><th>مبلغ</th><th>زمان</th></tr></thead>
+      <tbody>{body if body else '<tr><td colspan="8">سفارشی نیست.</td></tr>'}</tbody></table>
+    <div class="pager">{pager}</div>"""
+    return render_page("سفارش‌ها", "orders", content)
+
+
+# ---------- بکاپ و خروجی ----------
+
+EXPORT_TABLES = {
+    "users": "user_id, username, first_name, wallet, joined_at, last_active, lang",
+    "orders": "id, user_id, label, gb, days, price, type, config_id, created_at",
+    "user_configs": "id, user_id, sub_url, config_id, gb, label, days, price, type, status, created_at, expires_at",
+    "topup_requests": "id, user_id, amount, status, created_at, method, coin_symbol, coin_qty, tx_hash",
+    "tickets": "id, user_id, message, status, admin_reply, created_at",
+    "discount_codes": "code, percent, max_uses, used_count, active, created_at",
+    "referral_rewards": "invitee_id, inviter_id, inviter_amount, invitee_amount, created_at",
+}
+TABLE_TITLES = {"users": "کاربران", "orders": "سفارش‌ها", "user_configs": "کانفیگ‌ها", "topup_requests": "شارژها",
+                "tickets": "تیکت‌ها", "discount_codes": "کدهای تخفیف", "referral_rewards": "پاداش‌های دعوت"}
+
+
+def _csv_cell(v):
+    s = "" if v is None else str(v)
+    return "'" + s if s[:1] in ("=", "+", "-", "@") else s
+
+
+@app.route("/backup")
+@login_required
+def backup_page():
+    links = "".join(f'<a class="btn secondary" href="{url_for("export_csv", name=n)}">⬇️ {TABLE_TITLES[n]} (CSV)</a> ' for n in EXPORT_TABLES)
+    content = f"""
+    <div class="card"><h3>⬇️ خروجی جدول‌ها</h3><div class="flex">{links}</div></div>
+    <div class="card"><h3>💾 بکاپ کامل</h3>
+      <div class="flex"><a class="btn" href="{url_for('export_all')}">همه‌ی جدول‌ها (JSON)</a>
+        <a class="btn secondary" href="{url_for('export_settings')}">تنظیمات و متن‌ها (JSON)</a></div>
+      <small class="muted">فایل‌ها شامل اطلاعات کاربران‌اند؛ جای امن نگه دارید. جدول فروشنده‌ها و رمزها عمداً تو خروجی نیست.</small></div>
+    <div class="card"><h3>♻️ بازگردانی تنظیمات</h3>
+      <form method="post" action="{url_for('restore_settings')}" enctype="multipart/form-data" onsubmit="return confirm('تنظیمات فعلی با فایل جایگزین/ادغام بشه؟');">
+        <input type="file" name="file" accept=".json,application/json" required>
+        <div style="margin-top:10px;"><button type="submit" class="danger">بازگردانی از فایل</button></div></form>
+      <small class="muted">فقط فایل «تنظیمات» که از همین صفحه گرفتید. کلیدهای موجود بازنویسی می‌شن.</small></div>"""
+    return render_page("بکاپ و خروجی", "backup", content)
+
+
+def _dl(name, data, mime):
+    return Response(data, mimetype=mime, headers={"Content-Disposition": f'attachment; filename="{name}"'})
+
+
+@app.route("/export/<name>.csv")
+@login_required
+def export_csv(name):
+    if name not in EXPORT_TABLES:
+        abort(404)
+    try:
+        rows = db_rows(f"SELECT {EXPORT_TABLES[name]} FROM {name}")
+    except Exception as e:
+        flash("⚠️ خروجی ناموفق: " + str(e)[:120])
+        return redirect(url_for("backup_page"))
+    buf = io.StringIO()
+    w = csv.writer(buf)
+    w.writerow([c.strip() for c in EXPORT_TABLES[name].split(",")])
+    for r in rows:
+        w.writerow([_csv_cell(v) for v in r])
+    return _dl(f"{name}.csv", "\ufeff" + buf.getvalue(), "text/csv; charset=utf-8")
+
+
+@app.route("/export/all.json")
+@login_required
+def export_all():
+    out = {"exported_at": datetime.now(timezone.utc).isoformat(timespec="seconds"), "tables": {}}
+    for n, cols in EXPORT_TABLES.items():
+        try:
+            out["tables"][n] = {"columns": [c.strip() for c in cols.split(",")],
+                                "rows": [list(r) for r in db_rows(f"SELECT {cols} FROM {n}")]}
+        except Exception as e:
+            out["tables"][n] = {"error": str(e)[:120]}
+    return _dl("skytunnel-backup.json", json.dumps(out, ensure_ascii=False), "application/json")
+
+
+@app.route("/export/settings.json")
+@login_required
+def export_settings():
+    return _dl("skytunnel-settings.json", json.dumps(get_all_settings(), ensure_ascii=False, indent=1), "application/json")
+
+
+@app.route("/backup/restore", methods=["POST"])
+@login_required
+def restore_settings():
+    f = request.files.get("file")
+    try:
+        data = json.loads(f.read().decode("utf-8")) if f else None
+    except Exception:
+        data = None
+    if (not isinstance(data, dict) or not data or len(data) > 3000
+            or not all(isinstance(k, str) and isinstance(v, str) and len(k) <= 100 and len(v) <= 20000 for k, v in data.items())):
+        flash("⚠️ فایل معتبر نیست (باید خروجی «تنظیمات» همین پنل باشه).")
+        return redirect(url_for("backup_page"))
+    for k, v in data.items():
+        set_setting(k, v)
+    flash(f"{len(data)} تنظیم بازگردانی شد.")
+    return redirect(url_for("backup_page"))
 
 
 if __name__ == "__main__":
