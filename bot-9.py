@@ -5472,6 +5472,58 @@ sync_text_registry()
 network_diagnostic()
 delete_webhook()
 set_bot_commands()
+
+def _keepalive_url(port):
+    """آدرس عمومی سرویس برای پینگ. Render خودش RENDER_EXTERNAL_URL رو ست می‌کنه (نیازی به تنظیم دستی نیست)."""
+    for cand in (os.getenv("KEEPALIVE_URL", ""), os.getenv("RENDER_EXTERNAL_URL", "")):
+        cand = (cand or "").strip().rstrip("/")
+        if cand:
+            return cand + "/healthz"
+    return "http://127.0.0.1:%d/healthz" % port
+
+
+def start_keepalive(port, interval=300):
+    """هر ۵ دقیقه به آدرس عمومیِ خودِ سرویس درخواست می‌زنه تا Render (پلن رایگان) بعد از ۱۵ دقیقه بی‌ترافیکی سرویس رو نخوابونه."""
+    def _loop():
+        time.sleep(60)
+        while True:
+            try:
+                requests.get(_keepalive_url(port), timeout=20)
+            except Exception as e:
+                print("⚠️ keepalive:", e)
+            time.sleep(interval)
+    threading.Thread(target=_loop, daemon=True).start()
+
+
+def start_health_server(port):
+    """سرور HTTP مینیمال (فقط «ok») تا Render سرویس رو وب‌سرویس زنده بدونه و پینگ جواب بگیره."""
+    from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
+
+    class _H(BaseHTTPRequestHandler):
+        def do_GET(self):
+            self.send_response(200)
+            self.send_header("Content-Type", "text/plain")
+            self.end_headers()
+            self.wfile.write(b"ok")
+
+        do_HEAD = do_GET
+
+        def log_message(self, *a):
+            pass
+
+    try:
+        srv = ThreadingHTTPServer(("0.0.0.0", port), _H)
+    except OSError as e:
+        print("⚠️ health server بالا نیومد (پورت اشغاله):", e)
+        return False
+    threading.Thread(target=srv.serve_forever, daemon=True).start()
+    return True
+
+
+_HEALTH_PORT = int(os.getenv("PORT", "8080"))
+# وقتی بات و پنل تو یه سرویس با start.py اجرا می‌شن، پورت مال پنله و start.py این رو ۱ می‌ذاره
+if os.getenv("DISABLE_HEALTH_SERVER") != "1" and start_health_server(_HEALTH_PORT):
+    start_keepalive(_HEALTH_PORT)
 threading.Thread(target=commands_watcher, daemon=True).start()
 threading.Thread(target=registry_watcher, daemon=True).start()
 threading.Thread(target=crypto_deposit_watcher, daemon=True).start()

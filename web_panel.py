@@ -4470,10 +4470,39 @@ def restore_settings():
     return redirect(url_for("backup_page"))
 
 
+
+def _keepalive_url(port):
+    """آدرس عمومی سرویس برای پینگ. Render خودش RENDER_EXTERNAL_URL رو ست می‌کنه (نیازی به تنظیم دستی نیست)."""
+    for cand in (os.getenv("KEEPALIVE_URL", ""), os.getenv("RENDER_EXTERNAL_URL", "")):
+        cand = (cand or "").strip().rstrip("/")
+        if cand:
+            return cand + "/healthz"
+    return "http://127.0.0.1:%d/healthz" % port
+
+
+def start_keepalive(port, interval=300):
+    """هر ۵ دقیقه به آدرس عمومیِ خودِ سرویس درخواست می‌زنه تا Render (پلن رایگان) بعد از ۱۵ دقیقه بی‌ترافیکی سرویس رو نخوابونه."""
+    def _loop():
+        time.sleep(60)
+        while True:
+            try:
+                requests.get(_keepalive_url(port), timeout=20)
+            except Exception as e:
+                print("⚠️ keepalive:", e)
+            time.sleep(interval)
+    threading.Thread(target=_loop, daemon=True).start()
+
+
+@app.route("/healthz")
+def healthz():
+    return "ok", 200
+
+
 if __name__ == "__main__":
     try:
         ensure_schema()
     except Exception as e:
         print("⚠️ ensure_schema:", e)
     port = int(os.getenv("PORT", "8080"))
+    start_keepalive(port)
     app.run(host="0.0.0.0", port=port)
