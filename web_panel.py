@@ -50,6 +50,7 @@ DEFAULT_CARD_NUMBER = os.getenv("CARD_NUMBER", "6219861957006504")
 DEFAULT_CARD_OWNER = os.getenv("CARD_OWNER", "کمالزاده")
 DEFAULT_MIN_TOPUP = os.getenv("MIN_TOPUP", "10000")
 
+DEFAULT_DONITO_PAGE_URL = os.getenv("DONITO_PAGE_URL", "https://donito.me/skytunnel")
 DEFAULT_RESELLER_PANEL_URL = os.getenv("RESELLER_PANEL_URL", "https://web-production-bfd2e.up.railway.app")
 
 # هر آیتم: (کلید settings، عنوان، مقدار پیش‌فرض، نوع). نوع: number | float | text | url | tiers
@@ -65,6 +66,10 @@ CONFIG_GROUPS = [
         ("card_owner", "نام صاحب کارت", DEFAULT_CARD_OWNER, "text"),
         ("min_topup", "حداقل مبلغ شارژ کارت‌به‌کارت — ریالی (تومان)", DEFAULT_MIN_TOPUP, "number"),
         ("min_topup_crypto", "حداقل مبلغ شارژ با رمزارز (تومان) — روی معادل تومانیِ مقداری که کاربر اعلام می‌کنه چک می‌شه", DEFAULT_MIN_TOPUP, "number"),
+        ("min_topup_donito", "حداقل مبلغ شارژ ریالی خودکار — دونیتو (تومان)", DEFAULT_MIN_TOPUP, "number"),
+        ("donito_page_url", "آدرس صفحه‌ی دونیت (لینکی که ربات به کاربر می‌ده)", DEFAULT_DONITO_PAGE_URL, "url"),
+        ("donito_window_min", "مدت اعتبار هر درخواست شارژ دونیتو (دقیقه) — بعد از این مدت پرداخت دیگه تطبیق داده نمی‌شه", "180", "number"),
+        ("donito_poll_sec", "هر چند ثانیه یک‌بار دونیت‌ها چک بشن (حداقل ۱۰)", "20", "number"),
         ("crypto_auto_confirm", "تأیید خودکار واریز رمزارز||روشن باشه: کاربر مقدار واریزی (مثلاً 0.2 TON) رو تو بات می‌نویسه؛ اگه همون مقدار (با اختلاف خیلی کم) تو حساب نوبیتکس خودت پیدا بشه، یا هشی که کاربر می‌فرسته با یه واریز بخوره و کوین/مقدارش درست باشه، شارژ خودکار تأیید می‌شه. اگه چند کاربر مقدار هم‌اندازه اعلام کنن، فقط با هش یا تأیید دستی ادمین. بات هیچ‌وقت خودش رد نمی‌کنه؛ رد کردن فقط با ادمینه", "0", "toggle"),
         ("crypto_max_shortfall_toman", "حداکثر کسریِ مجاز واریز رمزارز نسبت به مقدار مورد انتظار (تومان). مثلاً 6000 یعنی تا ۶ هزار تومان کمتر هم خودکار تأیید می‌شه", "6000", "number"),
         ("topup_multiplier", "ضریب واریزی (مثلاً 2 یعنی دو برابر مبلغ واریزی به کیف پول اضافه شود)", "1", "float"),
@@ -1654,7 +1659,7 @@ BASE_HTML = """<!DOCTYPE html>
   .badge.on, .badge.answered, .badge.approved { background: var(--ok-dim); color: var(--ok); }
   .badge.off, .badge.rejected { background: var(--danger-dim); color: var(--danger); }
   .badge.open, .badge.pending { background: var(--warn-dim); color: var(--warn); }
-  .badge.closed { background: var(--surface-2); color: var(--muted); }
+  .badge.closed, .badge.expired { background: var(--surface-2); color: var(--muted); }
   button.tgl { min-width: 112px; padding: 6px 14px; font-size: 13px; border-radius: 999px; box-shadow: none; white-space: nowrap; }
   button.tgl.on { background: var(--ok-dim); color: var(--ok); border-color: var(--ok); }
   button.tgl.off { background: var(--danger-dim); color: var(--danger); border-color: transparent; }
@@ -2310,8 +2315,12 @@ def topups_page():
     rows_html = ""
     for rid, user_id, amount, status, created_at, method, coin_symbol, coin_qty, tx_hash, matched_tx in rows:
         is_crypto = (method == "crypto")
-        kind = "🪙 رمزارز" if is_crypto else "💳 کارت‌به‌کارت"
+        is_donito = (method == "donito")
+        kind = "🪙 رمزارز" if is_crypto else ("⚡️ دونیتو (خودکار)" if is_donito else "💳 کارت‌به‌کارت")
         detail = ""
+        if is_donito:
+            detail = ("<br><small class=\"muted\">✔️ پرداخت در دونیتو پیدا شد</small>" if matched_tx
+                      else "<br><small class=\"muted\">منتظر پرداخت کاربر (مبلغ یکتا)</small>")
         if is_crypto:
             try:
                 qty_txt = f"{float(coin_qty):g}" if coin_qty else ""
@@ -2340,7 +2349,7 @@ def topups_page():
           <td data-label="کاربر"><a class="num" href="{url_for('user_detail', user_id=user_id)}">{user_id}</a></td>
           <td data-label="نوع">{kind}{detail}</td>
           <td data-label="مبلغ" class="num">{int(amount or 0):,} تومان</td>
-          <td data-label="وضعیت"><span class="badge {esc(status)}">{esc({'pending': 'در انتظار', 'approved': 'تایید شده', 'rejected': 'رد شده'}.get(status, status))}</span></td>
+          <td data-label="وضعیت"><span class="badge {esc(status)}">{esc({'pending': 'در انتظار', 'approved': 'تایید شده', 'rejected': 'رد شده', 'expired': 'منقضی شده'}.get(status, status))}</span></td>
           <td data-label="تاریخ"><small class="muted">{fmt_dt(created_at)}</small></td>
           <td data-label="عملیات">{actions}</td>
         </tr>"""
@@ -2350,7 +2359,9 @@ def topups_page():
       <tbody>{rows_html if rows_html else '<tr><td colspan="7">درخواستی ثبت نشده.</td></tr>'}</tbody>
     </table>
     <p><small class="muted">تایید/رد از همین‌جا با دکمه‌ی داخل ربات یکی‌ه و پیام نتیجه برای کاربر هم فرستاده می‌شه. هر درخواست فقط یک‌بار قابل بررسیه (اگه تو ربات تایید شده باشه، اینجا دوباره شارژ نمی‌شه).
-    عکس رسید کارت‌به‌کارت فقط داخل پیام ادمین تو ربات هست؛ قبل از تایید، رسید رو اون‌جا چک کن.</small></p>"""
+    عکس رسید کارت‌به‌کارت فقط داخل پیام ادمین تو ربات هست؛ قبل از تایید، رسید رو اون‌جا چک کن.
+    شارژهای «دونیتو» خودکار تایید می‌شن (بدون رسید)؛ فقط اگه کاربر مبلغ رو اشتباه پرداخت کرد یا مهلت تموم شد، بعد از چک‌کردن داشبورد دونیتو دستی تایید کن
+    (درخواست منقضی‌شده دیگه قابل تایید نیست).</small></p>"""
     return render_page("شارژهای کیف پول", "topups", content)
 
 
@@ -2483,6 +2494,21 @@ def crypto_page():
       </div>
     </div>"""
 
+    donito_on = all_settings.get("donito_enabled", "1") == "1"
+    donito_master = f"""
+    <div class="card">
+      <div class="switch-row" style="padding-top:0;">
+        <div><b>⚡️ شارژ ریالی خودکار (دونیتو)</b><br>
+          <small class="muted">کاربر مبلغ رو می‌نویسه، ربات یه مبلغ یکتا (مثلاً ۱۰۰,۰۳۷) بهش می‌ده و کاربر همون مبلغ دقیق رو تو صفحه‌ی دونیتوی تو می‌پردازه؛
+          ربات با تطبیق مبلغ، شارژ رو خودکار تأیید می‌کنه (بدون رسید و بدون تأیید ادمین). آدرس صفحه، حداقل مبلغ و مدت اعتبار از صفحه‌ی «تنظیمات ربات» عوض می‌شه.
+          توکن دونیتو داخل خود ربات (متغیر DONITO_TOKEN یا کد) تنظیم می‌شه؛ با دستور /donitocheck تو ربات اتصال رو تست کن.
+          صفحه‌ی فعلی: <span dir="ltr">{esc(all_settings.get('donito_page_url') or DEFAULT_DONITO_PAGE_URL)}</span></small></div>
+        <form method="post" action="{url_for('donito_master')}">
+          {tgl_btn(donito_on)}
+        </form>
+      </div>
+    </div>"""
+
     master = f"""
     <div class="card">
       <div class="switch-row" style="padding-top:0;">
@@ -2548,6 +2574,7 @@ def crypto_page():
     </div>"""
 
     content = f"""
+    {donito_master}
     {card_master}
     {master}
     {note}
@@ -2566,6 +2593,15 @@ def card_topup_master():
     on = get_setting("card_topup_enabled", "1") == "1"
     set_setting("card_topup_enabled", "0" if on else "1")
     flash("شارژ کارت‌به‌کارت خاموش شد." if on else "شارژ کارت‌به‌کارت روشن شد.")
+    return redirect(url_for("crypto_page"))
+
+
+@app.route("/donito/master", methods=["POST"])
+@login_required
+def donito_master():
+    on = get_setting("donito_enabled", "1") == "1"
+    set_setting("donito_enabled", "0" if on else "1")
+    flash("شارژ ریالی خودکار (دونیتو) خاموش شد." if on else "شارژ ریالی خودکار (دونیتو) روشن شد.")
     return redirect(url_for("crypto_page"))
 
 

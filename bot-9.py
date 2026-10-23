@@ -163,6 +163,11 @@ def get_min_topup_crypto():
 
 
 def get_min_topup_for(method):
+    if method == 'donito':
+        try:
+            return int(get_setting('min_topup_donito', str(get_min_topup())))
+        except Exception:
+            return get_min_topup()
     return get_min_topup_crypto() if method == 'crypto' else get_min_topup()
 
 
@@ -898,6 +903,22 @@ UI_TEXT['fa'].update({
 UI_TEXT['fa'].update({
     'topup_choose_method': '💠 مبلغ شارژ: <b>{amount}</b> تومان\nروش پرداخت رو انتخاب کنید:',
     'btn_topup_card': '💳 کارت به کارت',
+    'btn_topup_donito': '⚡️ پرداخت ریالی (خودکار)',
+    'btn_donito_check': '✅ پرداخت کردم، بررسی کن',
+    'topup_donito_info': (
+        '⚡️ <b>پرداخت ریالی خودکار</b>\n{divider}\n'
+        '💵 مبلغ دقیق پرداخت: <b>{amount}</b> تومان\n\n'
+        '1️⃣ لینک زیر رو باز کنید\n'
+        '2️⃣ دقیقاً همین مبلغ (تا آخرین رقم) رو وارد و پرداخت کنید\n\n'
+        '🔗 {url}\n\n'
+        '⚠️ مبلغ باید دقیقاً همین باشه چون بات پرداخت رو از روی مبلغ تشخیص می‌ده. رسید نفرستید؛ '
+        'بعد از پرداخت ظرف چند ثانیه کیف پولتون خودکار شارژ می‌شه.\n'
+        '⏳ این درخواست {minutes} دقیقه اعتبار داره.'
+    ),
+    'topup_donito_busy': '⚠️ الان نتونستم مبلغ پرداخت اختصاصی بسازم. چند لحظه دیگه دوباره امتحان کنید.',
+    'topup_donito_not_yet': '⏳ هنوز پرداختی با این مبلغ پیدا نشد. اگه همین الان پرداخت کردید چند ثانیه صبر کنید، خودکار شارژ می‌شه.',
+    'topup_donito_expired': '⌛️ مهلت درخواست شارژ تموم شد. اگه پرداخت کردید با پشتیبانی تماس بگیرید؛ وگرنه دوباره شارژ رو شروع کنید.',
+    'admin_auto_approved_donito': '🤖 تأیید خودکار: مبلغ پرداخت با دونیت دونیتو خورد',
     'btn_topup_crypto': '🪙 پرداخت با رمزارز',
     'topup_choose_coin': '🪙 با کدوم رمزارز پرداخت می‌کنید؟',
     'topup_choose_method_first': '💠 شارژ کیف پول\nروش پرداخت رو انتخاب کنید:',
@@ -946,6 +967,21 @@ UI_TEXT['fa'].update({
 UI_TEXT['en'].update({
     'topup_choose_method': '💠 Top-up amount: <b>{amount}</b> Toman\nChoose a payment method:',
     'btn_topup_card': '💳 Card to card',
+    'btn_topup_donito': '⚡️ Pay in Toman (automatic)',
+    'btn_donito_check': '✅ I paid, check now',
+    'topup_donito_info': (
+        '⚡️ <b>Automatic Toman payment</b>\n{divider}\n'
+        '💵 Exact amount to pay: <b>{amount}</b> Toman\n\n'
+        '1️⃣ Open the link below\n'
+        '2️⃣ Pay exactly this amount (down to the last digit)\n\n'
+        '🔗 {url}\n\n'
+        '⚠️ The amount must match exactly because the bot recognizes your payment by its amount. '
+        'No receipt needed; your wallet is topped up automatically within seconds.\n'
+        '⏳ This request is valid for {minutes} minutes.'
+    ),
+    'topup_donito_busy': '⚠️ Could not create a unique payment amount right now. Please try again shortly.',
+    'topup_donito_not_yet': '⏳ No payment with this amount found yet. If you just paid, wait a few seconds; it will be credited automatically.',
+    'topup_donito_expired': '⌛️ Your top-up request expired. If you paid, please contact support; otherwise start a new top-up.',
     'btn_topup_crypto': '🪙 Pay with crypto',
     'topup_choose_coin': '🪙 Which cryptocurrency do you want to pay with?',
     'topup_choose_method_first': '💠 Wallet top-up\nChoose a payment method:',
@@ -2297,7 +2333,8 @@ def approve_topup_request(req_id, auto=False, reason='hash_ok'):
     else:
         send_message(req[1], u(req[1], 'topup_approved', credited=f'{credited:,}'))
     note = u('fa', 'admin_topup_approved', req_id=str(req_id), credited=f'{credited:,}')
-    auto_note = '\n' + u('fa', 'admin_auto_approved_hash' if reason == 'hash_ok' else 'admin_auto_approved_amount')
+    auto_note = '\n' + u('fa', 'admin_auto_approved_donito' if reason == 'donito' else
+                         'admin_auto_approved_hash' if reason == 'hash_ok' else 'admin_auto_approved_amount')
     send_message(ADMIN_ID, note + (auto_note if auto else ''))
     return True
 
@@ -2359,6 +2396,250 @@ def crypto_deposit_watcher():
         except Exception as e:
             print('⚠️ crypto_deposit_watcher:', e)
         time.sleep(45)
+
+
+# ===========================================================================
+# پرداخت ریالی خودکار از طریق دونیتو (Donito)
+# ---------------------------------------------------------------------------
+# دونیتو درگاه واقعی (ساخت تراکنش/وب‌هوک/verify) نداره؛ فقط ۵۰ دونیت آخر رو با
+# GET برمی‌گردونه. پس هر درخواست شارژ یه «مبلغ یکتا» می‌گیره (مبلغ کاربر + ۱ تا ۹۹۹
+# تومان که بین درخواست‌های معلق تکراری نیست). کاربر همون مبلغ دقیق رو تو صفحه‌ی
+# دونیتو می‌پردازه و بات با تطبیق مبلغ، شارژ رو خودکار تأیید می‌کنه.
+# مبلغ واریزی کاربر (با همون رقم یکتا) کامل به کیف پول اضافه می‌شه.
+# تنظیمات (Environment یا جدول settings):
+#   DONITO_TOKEN     توکن API  (پنل دونیتو > تنظیمات > اتصالات)
+#   DONITO_PAGE_URL  آدرس صفحه‌ی دونیت تو، مثلا https://donito.me/yourname
+# ===========================================================================
+DONITO_API_BASE = os.getenv("DONITO_API_BASE", "https://donito.me/api/v1/thirdparty").rstrip('/')
+
+
+# مقدار پیش‌فرض داخل کد؛ اگه Environment (DONITO_TOKEN / DONITO_PAGE_URL) یا جدول settings مقدار داشته باشه، اون‌ها اولویت دارن.
+DONITO_DEFAULT_TOKEN = "BKEXR_7CdfmlnsxgDY3eTMebj2fMeWYe8TTRKA"
+DONITO_DEFAULT_PAGE_URL = "https://donito.me/skytunnel"
+
+
+def get_donito_token():
+    return (get_setting('donito_token', '') or os.getenv("DONITO_TOKEN", "") or DONITO_DEFAULT_TOKEN).strip()
+
+
+def get_donito_page_url():
+    return (get_setting('donito_page_url', '') or os.getenv("DONITO_PAGE_URL", "") or DONITO_DEFAULT_PAGE_URL).strip()
+
+
+def donito_enabled():
+    return get_setting('donito_enabled', '1') == '1' and bool(get_donito_token()) and bool(get_donito_page_url())
+
+
+def donito_window_seconds():
+    """مدت اعتبار هر درخواست (دقیقه) — پیش‌فرض ۱۸۰."""
+    return max(10, _setting_int('donito_window_min', 180)) * 60
+
+
+def donito_poll_seconds():
+    return max(10, _setting_int('donito_poll_sec', 20))
+
+
+def _donito_scrub(text):
+    """توکن تو URL هست و پیام خطای requests ممکنه URL کامل رو داشته باشه؛ هیچ‌وقت نباید تو لاگ/پیام برسه."""
+    t = str(text)
+    tok = get_donito_token()
+    return t.replace(tok, '***') if tok else t
+
+
+def _donito_parse_ts(s):
+    try:
+        return datetime.fromisoformat(str(s).replace('Z', '+00:00')).timestamp()
+    except Exception:
+        return None
+
+
+_donito_cache = {'t': 0.0, 'v': []}
+
+
+def donito_fetch_recent(force=False):
+    """۵۰ دونیت آخر → لیست dict: id, amount(تومان), ts(epoch), message. خطا → Exception (بدون توکن)."""
+    if not force and time.time() - _donito_cache['t'] < 5:
+        return _donito_cache['v']
+    tok = get_donito_token()
+    if not tok:
+        raise RuntimeError('DONITO_TOKEN تنظیم نشده')
+    try:
+        r = requests.get(f'{DONITO_API_BASE}/{tok}/donations/recent', timeout=15,
+                         headers={'Accept': 'application/json'})
+        r.raise_for_status()
+        data = r.json()
+    except Exception as e:
+        raise RuntimeError(_donito_scrub(e)) from None
+    items = data.get('data') if isinstance(data, dict) else None
+    if not isinstance(items, list):
+        raise RuntimeError('پاسخ دونیتو نامعتبره: ' + _donito_scrub(str(data)[:200]))
+    out = []
+    for it in items:
+        if not isinstance(it, dict):
+            continue
+        if str(it.get('currency_type') or 'IRT').upper() != 'IRT':
+            continue
+        try:
+            amount = int(it.get('amount'))
+        except (TypeError, ValueError):
+            continue
+        did = str(it.get('id') or '').strip()
+        ts = _donito_parse_ts(it.get('created_at'))
+        if not did or ts is None:
+            continue
+        out.append({'id': did, 'amount': amount, 'ts': ts, 'message': str(it.get('donator_message') or '')})
+    out.sort(key=lambda d: d['ts'])
+    _donito_cache['t'], _donito_cache['v'] = time.time(), out
+    return out
+
+
+_donito_alloc_lock = threading.Lock()
+
+
+@with_db_retry
+def list_pending_donito_requests(window=None):
+    """[(id, user_id, amount, req_ts)] درخواست‌های معلقِ هنوز معتبر."""
+    cutoff = time.time() - (window or donito_window_seconds())
+    conn = get_conn()
+    c = conn.cursor()
+    c.execute("SELECT id, user_id, amount, req_ts FROM topup_requests WHERE status='pending' AND method='donito' "
+              "AND req_ts >= ? ORDER BY id", (cutoff,))
+    rows = c.fetchall()
+    conn.close()
+    return rows
+
+
+@with_db_retry
+def list_expired_donito_requests():
+    cutoff = time.time() - donito_window_seconds()
+    conn = get_conn()
+    c = conn.cursor()
+    c.execute("SELECT id, user_id FROM topup_requests WHERE status='pending' AND method='donito' "
+              "AND (req_ts IS NULL OR req_ts < ?)", (cutoff,))
+    rows = c.fetchall()
+    conn.close()
+    return rows
+
+
+@with_db_retry
+def _donito_insert_request(user_id, pay_amount, req_ts):
+    conn = get_conn()
+    c = conn.cursor()
+    c.execute("INSERT INTO topup_requests (user_id, amount, created_at, method, req_ts) VALUES (?, ?, ?, 'donito', ?)",
+              (user_id, pay_amount, datetime.now().isoformat(), req_ts))
+    conn.commit()
+    req_id = c.lastrowid
+    conn.close()
+    return req_id
+
+
+def create_donito_request(user_id, base_amount):
+    """درخواست جدید با مبلغ یکتا. اگه همین کاربر تازه برای همین مبلغ درخواست معلق داشت، همون برمی‌گرده.
+    خروجی: (req_id, pay_amount) یا (None, None) اگه مبلغ یکتا پیدا نشد."""
+    with _donito_alloc_lock:
+        pending = list_pending_donito_requests()
+        for rid, uid, amt, ts in pending:
+            if uid == user_id and base_amount < amt <= base_amount + 999 and time.time() - (ts or 0) < 600:
+                return rid, amt
+        taken = {amt for _, _, amt, _ in pending}
+        offsets = list(range(1, 100))
+        secrets.SystemRandom().shuffle(offsets)
+        offsets += list(range(100, 1000))
+        for o in offsets:
+            if base_amount + o not in taken:
+                pay = base_amount + o
+                return _donito_insert_request(user_id, pay, time.time()), pay
+    return None, None
+
+
+def donito_match_and_approve():
+    """دونیت‌های اخیر رو با درخواست‌های معلق تطبیق می‌ده و شارژ رو خودکار تأیید می‌کنه. تعداد تأییدها رو برمی‌گردونه."""
+    pending = list_pending_donito_requests()
+    if not pending:
+        return 0
+    donations = donito_fetch_recent()
+    done = 0
+    for rid, uid, amount, req_ts in pending:
+        for d in donations:
+            if d['amount'] != amount or d['ts'] < (req_ts or 0) - 60:
+                continue
+            key = 'donito:' + d['id']
+            if is_deposit_used(key):
+                continue
+            set_request_matched_tx(rid, key)
+            if approve_topup_request(rid, auto=True, reason='donito'):
+                done += 1
+            break
+    return done
+
+
+def donito_expire_old():
+    for rid, uid in list_expired_donito_requests():
+        try:
+            if claim_topup_pending(rid, 'expired'):
+                send_message(uid, u(uid, 'topup_donito_expired'))
+        except Exception as e:
+            print('⚠️ donito_expire_old:', _donito_scrub(e))
+
+
+def donito_watcher():
+    """هر چند ثانیه (فقط اگه درخواست معلقی باشه) دونیت‌ها رو چک می‌کنه."""
+    time.sleep(20)
+    while True:
+        try:
+            if donito_enabled():
+                donito_match_and_approve()
+                donito_expire_old()
+        except Exception as e:
+            print('⚠️ donito_watcher:', _donito_scrub(e))
+        time.sleep(donito_poll_seconds())
+
+
+def send_donito_topup_info(chat_id, amount):
+    req_id, pay = create_donito_request(chat_id, amount)
+    if not req_id:
+        send_message(chat_id, u(chat_id, 'topup_donito_busy'))
+        return
+    user_steps[str(chat_id)] = {}
+    send_message(chat_id, u(chat_id, 'topup_donito_info', amount=f'{pay:,}', divider=DIVIDER,
+                            url=_html.escape(get_donito_page_url()),
+                            minutes=str(donito_window_seconds() // 60)),
+                 reply_markup={'inline_keyboard': [
+                     [{'text': u(chat_id, 'btn_donito_check'), 'callback_data': 'donito_check_' + str(req_id)}],
+                     [{'text': u(chat_id, 'btn_cancel'), 'callback_data': 'menu'}]]})
+
+
+def donito_check_for_user_async(chat_id, req_id):
+    def _run():
+        try:
+            try:
+                donito_fetch_recent(force=True)
+                donito_match_and_approve()
+            except Exception as e:
+                print('⚠️ donito check:', _donito_scrub(e))
+            req = get_topup_request(req_id)
+            if req and req[1] == chat_id and req[3] == 'pending':
+                send_message(chat_id, u(chat_id, 'topup_donito_not_yet'))
+        except Exception as e:
+            print('⚠️ donito_check_for_user_async:', _donito_scrub(e))
+    threading.Thread(target=_run, daemon=True).start()
+
+
+def donito_check_report():
+    """گزارش تست اتصال برای دستور ادمین /donitocheck."""
+    if not get_donito_token():
+        return '⚠️ DONITO_TOKEN تنظیم نشده.'
+    if not get_donito_page_url():
+        return '⚠️ DONITO_PAGE_URL (آدرس صفحه‌ی دونیتت) تنظیم نشده.'
+    try:
+        deps = donito_fetch_recent(force=True)
+    except Exception as e:
+        return '❌ اتصال/دسترسی به دونیتو ناموفق بود:\n' + _html.escape(_donito_scrub(e)[:300])
+    lines = [f'✅ اتصال به دونیتو برقراره. {len(deps)} دونیت خونده شد.']
+    for d in deps[-3:]:
+        lines.append(f'• {d["amount"]:,} تومان — ' + fmt_iran_datetime(d['ts']))
+    lines.append(f'در انتظار: {len(list_pending_donito_requests())} درخواست | وضعیت: {"روشن" if donito_enabled() else "خاموش"}')
+    return '\n'.join(lines)
 
 
 def nobitex_check_report():
@@ -4103,12 +4384,15 @@ def check_crypto_for_user_async(chat_id, req_id, stage):
 def show_topup_method_choice(chat_id):
     """مرحله‌ی اول شارژ: انتخاب روش پرداخت (قبل از پرسیدن مبلغ)."""
     user_steps[str(chat_id)] = {'step': 'choose_topup_method'}
-    send_message(chat_id, u(chat_id, 'topup_choose_method_first'), reply_markup={
-        'inline_keyboard': [
-            [{'text': u(chat_id, 'btn_topup_card'), 'callback_data': 'tpm_card'}],
-            [{'text': u(chat_id, 'btn_topup_crypto'), 'callback_data': 'tpm_crypto'}],
-            [{'text': u(chat_id, 'btn_cancel'), 'callback_data': 'menu'}],
-        ]})
+    rows = []
+    if donito_enabled():
+        rows.append([{'text': u(chat_id, 'btn_topup_donito'), 'callback_data': 'tpm_donito'}])
+    if card_topup_enabled():
+        rows.append([{'text': u(chat_id, 'btn_topup_card'), 'callback_data': 'tpm_card'}])
+    if crypto_enabled():
+        rows.append([{'text': u(chat_id, 'btn_topup_crypto'), 'callback_data': 'tpm_crypto'}])
+    rows.append([{'text': u(chat_id, 'btn_cancel'), 'callback_data': 'menu'}])
+    send_message(chat_id, u(chat_id, 'topup_choose_method_first'), reply_markup={'inline_keyboard': rows})
 
 
 def ask_topup_amount_for(chat_id, method):
@@ -4140,6 +4424,12 @@ def proceed_after_topup_amount(chat_id, amount, method):
             send_message(chat_id, u(chat_id, 'disabled_feature'))
         else:
             show_coin_choice(chat_id, amount, coins)
+    elif method == 'donito':
+        if donito_enabled():
+            send_donito_topup_info(chat_id, amount)
+        else:
+            user_steps[str(chat_id)] = {}
+            send_message(chat_id, u(chat_id, 'disabled_feature'))
     else:
         if card_topup_enabled():
             send_card_topup_info(chat_id, amount)
@@ -4152,9 +4442,11 @@ def action_topup_menu(chat_id):
     if not is_feature_enabled('topup'):
         send_message(chat_id, u(chat_id, 'disabled_feature'))
         return
-    card_on, crypto_on = card_topup_enabled(), crypto_enabled()
-    if card_on and crypto_on:
+    card_on, crypto_on, donito_on = card_topup_enabled(), crypto_enabled(), donito_enabled()
+    if [card_on, crypto_on, donito_on].count(True) > 1:
         show_topup_method_choice(chat_id)          # اول روش پرداخت رو می‌پرسه
+    elif donito_on:
+        ask_topup_amount_for(chat_id, 'donito')    # فقط پرداخت خودکار دونیتو فعاله: مستقیم مبلغ
     elif card_on:
         ask_topup_amount_for(chat_id, 'card')      # فقط یه روش فعاله: مستقیم مبلغ
     elif crypto_on:
@@ -5183,6 +5475,7 @@ set_bot_commands()
 threading.Thread(target=commands_watcher, daemon=True).start()
 threading.Thread(target=registry_watcher, daemon=True).start()
 threading.Thread(target=crypto_deposit_watcher, daemon=True).start()
+threading.Thread(target=donito_watcher, daemon=True).start()
 print('✅ ربات با موفقیت اجرا شد.')
 last_update_id = 0
 
@@ -5663,10 +5956,15 @@ def process_update(update):
             update_ticket_status(tid, 'closed')
             send_message(chat_id, u('fa', 'admin_ticket_closed', tid=str(tid)))
 
-        elif data in ('tpm_card', 'tpm_crypto'):
+        elif data in ('tpm_card', 'tpm_crypto', 'tpm_donito'):
             s_ = user_steps.get(str(chat_id), {})
             if s_.get('step') != 'choose_topup_method':
                 main_menu(chat_id)
+            elif data == 'tpm_donito':
+                if donito_enabled():
+                    ask_topup_amount_for(chat_id, 'donito')
+                else:
+                    send_message(chat_id, u(chat_id, 'disabled_feature'))
             elif data == 'tpm_card':
                 if card_topup_enabled():
                     ask_topup_amount_for(chat_id, 'card')
@@ -5677,6 +5975,17 @@ def process_update(update):
                     start_crypto_topup(chat_id)
                 else:
                     send_message(chat_id, u(chat_id, 'disabled_feature'))
+
+        elif data.startswith('donito_check_'):
+            try:
+                _rid = int(data.split('_')[2])
+            except (IndexError, ValueError):
+                _rid = 0
+            _req = get_topup_request(_rid) if _rid else None
+            if _req and _req[1] == chat_id and _req[3] == 'pending':
+                donito_check_for_user_async(chat_id, _rid)
+            else:
+                main_menu(chat_id)
 
         elif data.startswith('tpc_'):
             s_ = user_steps.get(str(chat_id), {})
@@ -5735,6 +6044,9 @@ def process_update(update):
 
         if text == '/nobitexcheck' and chat_id == ADMIN_ID:
             send_message(chat_id, nobitex_check_report())
+
+        elif text == '/donitocheck' and chat_id == ADMIN_ID:
+            send_message(chat_id, donito_check_report())
 
         elif chat_id == ADMIN_ID and text in (admin_add_channel_label(), '/channels'):
             user_steps[str(chat_id)] = {}
