@@ -25,7 +25,7 @@ try:
 except ImportError:
     QRCODE_AVAILABLE = False
 
-TOKEN = os.getenv("BOT_TOKEN", "69786607:p-AAjsil8xAOknphz-PxbDBsvFxFSWknCMg").strip()
+TOKEN = os.getenv("BOT_TOKEN", "70578965:nZ8qtHO0j8BTSEcAghcWvq75m_-2PLEZVw8").strip()
 if not TOKEN:
     raise SystemExit("متغیر محیطی BOT_TOKEN تنظیم نشده. بدون اون بات بالا نمیاد.")
 BASE_URL = "https://api.splus.ir/bot" + TOKEN
@@ -72,7 +72,7 @@ def reseller_price_range_text(chat_id):
 RESELLER_API_BASE = os.getenv("RESELLER_API_BASE", "http://YOUR-SERVER-IP:8088")
 # آدرس پنلی که فروشنده بعد از خرید استخر گیگ باهاش کانفیگ می‌سازه (پیش‌فرض: همون آدرس API)
 RESELLER_PANEL_URL = os.getenv("RESELLER_PANEL_URL", "https://just-reseller-panel-six.vercel.app/")
-ADMIN_ID = int(os.getenv("ADMIN_ID", "48198481"))
+ADMIN_ID = int(os.getenv("ADMIN_ID", "48985781"))
 
 # مقادیر پیش‌فرض (fallback) — اگه از پنل وب مقداری تو جدول settings ثبت نشده
 # باشه، همین مقادیر استفاده می‌شن. مقدار واقعی و قابل‌تغییر همیشه با
@@ -2414,7 +2414,7 @@ DONITO_API_BASE = os.getenv("DONITO_API_BASE", "https://donito.me/api/v1/thirdpa
 
 
 # مقدار پیش‌فرض داخل کد؛ اگه Environment (DONITO_TOKEN / DONITO_PAGE_URL) یا جدول settings مقدار داشته باشه، اون‌ها اولویت دارن.
-DONITO_DEFAULT_TOKEN = "BKEXR_7CdfmlnsxgDY3eTMebj2fMeWYe8TTRKA"
+DONITO_DEFAULT_TOKEN = "BKEXR_KnkwEh1jEHov5oDOPvxAVfps1MwXHBpc"
 DONITO_DEFAULT_PAGE_URL = "https://donito.me/skytunnel"
 
 
@@ -2453,7 +2453,7 @@ def _donito_parse_ts(s):
         return None
 
 
-_donito_cache = {'t': 0.0, 'v': []}
+_donito_cache = {'t': 0.0, 'v': [], 'raw': []}
 
 
 def donito_fetch_recent(force=False):
@@ -2477,19 +2477,30 @@ def donito_fetch_recent(force=False):
     for it in items:
         if not isinstance(it, dict):
             continue
-        if str(it.get('currency_type') or 'IRT').upper() != 'IRT':
-            continue
+        cur = str(it.get('currency_type') or 'IRT').strip().upper()
         try:
-            amount = int(it.get('amount'))
+            amount = int(round(float(str(it.get('amount')).replace(',', '').strip())))
         except (TypeError, ValueError):
+            continue
+        if cur in ('IRR', 'RIAL', 'RLS'):
+            amount //= 10                       # ریال → تومان
+        elif cur not in ('IRT', 'TOMAN', 'TMN', 'TMN.', ''):
             continue
         did = str(it.get('id') or '').strip()
         ts = _donito_parse_ts(it.get('created_at'))
-        if not did or ts is None:
+        if ts is None:
+            ts = time.time()                    # تاریخ نامعتبر/نبود: همین الان فرض می‌شه (تطبیق با مبلغ یکتا و id یک‌بارمصرف امنه)
+        if not did:
             continue
         out.append({'id': did, 'amount': amount, 'ts': ts, 'message': str(it.get('donator_message') or '')})
     out.sort(key=lambda d: d['ts'])
     _donito_cache['t'], _donito_cache['v'] = time.time(), out
+    _seen, _raw = set(), []
+    for _it in [x for x in items if isinstance(x, dict)][:3] + [x for x in items if isinstance(x, dict)][-3:]:
+        if str(_it.get('id')) not in _seen:
+            _seen.add(str(_it.get('id')))
+            _raw.append({k: _it.get(k) for k in ('id', 'amount', 'currency_type', 'type', 'created_at')})
+    _donito_cache['raw'] = _raw
     return out
 
 
@@ -2561,7 +2572,7 @@ def donito_match_and_approve():
     done = 0
     for rid, uid, amount, req_ts in pending:
         for d in donations:
-            if d['amount'] != amount or d['ts'] < (req_ts or 0) - 60:
+            if d['amount'] != amount or d['ts'] < (req_ts or 0) - 300:
                 continue
             key = 'donito:' + d['id']
             if is_deposit_used(key):
@@ -2582,13 +2593,32 @@ def donito_expire_old():
             print('⚠️ donito_expire_old:', _donito_scrub(e))
 
 
+_donito_dbg_t = [0.0]
+
+
+def _donito_debug_unmatched():
+    """اگه درخواست معلق هست ولی تطبیقی نشد، هر ~۶۰ ثانیه یه خلاصه تو لاگ می‌ذاره تا بشه علتش رو دید."""
+    try:
+        pend = list_pending_donito_requests()
+        if not pend or time.time() - _donito_dbg_t[0] < 60:
+            return
+        _donito_dbg_t[0] = time.time()
+        last = _donito_cache.get('v') or []
+        print('[donito] معلق:', [(r[0], r[2], int(time.time() - (r[3] or 0))) for r in pend],
+              '| دونیت‌های دیده‌شده (id, مبلغ, سن‌ثانیه):',
+              [(d['id'], d['amount'], int(time.time() - d['ts'])) for d in last[-5:]])
+    except Exception as e:
+        print('⚠️ donito debug:', _donito_scrub(e))
+
+
 def donito_watcher():
     """هر چند ثانیه (فقط اگه درخواست معلقی باشه) دونیت‌ها رو چک می‌کنه."""
     time.sleep(20)
     while True:
         try:
             if donito_enabled():
-                donito_match_and_approve()
+                if not donito_match_and_approve():
+                    _donito_debug_unmatched()
                 donito_expire_old()
         except Exception as e:
             print('⚠️ donito_watcher:', _donito_scrub(e))
@@ -2635,9 +2665,16 @@ def donito_check_report():
         deps = donito_fetch_recent(force=True)
     except Exception as e:
         return '❌ اتصال/دسترسی به دونیتو ناموفق بود:\n' + _html.escape(_donito_scrub(e)[:300])
-    lines = [f'✅ اتصال به دونیتو برقراره. {len(deps)} دونیت خونده شد.']
+    lines = [f'✅ اتصال به دونیتو برقراره. {len(deps)} دونیت قابل‌استفاده خونده شد.']
     for d in deps[-3:]:
         lines.append(f'• {d["amount"]:,} تومان — ' + fmt_iran_datetime(d['ts']))
+    raw = _donito_cache.get('raw') or []
+    if raw:
+        lines.append('🔬 داده‌ی خام دریافتی از دونیتو (برای عیب‌یابی):')
+        for r in raw:
+            lines.append('<code>' + _html.escape(str(r)[:200]) + '</code>')
+    for rid, uid, amt, rts in list_pending_donito_requests()[:5]:
+        lines.append(f'⏳ درخواست #{rid}: مبلغ {amt:,} — {int((time.time() - (rts or 0)) / 60)} دقیقه پیش')
     lines.append(f'در انتظار: {len(list_pending_donito_requests())} درخواست | وضعیت: {"روشن" if donito_enabled() else "خاموش"}')
     return '\n'.join(lines)
 
