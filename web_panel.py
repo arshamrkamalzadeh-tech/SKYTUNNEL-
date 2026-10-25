@@ -919,7 +919,7 @@ def get_topups(limit=60):
     درخواست‌های در انتظار اول می‌آن."""
     conn = get_conn()
     c = conn.cursor()
-    c.execute("SELECT id, user_id, amount, status, created_at, method, coin_symbol, coin_qty, tx_hash, matched_tx "
+    c.execute("SELECT id, user_id, amount, status, created_at, method, coin_symbol, coin_qty, tx_hash, matched_tx, user_note "
               "FROM topup_requests ORDER BY (CASE WHEN status='pending' THEN 0 ELSE 1 END), id DESC LIMIT ?", (limit,))
     res = c.fetchall()
     conn.close()
@@ -1300,19 +1300,6 @@ def parse_gb_delta(raw):
     return v if v == v and abs(v) != float("inf") else None
 
 
-def apply_service_pool(sub_id, delta):
-    """حجم رو روی سرویس کم/زیاد می‌کنه: delta>0 → give (از اعتبار حساب اصلی به فروشنده)،
-    delta<0 → take (از فروشنده به حساب اصلی). خروجی: (ok, پیام، موجودی_جدید)."""
-    gb = round(abs(delta), 3)
-    gb = int(gb) if gb == int(gb) else gb
-    res = seller_api("POST", f"/resale/subs/{sub_id}/transfer",
-                     {"direction": "give" if delta > 0 else "take", "gb": gb, "units": 0, "note": "پنل ادمین"})
-    invalidate_subs_cache()
-    if res["success"]:
-        return True, "", res["data"].get("subCreditGb")
-    return False, seller_reason(res), None
-
-
 def vendor_login_text(v):
     panel = v.get("panel_url") or get_setting("reseller_panel_url", DEFAULT_RESELLER_PANEL_URL)
     return f"پنل: {panel}\nنام کاربری: {v['name']}\nرمز عبور: {v['password']}"
@@ -1426,10 +1413,42 @@ def csrf_token():
     return session["csrf"]
 
 
+_ENV_BOOT = {}
+_ENV_LAST = {"ts": 0.0}
+_ENV_OVERRIDES = (
+    ("env_bot_token", "BOT_TOKEN"), ("env_seller_api_base", "SELLER_API_BASE"), ("env_seller_api_key", "SELLER_API_KEY"),
+    ("env_config_api", "CONFIG_API"), ("env_config_key", "CONFIG_KEY"),
+)
+
+
+def apply_env_overrides(force=False):
+    """مقدارهایی که از صفحه‌ی «متغیرهای محیطی» ذخیره شدن رو روی متغیرهای سراسری پنل اعمال می‌کنه (هر ~۱۰ ثانیه)."""
+    if not force and time.time() - _ENV_LAST["ts"] < 10:
+        return
+    _ENV_LAST["ts"] = time.time()
+    st = get_all_settings()
+    g = globals()
+    for skey, gname in _ENV_OVERRIDES:
+        if gname not in g:      # مثلاً CONFIG_API پایین‌تر تعریف می‌شه؛ تا وقتی تعریف نشده رد می‌شیم
+            continue
+        _ENV_BOOT.setdefault(gname, g[gname])
+        newv = (st.get(skey) or "").strip() or _ENV_BOOT[gname]
+        if gname in ("SELLER_API_BASE", "CONFIG_API"):
+            newv = str(newv).rstrip("/")
+        if newv != g[gname]:
+            g[gname] = newv
+            if gname == "BOT_TOKEN":
+                g["BASE_URL"] = "https://api.splus.ir/bot" + newv
+
+
 @app.before_request
 def _before_request():
     if request.endpoint in ("static", "panel_font"):
         return None
+    try:
+        apply_env_overrides()
+    except Exception as e:
+        print("⚠️ apply_env_overrides:", e)
     try:
         ensure_schema()
     except Exception as e:
@@ -2347,6 +2366,7 @@ def topups_page():
         + _pill("⌛️ منقضی", "status", "expired", f_status) + '</div>'
         + '<div class="chips-row">'
         + _pill("همه روش‌ها", "method", "all", f_method) + _pill("⚡️ دونیتو", "method", "donito", f_method)
+        + _pill("🧾 دونیتو دستی", "method", "donito_manual", f_method)
         + _pill("💳 کارت‌به‌کارت", "method", "card", f_method) + _pill("🪙 رمزارز", "method", "crypto", f_method)
         + '</div>'
         + '<form method="get" class="flex" style="margin-bottom:14px;">'
@@ -2354,11 +2374,17 @@ def topups_page():
         + f'<input type="search" name="q" value="{esc(f_q)}" placeholder="آیدی عددی کاربر…" inputmode="numeric" style="max-width:240px;">'
         + '<button type="submit" class="sm">🔍 جستجو</button></form>')
     rows_html = ""
-    for rid, user_id, amount, status, created_at, method, coin_symbol, coin_qty, tx_hash, matched_tx in rows:
+    for rid, user_id, amount, status, created_at, method, coin_symbol, coin_qty, tx_hash, matched_tx, user_note in rows:
         is_crypto = (method == "crypto")
         is_donito = (method == "donito")
-        kind = "🪙 رمزارز" if is_crypto else ("⚡️ دونیتو (خودکار)" if is_donito else "💳 کارت‌به‌کارت")
+        is_manual = (method == "donito_manual")
+        kind = ("🪙 رمزارز" if is_crypto else ("⚡️ دونیتو (خودکار)" if is_donito else
+                ("🧾 دونیتو (تایید دستی)" if is_manual else "💳 کارت‌به‌کارت")))
         detail = ""
+        if is_manual:
+            detail = f"<br><small class=\"muted\" style=\"word-break:break-all;\">📝 {esc(user_note or '—')}</small>"
+            if matched_tx:
+                detail += "<br><small class=\"muted\">✔️ دونیت هم‌مبلغ تو دونیتو پیدا شده</small>"
         if is_donito:
             detail = ("<br><small class=\"muted\">✔️ پرداخت در دونیتو پیدا شد</small>" if matched_tx
                       else "<br><small class=\"muted\">منتظر پرداخت کاربر (مبلغ یکتا)</small>")
@@ -2846,15 +2872,10 @@ def _status_badge(status):
     return '<span class="badge on">فعال</span>' if status == "active" else '<span class="badge off">مسدود</span>'
 
 
-def _credit_text(v):
-    return f"{v['credit']:g} گیگ" if v["credit"] is not None else "—"
-
-
 @app.route("/resellers")
 @login_required
 def resellers_page():
     vendors, svc_ok = build_vendors()
-    total_pool = sum(v["credit"] or 0 for v in vendors)
     total_paid = sum(v["paid"] or 0 for v in vendors)
     active_cnt = sum(1 for v in vendors if v["status"] == "active")
     warn = "" if svc_ok else ('<div class="alert">⚠️ ارتباط با سرویس برقرار نشد؛ حجم و قیمت‌ها نمایش داده نمی‌شن و '
@@ -2875,11 +2896,6 @@ def resellers_page():
                     f'onclick="copyFrom(this)">📋 کپی ورود</button>')
         if v["on_service"]:
             actions = f"""
-              <form method="post" action="{url_for('reseller_pool', vkey=vk)}" class="flex" onsubmit="return confirm('حجم روی سرویس اصلی اعمال می‌شه. ادامه بدیم؟');">
-                <input type="hidden" name="next" value="list">
-                <input type="text" name="delta" inputmode="decimal" placeholder="+20 یا -5" style="width:90px;" required>
-                <button type="submit" class="secondary sm">اعمال حجم</button>
-              </form>
               <form method="post" action="{url_for('reseller_toggle', vkey=vk)}">
                 <input type="hidden" name="next" value="list">
                 <button type="submit" class="{'danger' if v['status'] == 'active' else ''} sm">{'مسدود کن' if v['status'] == 'active' else 'فعال کن'}</button>
@@ -2892,7 +2908,6 @@ def resellers_page():
           <td data-label="فروشنده" class="wrap">{tg_cell}</td>
           <td data-label="نام کاربری">{login_cell}</td>
           <td data-label="رمز عبور">{pw_cell}</td>
-          <td data-label="حجم روی سرویس" class="num">{_credit_text(v)}</td>
           <td data-label="قیمت هر گیگ" class="num">{price_txt}</td>
           <td data-label="خرید" class="num">{v['purchases']}</td>
           <td data-label="پرداختی (تومان)" class="num">{int(v['paid'] or 0):,}</td>
@@ -2905,16 +2920,14 @@ def resellers_page():
     <div class="stats">
       <div class="stat"><span>👥 کل فروشنده‌ها</span><b class="num">{len(vendors):,}</b></div>
       <div class="stat"><span>✅ فعال</span><b class="num">{active_cnt:,}</b></div>
-      <div class="stat"><span>📦 مجموع حجم فروشنده‌ها</span><b class="num">{total_pool:,.1f}</b><small>گیگ</small></div>
       <div class="stat"><span>💰 مجموع پرداختی‌ها</span><b class="num">{total_paid:,}</b><small>تومان</small></div>
     </div>
-    <div class="card"><small class="muted">حجم، قیمت و وضعیت هر فروشنده <b>مستقیم روی سرویس اصلی</b> خونده و تغییر داده می‌شه (نه استخر قدیمی ربات).
-    «+۲۰» حجم رو از اعتبار حساب اصلی به فروشنده می‌ده و «-۵» از فروشنده پس می‌گیره و به حساب اصلی برمی‌گردونه.</small></div>
+    <div class="card"><small class="muted">قیمت و وضعیت هر فروشنده <b>مستقیم روی سرویس اصلی</b> خونده و تغییر داده می‌شه.</small></div>
     <div class="flex" style="margin-bottom:14px;">
       <div class="search-box"><input type="search" placeholder="جستجو: نام، آیدی، نام کاربری…" oninput="filterRows(this,'resellers-table')" autocomplete="off"></div>
     </div>
     <table class="rt" id="resellers-table">
-      <thead><tr><th>فروشنده</th><th>نام کاربری ورود</th><th>رمز عبور</th><th>حجم</th><th>قیمت هر گیگ</th><th>خرید</th><th>پرداختی</th><th>وضعیت</th><th>عملیات</th></tr></thead>
+      <thead><tr><th>فروشنده</th><th>نام کاربری ورود</th><th>رمز عبور</th><th>قیمت هر گیگ</th><th>خرید</th><th>پرداختی</th><th>وضعیت</th><th>عملیات</th></tr></thead>
       <tbody>{rows_html if rows_html else '<tr><td colspan="9">هنوز فروشنده‌ای ثبت نشده.</td></tr>'}</tbody>
     </table>"""
     return render_page("فروشنده‌ها", "resellers", content)
@@ -2946,16 +2959,11 @@ def reseller_detail(vkey):
         <div style="margin-top:14px;"><button type="submit">💾 ذخیره‌ی رمز</button></div>
       </form>
     </div>
-    <div class="grid cols-2">
+    <div class="grid cols-1">
       <div class="card"><h3>قیمت هر گیگ فروشنده (تومان)</h3>
         <form method="post" action="{url_for('reseller_price', vkey=vkey)}" class="flex">
           <input type="number" name="price_per_gb" value="{int(v['price']) if v['price'] else ''}" min="0" placeholder="۰ = قیمت پیش‌فرض خودت" style="flex:1;min-width:120px;" required>
           <button type="submit">ذخیره</button></form></div>
-      <div class="card"><h3>تغییر حجم</h3>
-        <form method="post" action="{url_for('reseller_pool', vkey=vkey)}" class="flex" onsubmit="return confirm('حجم روی سرویس اصلی اعمال می‌شه. ادامه بدیم؟');">
-          <input type="text" name="delta" inputmode="decimal" placeholder="مثلاً 20 یا -5 (گیگ)" style="flex:1;min-width:120px;" required>
-          <button type="submit">اعمال روی سرویس</button></form>
-        <small class="muted">عدد مثبت از اعتبار حساب اصلی به فروشنده منتقل می‌شه و عدد منفی از فروشنده پس گرفته می‌شه.</small></div>
     </div>
     <div class="card"><h3>وضعیت حساب</h3>
       <form method="post" action="{url_for('reseller_toggle', vkey=vkey)}" class="flex">
@@ -2972,7 +2980,6 @@ def reseller_detail(vkey):
       <div><span>فروشنده</span><b>{tg_line}</b></div>
       <div><span>آیدی عددی</span><b class="num">{tg_id or '—'}</b></div>
       <div><span>وضعیت</span><b>{_status_badge(v['status'])}</b></div>
-      <div><span>حجم روی سرویس</span><b class="num">{_credit_text(v)}</b></div>
       <div><span>پرداختی‌ها</span><b class="num">{int(v['paid'] or 0):,} تومان</b></div>
       <div><span>تعداد خرید</span><b class="num">{v['purchases']}</b></div>
       <div><span>نام کاربری</span><b>{copy_widget(v['name']) if v['name'] and v['name'] != '—' else '— تعیین نشده —'}</b></div>
@@ -3067,28 +3074,6 @@ def reseller_price(vkey):
         flash(f"قیمت هر گیگ فروشنده {v['name']} " + (f"به {price:,} تومان تغییر کرد." if price else "به قیمت پیش‌فرض برگشت."))
     else:
         flash("⚠️ قیمت تغییر نکرد: " + seller_reason(res))
-    return _after_vendor_action(vkey)
-
-
-@app.route("/resellers/<vkey>/pool", methods=["POST"])
-@login_required
-def reseller_pool(vkey):
-    v = _need_service_vendor(vkey)
-    if not v:
-        return redirect(url_for("resellers_page"))
-    delta = parse_gb_delta(request.form.get("delta"))
-    if delta is None:
-        flash("⚠️ مقدار گیگ باید عدد باشه (مثلاً 20 یا -5).")
-        return _after_vendor_action(vkey)
-    if delta == 0 or abs(delta) > 100000:
-        flash("⚠️ مقدار نامعتبره.")
-        return _after_vendor_action(vkey)
-    ok, reason, new_credit = apply_service_pool(v["sub_id"], delta)
-    if ok:
-        tail = f" حجم جدید روی سرویس: {float(new_credit):g} گیگ." if new_credit is not None else ""
-        flash(f"حجم فروشنده {v['name']} روی سرویس به اندازه‌ی {delta:+g} گیگ تغییر کرد." + tail)
-    else:
-        flash("⚠️ حجم تغییر نکرد: " + reason)
     return _after_vendor_action(vkey)
 
 
@@ -4491,7 +4476,12 @@ def export_all():
 @app.route("/export/settings.json")
 @login_required
 def export_settings():
-    return _dl("skytunnel-settings.json", json.dumps(get_all_settings(), ensure_ascii=False, indent=1), "application/json")
+    safe = {k: v for k, v in get_all_settings().items() if not _is_secret_setting(k)}
+    return _dl("skytunnel-settings.json", json.dumps(safe, ensure_ascii=False, indent=1), "application/json")
+
+
+def _is_secret_setting(k):
+    return k.startswith("env_") or k == "donito_token"
 
 
 @app.route("/backup/restore", methods=["POST"])
@@ -4523,8 +4513,14 @@ ICONS["finance"] = '<path d="M3 3v18h18"/><path d="M7 15l4-4 3 3 5-6"/>'
 ICONS["donito"] = '<path d="M13 2L4 14h7l-1 8 9-12h-7z"/>'
 NAV[2][1].append(("finance", "مرکز مالی", "finance_page"))
 NAV[2][1].append(("donito", "مانیتور دونیتو", "donito_page"))
+NAV[2][1].append(("plans", "بسته‌های آماده", "plans_page"))
+NAV[2][1].append(("alerts", "هشدار انقضا و حجم", "alerts_page"))
+NAV[3][1].append(("envvars", "متغیرهای محیطی", "env_page"))
+ICONS["plans"] = '<path d="M21 8l-9-5-9 5 9 5 9-5z"/><path d="M3 8v8l9 5 9-5V8"/>'
+ICONS["alerts"] = '<path d="M18 8a6 6 0 0 0-12 0c0 7-3 9-3 9h18s-3-2-3-9"/><path d="M13.7 21a2 2 0 0 1-3.4 0"/>'
+ICONS["envvars"] = '<path d="M4 6h16M4 12h16M4 18h10"/><circle cx="18" cy="18" r="2"/>'
 
-METHOD_LABELS = {"card": "💳 کارت‌به‌کارت", "crypto": "🪙 رمزارز", "donito": "⚡️ دونیتو"}
+METHOD_LABELS = {"card": "💳 کارت‌به‌کارت", "crypto": "🪙 رمزارز", "donito": "⚡️ دونیتو", "donito_manual": "🧾 دونیتو (دستی)"}
 STATUS_LABELS = {"pending": "در انتظار", "approved": "تایید شده", "rejected": "رد شده", "expired": "منقضی شده"}
 
 
@@ -4865,6 +4861,283 @@ def start_keepalive(port, interval=300):
                 print("⚠️ keepalive:", e)
             time.sleep(interval)
     threading.Thread(target=_loop, daemon=True).start()
+
+
+# ---------------------------------------------------------------------------
+# بسته‌های آماده (پلن‌ها) — ذخیره تو settings با کلید plans (JSON)؛ بات از همین‌جا می‌خونه
+# ---------------------------------------------------------------------------
+PLAN_TYPES = {"both": "هر دو (کانفیگ + وایرگارد)", "config": "کانفیگ", "wireguard": "وایرگارد",
+              "openvpn": "OpenVPN", "dns": "DNS بازی"}
+
+
+def _load_plans():
+    try:
+        data = json.loads(get_setting("plans", "") or "[]")
+    except Exception:
+        data = []
+    return data if isinstance(data, list) else []
+
+
+def _save_plans(lst):
+    set_setting("plans", json.dumps(lst, ensure_ascii=False))
+
+
+def _parse_plan_form(prefix=""):
+    """(plan_dict | None, خطا). فیلدها: title, gb, days, price, type, active."""
+    f = request.form
+    title = (f.get(prefix + "title") or "").strip()[:40]
+    try:
+        gb = float((f.get(prefix + "gb") or "").replace(",", "."))
+        days = int(f.get(prefix + "days") or 0)
+        price = int((f.get(prefix + "price") or "0").replace(",", ""))
+    except ValueError:
+        return None, "حجم، مدت و قیمت باید عدد باشن."
+    if not (0 < gb <= 100000) or gb != gb:
+        return None, "حجم باید بین ۰ و ۱۰۰۰۰۰ گیگ باشه."
+    if not (1 <= days <= 3650):
+        return None, "مدت باید بین ۱ تا ۳۶۵۰ روز باشه."
+    if not (0 <= price <= 1_000_000_000):
+        return None, "قیمت نامعتبره."
+    ptype = f.get(prefix + "type") or "both"
+    if ptype not in PLAN_TYPES:
+        return None, "نوع سرویس نامعتبره."
+    gb = int(gb) if gb == int(gb) else round(gb, 3)
+    return {"title": title, "gb": gb, "days": days, "price": price, "type": ptype,
+            "active": f.get(prefix + "active") == "1"}, None
+
+
+def _plan_type_select(name, cur):
+    opts = "".join(f'<option value="{k}"{" selected" if k == cur else ""}>{esc(v)}</option>' for k, v in PLAN_TYPES.items())
+    return f'<select name="{name}">{opts}</select>'
+
+
+@app.route("/plans")
+@login_required
+def plans_page():
+    plans = _load_plans()
+    rows = ""
+    for i, p in enumerate(plans):
+        pid = esc(str(p.get("id", "")))
+        rows += f"""
+        <form method="post" action="{url_for('plans_act')}" class="card">
+          <input type="hidden" name="pid" value="{pid}">
+          <div class="grid cols-2">
+            <div><label>عنوان دکمه (خالی = خودکار)</label><input type="text" name="title" maxlength="40" value="{esc(p.get('title', ''))}"></div>
+            <div><label>نوع سرویس</label>{_plan_type_select('type', p.get('type', 'both'))}</div>
+            <div><label>حجم (گیگ)</label><input type="text" name="gb" inputmode="decimal" value="{esc(str(p.get('gb', '')))}" required></div>
+            <div><label>مدت (روز)</label><input type="number" name="days" min="1" value="{esc(str(p.get('days', '')))}" required></div>
+            <div><label>قیمت (تومان)</label><input type="number" name="price" min="0" value="{esc(str(p.get('price', '')))}" required></div>
+            <div><label>نمایش در ربات</label>
+              <label style="display:flex;gap:8px;align-items:center;"><input type="checkbox" name="active" value="1"{' checked' if p.get('active', True) else ''}> فعال</label></div>
+          </div>
+          <div class="flex" style="margin-top:12px;">
+            <button type="submit" name="act" value="save" class="sm">💾 ذخیره</button>
+            <button type="submit" name="act" value="up" class="secondary sm" formnovalidate>▲</button>
+            <button type="submit" name="act" value="down" class="secondary sm" formnovalidate>▼</button>
+            <button type="submit" name="act" value="delete" class="danger sm" formnovalidate
+                    onclick="return confirm('این بسته حذف بشه؟');">🗑 حذف</button>
+          </div>
+        </form>"""
+    if not rows:
+        rows = '<div class="card"><p class="muted">هنوز بسته‌ای نساختی؛ تا وقتی بسته‌ای نباشه، ربات خرید دلخواه (حجم و مدت) رو مستقیم نشون می‌ده.</p></div>'
+    content = f"""
+    <div class="card"><small class="muted">بسته‌های فعال تو منوی خرید ربات به‌صورت دکمه نشون داده می‌شن و زیرشون دکمه‌ی «خرید دلخواه» هست. ترتیب نمایش همین ترتیب لیسته.</small></div>
+    {rows}
+    <form method="post" action="{url_for('plans_act')}" class="card">
+      <h3>➕ بسته‌ی جدید</h3>
+      <input type="hidden" name="act" value="add">
+      <div class="grid cols-2">
+        <div><label>عنوان دکمه (اختیاری)</label><input type="text" name="title" maxlength="40" placeholder="مثلاً ۲۰ گیگ / ۳۰ روزه"></div>
+        <div><label>نوع سرویس</label>{_plan_type_select('type', 'both')}</div>
+        <div><label>حجم (گیگ)</label><input type="text" name="gb" inputmode="decimal" required></div>
+        <div><label>مدت (روز)</label><input type="number" name="days" min="1" required></div>
+        <div><label>قیمت (تومان)</label><input type="number" name="price" min="0" required></div>
+        <div><label>نمایش در ربات</label><label style="display:flex;gap:8px;align-items:center;"><input type="checkbox" name="active" value="1" checked> فعال</label></div>
+      </div>
+      <div style="margin-top:12px;"><button type="submit">➕ افزودن بسته</button></div>
+    </form>"""
+    return render_page("بسته‌های آماده", "plans", content)
+
+
+@app.route("/plans/act", methods=["POST"])
+@login_required
+def plans_act():
+    act = request.form.get("act")
+    pid = (request.form.get("pid") or "").strip()
+    plans = _load_plans()
+    if act == "add":
+        p, err = _parse_plan_form()
+        if err:
+            flash("⚠️ " + err)
+        elif len(plans) >= 30:
+            flash("⚠️ حداکثر ۳۰ بسته مجازه.")
+        else:
+            p["id"] = secrets.token_hex(3)
+            plans.append(p)
+            _save_plans(plans)
+            flash("بسته اضافه شد.")
+        return redirect(url_for("plans_page"))
+    idx = next((i for i, x in enumerate(plans) if str(x.get("id")) == pid), None)
+    if idx is None:
+        flash("⚠️ بسته پیدا نشد.")
+    elif act == "save":
+        p, err = _parse_plan_form()
+        if err:
+            flash("⚠️ " + err)
+        else:
+            p["id"] = plans[idx]["id"]
+            plans[idx] = p
+            _save_plans(plans)
+            flash("بسته ذخیره شد.")
+    elif act == "delete":
+        plans.pop(idx)
+        _save_plans(plans)
+        flash("بسته حذف شد.")
+    elif act in ("up", "down"):
+        j = idx - 1 if act == "up" else idx + 1
+        if 0 <= j < len(plans):
+            plans[idx], plans[j] = plans[j], plans[idx]
+            _save_plans(plans)
+    return redirect(url_for("plans_page"))
+
+
+# ---------------------------------------------------------------------------
+# هشدار انقضا و اتمام حجم (تنظیمات؛ خودِ ارسال کار بات است)
+# ---------------------------------------------------------------------------
+@app.route("/alerts")
+@login_required
+def alerts_page():
+    st = get_all_settings()
+    on = st.get("alerts_enabled", "1") == "1"
+    exp_notice = st.get("alert_expired_notice", "1") == "1"
+    content = f"""
+    <form method="post" action="{url_for('alerts_save')}">
+      <div class="card">
+        <label style="display:flex;gap:8px;align-items:center;"><input type="checkbox" name="alerts_enabled" value="1"{' checked' if on else ''}> <b>⏰ هشدارهای انقضا و حجم فعال باشه</b></label>
+        <label style="display:flex;gap:8px;align-items:center;margin-top:12px;"><input type="checkbox" name="alert_expired_notice" value="1"{' checked' if exp_notice else ''}> وقتی کانفیگ منقضی شد هم پیام بده (فقط برای منقضی‌های ۲ روز اخیر)</label>
+        <label style="margin-top:12px;">چند روز مونده به انقضا هشدار بره؟</label>
+        <input type="number" name="alert_expiry_days" min="1" max="60" value="{esc(st.get('alert_expiry_days', '3'))}">
+        <label style="margin-top:12px;">هشدار حجم وقتی چند درصد مصرف شد؟</label>
+        <input type="number" name="alert_volume_percent" min="1" max="99" value="{esc(st.get('alert_volume_percent', '90'))}">
+        <label style="margin-top:12px;">هر چند دقیقه یک‌بار بررسی بشه؟ (حداقل ۵)</label>
+        <input type="number" name="alert_interval_min" min="5" max="1440" value="{esc(st.get('alert_interval_min', '30'))}">
+        <div style="margin-top:14px;"><button type="submit">💾 ذخیره</button></div>
+      </div>
+    </form>
+    <div class="card"><small class="muted">هر هشدار برای هر کانفیگ فقط یک‌بار فرستاده می‌شه و بعد از تمدید دوباره مجازه. کانفیگ‌های تست رایگان و متوقف‌شده هشدار نمی‌گیرن. پیام «حجم تموم شد» هم جداست. متن هشدارها از صفحه‌ی «متن‌های ربات» قابل ویرایشه.</small></div>"""
+    return render_page("هشدار انقضا و حجم", "alerts", content)
+
+
+@app.route("/alerts/save", methods=["POST"])
+@login_required
+def alerts_save():
+    f = request.form
+
+    def num(name, lo, hi, default):
+        try:
+            return str(min(hi, max(lo, int(f.get(name) or default))))
+        except ValueError:
+            return str(default)
+    set_setting("alerts_enabled", "1" if f.get("alerts_enabled") == "1" else "0")
+    set_setting("alert_expired_notice", "1" if f.get("alert_expired_notice") == "1" else "0")
+    set_setting("alert_expiry_days", num("alert_expiry_days", 1, 60, 3))
+    set_setting("alert_volume_percent", num("alert_volume_percent", 1, 99, 90))
+    set_setting("alert_interval_min", num("alert_interval_min", 5, 1440, 30))
+    flash("تنظیمات هشدار ذخیره شد.")
+    return redirect(url_for("alerts_page"))
+
+
+# ---------------------------------------------------------------------------
+# متغیرهای محیطی قابل تغییر از پنل (بات و پنل حداکثر ~۱۵ ثانیه بعد اعمالش می‌کنن)
+# ---------------------------------------------------------------------------
+ENV_FIELDS = [
+    # (کلید settings, عنوان, راهنما, مخفی؟)
+    ("donito_token", "توکن دونیتو", "برای شارژ خودکار با دونیتو", True),
+    ("env_bot_token", "توکن ربات (BOT_TOKEN)", "قبل از ذخیره با getMe تست می‌شه؛ اشتباه بودنش ربات رو از کار می‌ندازه", True),
+    ("env_seller_api_key", "کلید Seller API (SELLER_API_KEY)", "برای حساب فروشنده‌ها", True),
+    ("env_seller_api_base", "آدرس Seller API (SELLER_API_BASE)", "مثلاً https://su.randomatic.ir/api/v1", False),
+    ("env_config_key", "کلید ساخت کانفیگ (CONFIG_KEY)", "", True),
+    ("env_config_api", "آدرس ساخت کانفیگ (CONFIG_API)", "", False),
+    ("env_nobitex_api_key", "کلید نوبیتکس (NOBITEX_API_KEY)", "برای تشخیص خودکار واریز رمزارز", True),
+    ("env_nobitex_api_secret", "رمز نوبیتکس (NOBITEX_API_SECRET)", "", True),
+]
+
+
+def _mask_secret(v):
+    v = v or ""
+    return ("•" * 8 + v[-4:]) if len(v) > 8 else "•" * len(v)
+
+
+@app.route("/env")
+@login_required
+def env_page():
+    st = get_all_settings()
+    rows = ""
+    for key, label, hint, secret in ENV_FIELDS:
+        cur = st.get(key) or ""
+        if cur:
+            shown = _mask_secret(cur) if secret else cur
+            badge = f'<span class="badge approved">از پنل: <span dir="ltr">{esc(shown)}</span></span>'
+        else:
+            badge = '<span class="badge open">از Environment / پیش‌فرض کد</span>'
+        rows += f"""
+        <div class="card">
+          <label><b>{esc(label)}</b></label>
+          <div style="margin:6px 0;">{badge}</div>
+          <input type="{'password' if secret else 'text'}" name="{key}" dir="ltr" autocomplete="off" placeholder="مقدار جدید (خالی = بدون تغییر)">
+          {f'<small class="muted">{esc(hint)}</small><br>' if hint else ''}
+          <label style="display:flex;gap:8px;align-items:center;margin-top:8px;"><input type="checkbox" name="reset_{key}" value="1"> حذفِ مقدار پنل و برگشت به Environment/پیش‌فرض</label>
+        </div>"""
+    content = f"""
+    <div class="card"><small class="muted">مقدارهایی که اینجا ذخیره کنی روی Environment اولویت دارن و بدون ری‌استارت اعمال می‌شن. این مقدارها تو خروجی بکاپ تنظیمات <b>نمی‌آن</b>.
+    آدرس/توکن دیتابیس (Turso) و رمز ورود خود پنل رو نمی‌شه از اینجا عوض کرد؛ اون‌ها فقط از Environment خونده می‌شن.</small></div>
+    <form method="post" action="{url_for('env_save')}">{rows}
+      <div><button type="submit">💾 ذخیره</button></div>
+    </form>"""
+    return render_page("متغیرهای محیطی", "envvars", content)
+
+
+@app.route("/env/save", methods=["POST"])
+@login_required
+def env_save():
+    changed, errors = 0, []
+    for key, label, _hint, _secret in ENV_FIELDS:
+        if request.form.get("reset_" + key) == "1":
+            delete_setting(key)
+            changed += 1
+            continue
+        val = (request.form.get(key) or "").strip()
+        if not val:
+            continue
+        if len(val) > 500 or re.search(r"\s", val):
+            errors.append(f"{label}: مقدار نامعتبره.")
+            continue
+        if key in ("env_seller_api_base", "env_config_api") and not val.startswith(("http://", "https://")):
+            errors.append(f"{label}: باید با http:// یا https:// شروع بشه.")
+            continue
+        if key == "env_bot_token":
+            try:
+                ok = requests.get(f"https://api.splus.ir/bot{val}/getMe", timeout=8).json().get("ok")
+            except Exception:
+                ok = False
+            if not ok:
+                errors.append("توکن ربات رد شد: getMe با این توکن موفق نبود، پس ذخیره نشد.")
+                continue
+        set_setting(key, val)
+        changed += 1
+    try:
+        apply_env_overrides(force=True)
+    except Exception as e:
+        print("⚠️ apply_env_overrides:", e)
+    for e in errors:
+        flash("⚠️ " + e)
+    if changed:
+        flash(f"{changed} مقدار ذخیره شد؛ بات حداکثر تا ~۱۵ ثانیه‌ی دیگه اعمالش می‌کنه.")
+    elif not errors:
+        flash("تغییری ثبت نشد.")
+    return redirect(url_for("env_page"))
+
+
 
 
 @app.route("/healthz")

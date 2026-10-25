@@ -32,45 +32,7 @@ BASE_URL = "https://api.splus.ir/bot" + TOKEN
 CONFIG_API = os.getenv("CONFIG_API", "https://su.randomatic.ir/api/v1/configs")
 CONFIG_KEY = os.getenv("CONFIG_KEY", "").strip()
 
-# --- فروشندگی (reseller): حداقل خرید استخر برای فعال‌سازی و قیمت هر گیگ ---
-RESELLER_MIN_GB = int(os.getenv("RESELLER_MIN_GB", "50"))
-RESELLER_PRICE_PER_GB = int(os.getenv("RESELLER_PRICE_PER_GB", "2000"))
-# قیمت پله‌ای شارژ مجدد استخر: قیمت هر گیگ بر اساس «مجموع گیگی که همین بار می‌خرید» تعیین می‌شه
-# (حد بالا شاملِ همون پله است). آخرین ردیف با None یعنی «از اون به بالا».
-RESELLER_TOPUP_MIN_GB = 1
-RESELLER_TOPUP_TIERS = [(10, 3500), (20, 3000), (30, 2500), (None, 2000)]
-
-
-def reseller_topup_rate(gb):
-    """قیمت هر گیگ (تومان) برای خرید gb گیگ (پله‌ها از پنل ادمین قابل تغییرن)."""
-    tiers = get_reseller_topup_tiers()
-    for limit, rate in tiers:
-        if limit is None or gb <= limit:
-            return rate
-    return tiers[-1][1]
-
-
-def reseller_tiers_text(chat_id=None):
-    lang = get_user_lang(chat_id) if chat_id is not None else 'fa'
-    lines, prev = [], 0
-    for limit, rate in get_reseller_topup_tiers():
-        if limit is None:
-            lines.append(u(lang, 'tier_line_last', prev=prev, rate=f'{rate:,}'))
-        elif prev == 0:
-            lines.append(u(lang, 'tier_line_first', limit=limit, rate=f'{rate:,}'))
-        else:
-            lines.append(u(lang, 'tier_line_range', prev=prev, limit=limit, rate=f'{rate:,}'))
-        prev = limit
-    return '\n'.join(lines)
-
-
-def reseller_price_range_text(chat_id):
-    tiers = get_reseller_topup_tiers()
-    return u(chat_id, 'price_range', low=f'{tiers[-1][1]:,}', high=f'{tiers[0][1]:,}')
-
-
-RESELLER_API_BASE = os.getenv("RESELLER_API_BASE", "http://YOUR-SERVER-IP:8088")
-# آدرس پنلی که فروشنده بعد از خرید استخر گیگ باهاش کانفیگ می‌سازه (پیش‌فرض: همون آدرس API)
+# آدرس پنل فروشندگی (فقط وقتی سرویس خودش آدرس نداده، به‌عنوان جایگزین نشون داده می‌شه)
 RESELLER_PANEL_URL = os.getenv("RESELLER_PANEL_URL", "https://just-reseller-panel-six.vercel.app/")
 ADMIN_ID = int(os.getenv("ADMIN_ID", "48985781"))
 
@@ -185,7 +147,6 @@ def get_topup_multiplier():
 # ---------------------------------------------------------------------------
 # پارامترهای قابل‌تغییر از پنل وب (جدول settings). مقدار env/کد فقط fallback است.
 # ---------------------------------------------------------------------------
-DEFAULT_RESELLER_TIERS_STR = '10:3500,20:3000,30:2500,*:2000'
 APP_LINK_DEFAULTS = [
     ('android', os.getenv('APP_LINK_ANDROID', 'https://play.google.com/store/apps/details?id=com.v2pro.client')),
     ('ios', os.getenv('APP_LINK_IOS', 'https://apps.apple.com/us/app/v2pro/id6801607092')),
@@ -209,46 +170,8 @@ def _setting_float(key, default):
         return float(default)
 
 
-def get_reseller_min_gb():
-    return max(1, _setting_int('reseller_min_gb', RESELLER_MIN_GB))
-
-
-def get_reseller_price_per_gb():
-    return max(0, _setting_int('reseller_price_per_gb', RESELLER_PRICE_PER_GB))
-
-
-def get_reseller_topup_min_gb():
-    return max(1, _setting_int('reseller_topup_min_gb', RESELLER_TOPUP_MIN_GB))
-
-
 def get_reseller_panel_url():
     return get_setting('reseller_panel_url', RESELLER_PANEL_URL) or RESELLER_PANEL_URL
-
-
-def parse_reseller_tiers(raw):
-    """'10:3500,20:3000,*:2000' -> [(10, 3500), (20, 3000), (None, 2000)]"""
-    finite, rest = [], []
-    for part in str(raw or '').split(','):
-        part = part.strip()
-        if ':' not in part:
-            continue
-        lim, rate = (x.strip() for x in part.split(':', 1))
-        try:
-            rate_i = int(rate)
-            lim_v = None if lim in ('*', '') else int(lim)
-        except ValueError:
-            continue
-        (rest if lim_v is None else finite).append((lim_v, rate_i))
-    finite.sort(key=lambda t: t[0])
-    if not finite and not rest:
-        return list(RESELLER_TOPUP_TIERS)
-    if not rest:
-        rest = [(None, finite[-1][1])]
-    return finite + rest[:1]
-
-
-def get_reseller_topup_tiers():
-    return parse_reseller_tiers(get_setting('reseller_topup_tiers', DEFAULT_RESELLER_TIERS_STR))
 
 
 def get_trial_gb():
@@ -523,13 +446,7 @@ UI_TEXT = {
             '💵 مبلغ فعال‌سازی: <b>{activation_price}</b> تومان\n'
         ),
         'btn_reseller_activate': '✅ فعال‌سازی فروشندگی',
-        'reseller_activated': (
-            '🎉 <b>فروشندگی شما فعال شد!</b>\n{divider}\n'
-            '📦 استخر اولیه: <b>{gb} گیگ</b>\n\n'
-            '🌐 <b>آدرس پنل:</b>\n<code>{panel_url}</code>\n\n'
-            '⚠️ <b>توجه:</b> اگه پنل باز نشد یا لود نمی‌شد، حتماً با <b>VPN</b> تست کنید.\n\n'
-            '👇 حالا یه <b>نام کاربری</b> و <b>رمز عبور</b> برای ورود به پنل انتخاب کنید.'
-        ),
+
         'reseller_ask_username': (
             '👤 یه <b>نام کاربری</b> برای ورود به پنل بفرستید.\n'
             'فقط حرف انگلیسی، عدد، _ و نقطه — بین {min_len} تا {max_len} کاراکتر.'
@@ -548,29 +465,14 @@ UI_TEXT = {
             '🌐 آدرس پنل:\n<code>{panel_url}</code>\n\n'
             'هر وقت خواستید از منوی «فروشنده شو ← تغییر نام کاربری / رمز» عوضش کنید.'
         ),
-        'reseller_creds_menu': (
-            '🔑 <b>اطلاعات ورود به پنل</b>\n{divider}\n'
-            '👤 نام کاربری فعلی: <code>{username}</code>\n\n'
-            'کدوم رو می‌خواید عوض کنید؟'
-        ),
-        'btn_change_username': '👤 تغییر نام کاربری',
+
         'btn_change_password': '🔑 تغییر رمز عبور',
-        'reseller_ask_new_username': '👤 <b>نام کاربری جدید</b> رو بفرستید (حرف انگلیسی، عدد، _ و نقطه؛ ۳ تا ۲۰ کاراکتر).',
         'reseller_ask_new_password': (
             '🔑 <b>رمز عبور جدید</b> رو بفرستید (حداقل {min_len} کاراکتر).\n'
             'پیامی که رمز توشه بعد از ارسال حذف می‌شه.'
         ),
-        'reseller_username_changed': '✅ نام کاربری به <code>{username}</code> تغییر کرد. دفعه‌ی بعد با همین وارد پنل بشید.',
         'reseller_password_changed': '✅ رمز عبور تغییر کرد. دفعه‌ی بعد با رمز جدید وارد پنل بشید.',
-        'reseller_creds_missing': '⚠️ هنوز نام کاربری و رمز ورود به پنل رو تنظیم نکردید.',
-        'reseller_activate_confirm_title': (
-            '🧾 <b>تایید فعال‌سازی فروشندگی</b>\n{divider}\n'
-            '📦 استخر اولیه: <b>{gb}</b> گیگ\n'
-            '💰 قیمت هر گیگ: <b>{price_per_gb}</b> تومان\n'
-            '{divider}\n'
-            '💵 مبلغ قابل پرداخت: <b>{price}</b> تومان\n\n'
-            'مبلغ از کیف پولتون کم می‌شه و بعد از تایید، آدرس پنل تحویل داده می‌شه و نام کاربری و رمز ورودتون رو انتخاب می‌کنید. تایید می‌کنید؟'
-        ),
+
         'reseller_dashboard': (
             '🧑‍💼 <b>پنل فروشندگی</b>\n{divider}\n'
             '📦 استخر باقیمونده: <b>{gb_balance}</b> گیگ\n'
@@ -579,51 +481,11 @@ UI_TEXT = {
             '🌐 آدرس پنل: <code>{panel_url}</code>\n'
             '{creds_line}\n'
         ),
-        'btn_reseller_topup': '➕ افزایش استخر گیگ',
-        'btn_reseller_regen': '🔑 تغییر نام کاربری / رمز',
-        'reseller_topup_prompt': (
-            '➕ <b>افزایش استخر گیگ</b>\n{divider}\n'
-            '💰 قیمت هر گیگ بر اساس حجم خرید:\n{tiers}\n\n'
-            'چند گیگ می‌خواید به استخرتون اضافه بشه؟ فقط عدد بفرستید (حداقل {min_gb} گیگ).'
-        ),
-        'reseller_topup_min': '⚠️ حداقل خرید {min_gb} گیگ است. یه عدد بزرگ‌تر بفرستید.',
-        'reseller_topup_confirm_title': (
-            '📦 <b>{gb}</b> گیگ × <b>{rate:,}</b> تومان = <b>{price:,}</b> تومان\n'
-            'از کیف پولتون کم می‌شه و به استخر اضافه می‌شه. تایید می‌کنید؟'
-        ),
-        'reseller_topup_done': '✅ {gb} گیگ به استخر شما اضافه شد. موجودی جدید: {gb_balance} گیگ.',
-        'btn_reseller_make': '🛠 ساخت کانفیگ جدید',
-        'btn_reseller_mylist': '📋 کانفیگ‌های ساخته‌شده‌ی من',
-        'reseller_mk_ask_type': '🛠 <b>ساخت کانفیگ جدید</b>\n{divider}\nنوع کانفیگ رو انتخاب کنید:',
-        'reseller_mk_ask_gb': '📶 چند گیگابایت از استخرتون کم بشه؟ (فقط عدد بفرستید — موجودی فعلی: {gb_balance} گیگ)',
-        'reseller_mk_ask_days': '⏳ مدت اعتبار چند روز باشه؟ (فقط عدد بفرستید)',
-        'reseller_mk_ask_label': '🏷 یه اسم/لیبل براش بفرستید (برای اسم خودکار، فقط - بفرستید).',
-        'reseller_mk_confirm_title': (
-            '🧾 <b>تایید ساخت کانفیگ</b>\n{divider}\n'
-            '🏷 نام: <b>{label}</b>\n'
-            '🧩 نوع: <b>{ctype_label}</b>\n'
-            '📶 حجم: <b>{gb}</b> گیگابایت (از استخر کم می‌شه)\n'
-            '⏳ مدت: <b>{days}</b> روز (تا {expiry})\n\n'
-            'موجودی استخر بعد از این ساخت: <b>{gb_after}</b> گیگ'
-        ),
-        'reseller_mk_insufficient': '⚠️ استخر گیگ شما کافی نیست. موجودی فعلی: {gb_balance} گیگ.',
-        'reseller_mk_panel_error': '❌ خطا در ساخت کانفیگ از سمت پنل. گیگ به استخرتون برگشت. لطفاً بعداً دوباره تلاش کنید.',
-        'reseller_mk_success': (
-            '✅ <b>کانفیگ ساخته شد</b>\n{divider}\n'
-            '🏷 نام: <b>{label}</b>\n'
-            '🧩 نوع: <b>{ctype_label}</b>\n'
-            '📶 حجم: <b>{gb}</b> گیگابایت\n'
-            '📅 تاریخ ساخت: <b>{created}</b>\n'
-            '⏳ تاریخ انقضا: <b>{expiry}</b>\n'
-            '📦 موجودی باقیمونده‌ی استخر: <b>{gb_after}</b> گیگ\n{divider}\n'
-            '🔗 لینک اتصال:\n<code>{sub_url}</code>'
-        ),
-        'reseller_mylist_empty': '📭 هنوز از پنل فروشندگی کانفیگی نساختید.',
-        'reseller_mylist_header': '📋 <b>{n} کانفیگ آخر شما</b>',
-        'reseller_mylist_item': (
-            '<b>{i}. {label}</b> — {ctype_label} — {gb} گیگ — {days} روز\n'
-            '📅 {created} {status}'
-        ),
+
+
+
+
+
         'guide_text': (
             '📲 <b>برنامه‌ی اتصال V2Pro</b>\n{divider}\n'
             'با این برنامه می‌تونید کانفیگ، DNS و همه‌ی سرویس‌هایی که از ربات می‌خرید رو وارد و مدیریت کنید.\n\n'
@@ -874,12 +736,6 @@ UI_TEXT = {
 UI_TEXT['fa'].update({
     'disabled_feature': '⛔ این قابلیت در حال حاضر توسط مدیریت غیرفعال شده است.',
     'price_unit_suffix': ' تومان/گیگ',
-    'price_range': '{low} تا {high}',
-    'tier_line_first': '• تا {limit} گیگ: <b>{rate}</b> تومان',
-    'tier_line_range': '• {prev} تا {limit} گیگ: <b>{rate}</b> تومان',
-    'tier_line_last': '• {prev} گیگ به بالا: <b>{rate}</b> تومان',
-    'reseller_status_active': 'فعال ✅',
-    'reseller_status_blocked': 'مسدود ⛔️',
     'btn_reseller': '🧑‍💼 فروشنده شو',
     'topup_approved_mult': '✅ کیف پول شما به مبلغ <b>{credited}</b> تومان شارژ شد (واریزی {amount} تومان × ضریب {multiplier}).',
     'topup_approved': '✅ کیف پول شما به مبلغ <b>{credited}</b> تومان شارژ شد.',
@@ -917,8 +773,8 @@ UI_TEXT['fa'].update({
         '⏳ این درخواست {minutes} دقیقه اعتبار داره.'
     ),
     'topup_donito_busy': '⚠️ الان نتونستم مبلغ پرداخت اختصاصی بسازم. چند لحظه دیگه دوباره امتحان کنید.',
-    'topup_donito_not_yet': '⏳ هنوز پرداختی با این مبلغ پیدا نشد. اگه همین الان پرداخت کردید چند ثانیه صبر کنید، خودکار شارژ می‌شه.',
-    'topup_donito_expired': '⌛️ مهلت درخواست شارژ تموم شد. اگه پرداخت کردید با پشتیبانی تماس بگیرید؛ وگرنه دوباره شارژ رو شروع کنید.',
+    'topup_donito_not_yet': '⏳ هنوز پرداختی با این مبلغ پیدا نشد. اگه همین الان پرداخت کردید چند ثانیه صبر کنید، خودکار شارژ می‌شه.\n\nاگه مطمئنید پرداخت کردید ولی خودکار شارژ نمی‌شه، دکمه‌ی پایین رو بزنید و کد پیگیری یا اسمی که باهاش دونیت کردید رو بفرستید تا ادمین دستی تایید کنه.',
+    'topup_donito_expired': '⌛️ مهلت درخواست شارژ تموم شد. اگه پرداخت کردید دکمه‌ی پایین رو بزنید و کد پیگیری یا اسمی که باهاش دونیت کردید رو بفرستید تا ادمین دستی تایید کنه؛ وگرنه دوباره شارژ رو شروع کنید.',
     'admin_auto_approved_donito': '🤖 تأیید خودکار: مبلغ پرداخت با دونیت دونیتو خورد',
     'btn_topup_crypto': '🪙 پرداخت با رمزارز',
     'topup_choose_coin': '🪙 با کدوم رمزارز پرداخت می‌کنید؟',
@@ -982,8 +838,8 @@ UI_TEXT['en'].update({
         '⏳ This request is valid for {minutes} minutes.'
     ),
     'topup_donito_busy': '⚠️ Could not create a unique payment amount right now. Please try again shortly.',
-    'topup_donito_not_yet': '⏳ No payment with this amount found yet. If you just paid, wait a few seconds; it will be credited automatically.',
-    'topup_donito_expired': '⌛️ Your top-up request expired. If you paid, please contact support; otherwise start a new top-up.',
+    'topup_donito_not_yet': '⏳ No payment with this amount found yet. If you just paid, wait a few seconds; it will be credited automatically.\n\nIf you are sure you paid but it is not credited, tap the button below and send your tracking code or the name you donated with, so the admin can approve it manually.',
+    'topup_donito_expired': '⌛️ Your top-up request expired. If you paid, tap the button below and send your tracking code or the name you donated with so the admin can approve it manually; otherwise start a new top-up.',
     'btn_topup_crypto': '🪙 Pay with crypto',
     'topup_choose_coin': '🪙 Which cryptocurrency do you want to pay with?',
     'topup_choose_method_first': '💠 Wallet top-up\nChoose a payment method:',
@@ -1031,12 +887,6 @@ UI_TEXT['en'].update({
 UI_TEXT['en'].update({
     'disabled_feature': '⛔ This feature is currently disabled by the administrator.',
     'price_unit_suffix': ' Toman/GB',
-    'price_range': '{low} to {high}',
-    'tier_line_first': '• Up to {limit} GB: <b>{rate}</b> Toman',
-    'tier_line_range': '• {prev} to {limit} GB: <b>{rate}</b> Toman',
-    'tier_line_last': '• {prev} GB and above: <b>{rate}</b> Toman',
-    'reseller_status_active': 'Active ✅',
-    'reseller_status_blocked': 'Blocked ⛔️',
     'btn_reseller': '🧑‍💼 Become a Reseller',
     'topup_approved_mult': '✅ Your wallet was topped up by <b>{credited}</b> Toman (deposit {amount} Toman × multiplier {multiplier}).',
     'topup_approved': '✅ Your wallet was topped up by <b>{credited}</b> Toman.',
@@ -1237,6 +1087,98 @@ UI_TEXT['en'].update({
     ),
 })
 
+
+
+# ---- قابلیت‌های جدید: تایید دستی دونیتو، بسته‌های آماده، هشدار انقضا/حجم، دکمه‌ی وضعیت فروشندگی ----
+UI_TEXT['fa'].update({
+    'btn_reseller_status': '📊 وضعیت فروشندگی',
+    # تایید دستی پرداخت دونیتو
+    'btn_donito_manual': '📨 پرداخت کردم ولی شارژ نشد',
+    'donito_manual_ask': (
+        '🧾 <b>تایید دستی پرداخت</b>\n{divider}\n'
+        'اگه پرداخت کردید ولی شارژ خودکار انجام نشد، <b>کد پیگیری</b> پرداخت یا <b>اسمی که باهاش دونیت کردید</b> رو همین‌جا بفرستید تا ادمین بررسی و دستی تایید کنه.\n'
+        '💵 مبلغ درخواست شما: <b>{amount}</b> تومان\n\n'
+        '📎 اگه خواستید می‌تونید اسکرین‌شات پرداخت رو هم بفرستید.'
+    ),
+    'donito_manual_sent': '✅ اطلاعات پرداختتون برای ادمین ارسال شد. بعد از بررسی، کیف پولتون شارژ می‌شه و خبر می‌دیم.',
+    'donito_manual_bad': '⚠️ لطفاً کد پیگیری یا اسمی که باهاش دونیت کردید رو (متن) بفرستید.',
+    'donito_manual_closed': '⚠️ این درخواست دیگه باز نیست (قبلاً تایید/رد شده یا پیدا نشد). اگه مشکلی هست با پشتیبانی در تماس باشید.',
+    'admin_donito_manual': (
+        '🧾 <b>درخواست تایید دستی (دونیتو)</b>\n{divider}\n'
+        '👤 کاربر: <code>{user_id}</code>{uname}\n'
+        '💵 مبلغ درخواست: <b>{amount}</b> تومان\n'
+        '🎫 شناسه درخواست: <b>{req_id}</b>\n'
+        '📝 کد پیگیری / اسم دونیت کاربر:\n<code>{note}</code>\n\n'
+        '⚠️ قبل از تایید، پرداخت رو تو پنل دونیتو چک کنید؛ با تایید، کل مبلغ درخواست به کیف پول کاربر اضافه می‌شه.'
+    ),
+    # بسته‌های آماده
+    'plans_menu_text': (
+        '🛍 <b>بسته‌های آماده</b>\n{divider}\n'
+        'یکی از بسته‌ها رو انتخاب کنید، یا «خرید دلخواه» رو بزنید تا خودتون حجم و مدت رو تنظیم کنید.\n\n'
+        '💳 موجودی فعلی: <b>{wallet}</b> تومان'
+    ),
+    'btn_buy_custom': '🛠 خرید دلخواه (انتخاب حجم و مدت)',
+    'plan_not_found': '⚠️ این بسته دیگه موجود نیست. لطفاً دوباره از منوی خرید انتخاب کنید.',
+    # هشدارها
+    'btn_alert_manage': '⚙️ مدیریت / تمدید کانفیگ',
+    'alert_exp_soon': (
+        '⏰ <b>هشدار انقضا</b>\n{divider}\n'
+        'کانفیگ <b>{label}</b> فقط <b>{days}</b> روز دیگه ({date}) منقضی می‌شه.\n'
+        'برای اینکه سرویستون قطع نشه، از دکمه‌ی پایین تمدیدش کنید.'
+    ),
+    'alert_expired': (
+        '⛔️ <b>کانفیگ منقضی شد</b>\n{divider}\n'
+        'مدت اعتبار کانفیگ <b>{label}</b> تموم شده. برای ادامه‌ی استفاده، تمدیدش کنید.'
+    ),
+    'alert_vol_low': (
+        '⚠️ <b>هشدار حجم</b>\n{divider}\n'
+        'حدود <b>{percent}٪</b> از حجم کانفیگ <b>{label}</b> مصرف شده و فقط <b>{remaining}</b> گیگ مونده.\n'
+        'قبل از تموم شدن، تمدیدش کنید.'
+    ),
+    'alert_vol_done': (
+        '🚫 <b>حجم تموم شد</b>\n{divider}\n'
+        'حجم کانفیگ <b>{label}</b> به پایان رسیده. برای ادامه‌ی استفاده، تمدیدش کنید.'
+    ),
+})
+UI_TEXT['en'].update({
+    'btn_reseller_status': '📊 Seller status',
+    'btn_donito_manual': '📨 I paid but was not credited',
+    'donito_manual_ask': (
+        '🧾 <b>Manual payment review</b>\n{divider}\n'
+        'If you paid but the automatic top-up did not happen, send your <b>tracking code</b> or the <b>name you donated with</b> here and the admin will review and approve it manually.\n'
+        '💵 Your request amount: <b>{amount}</b> Toman\n\n'
+        '📎 You may also send a screenshot of the payment.'
+    ),
+    'donito_manual_sent': '✅ Your payment details were sent to the admin. Your wallet will be credited after review and we will let you know.',
+    'donito_manual_bad': '⚠️ Please send your tracking code or the name you donated with (text).',
+    'donito_manual_closed': '⚠️ This request is no longer open (already approved/rejected or not found). Contact support if there is a problem.',
+    'plans_menu_text': (
+        '🛍 <b>Ready-made plans</b>\n{divider}\n'
+        'Pick a plan, or tap “Custom purchase” to choose the volume and duration yourself.\n\n'
+        '💳 Current balance: <b>{wallet}</b> Toman'
+    ),
+    'btn_buy_custom': '🛠 Custom purchase (choose volume & days)',
+    'plan_not_found': '⚠️ This plan is no longer available. Please pick again from the buy menu.',
+    'btn_alert_manage': '⚙️ Manage / renew config',
+    'alert_exp_soon': (
+        '⏰ <b>Expiry warning</b>\n{divider}\n'
+        'Your config <b>{label}</b> expires in <b>{days}</b> day(s) ({date}).\n'
+        'Renew it with the button below so your service is not cut.'
+    ),
+    'alert_expired': (
+        '⛔️ <b>Config expired</b>\n{divider}\n'
+        'The validity of your config <b>{label}</b> has ended. Renew it to keep using it.'
+    ),
+    'alert_vol_low': (
+        '⚠️ <b>Low data warning</b>\n{divider}\n'
+        'About <b>{percent}%</b> of config <b>{label}</b> is used; only <b>{remaining}</b> GB left.\n'
+        'Renew it before it runs out.'
+    ),
+    'alert_vol_done': (
+        '🚫 <b>Data used up</b>\n{divider}\n'
+        'The data of config <b>{label}</b> is finished. Renew it to keep using it.'
+    ),
+})
 
 # بعضی متن‌های فارسی از قبل تو پنل زیر کلیدهای قدیمی (text_*, ctype_label_*)
 # ذخیره می‌شدن؛ برای اینکه سفارشی‌سازی‌های قبلی ادمین از بین نره، همون کلیدها
@@ -1441,9 +1383,7 @@ def init_db():
         c.execute('CREATE INDEX IF NOT EXISTS idx_orders_user ON orders (user_id, id)')
     except Exception:
         pass
-    # فروشندگی: هر فروشنده یه استخر گیگ داره (gb_balance) که با قیمت تخفیف‌دار
-    # (get_reseller_price_per_gb()) پر می‌شه؛ سرویس API جدا (reseller_api.py) از همین
-    # جدول‌ها می‌خونه/می‌نویسه، پس ساختشون اینجاست تا هر دو سرویس هم‌نظر باشن.
+    # جدول قدیمی فروشنده‌ها (فقط برای نام کاربری/رمزِ فروشنده‌های قبلی نگه داشته شده؛ استخر گیگ حذف شده)
     c.execute("""CREATE TABLE IF NOT EXISTS resellers (
         user_id INTEGER PRIMARY KEY,
         api_key TEXT UNIQUE,
@@ -1453,29 +1393,6 @@ def init_db():
         status TEXT DEFAULT 'active',
         created_at TEXT
     )""")
-    c.execute("""CREATE TABLE IF NOT EXISTS reseller_pool_log (
-        id INTEGER PRIMARY KEY AUTOINCREMENT,
-        user_id INTEGER,
-        gb REAL,
-        price INTEGER,
-        created_at TEXT
-    )""")
-    c.execute("""CREATE TABLE IF NOT EXISTS reseller_api_configs (
-        id INTEGER PRIMARY KEY AUTOINCREMENT,
-        reseller_id INTEGER,
-        config_id TEXT,
-        sub_url TEXT,
-        gb REAL,
-        days INTEGER,
-        label TEXT,
-        type TEXT,
-        active INTEGER DEFAULT 1,
-        created_at TEXT
-    )""")
-    try:
-        c.execute('CREATE INDEX IF NOT EXISTS idx_reseller_cfg ON reseller_api_configs (reseller_id, id)')
-    except Exception:
-        pass
     c.execute('CREATE TABLE IF NOT EXISTS free_trials (user_id INTEGER PRIMARY KEY)')
     # حساب فروشندگی روی پنل فروشنده‌ی su.randomatic.ir (بدون رمز؛ رمز فقط تو خودِ سرویس می‌مونه)
     c.execute('''CREATE TABLE IF NOT EXISTS seller_accounts (
@@ -1492,12 +1409,16 @@ def init_db():
         created_at TEXT
     )''')
     for _col in ("method TEXT DEFAULT 'card'", "crypto_amount TEXT", "crypto_price TEXT",
-                 "coin_symbol TEXT", "coin_qty TEXT", "tx_hash TEXT", "matched_tx TEXT", "req_ts REAL"):
+                 "coin_symbol TEXT", "coin_qty TEXT", "tx_hash TEXT", "matched_tx TEXT", "req_ts REAL",
+                 "user_note TEXT"):
         try:
             c.execute('ALTER TABLE topup_requests ADD COLUMN ' + _col)
         except Exception:
             pass  # ستون از قبل هست
     c.execute('CREATE TABLE IF NOT EXISTS crypto_deposits_used (tx TEXT PRIMARY KEY, req_id INTEGER, created_at TEXT)')
+    # هشدارهای ارسال‌شده‌ی انقضا/حجم؛ ref = تاریخ انقضا یا حجم کل زمان ارسال (با تمدید عوض می‌شه و هشدار دوباره مجازه)
+    c.execute('CREATE TABLE IF NOT EXISTS config_alerts (config_row_id INTEGER, kind TEXT, ref TEXT, sent_at TEXT, '
+              'PRIMARY KEY (config_row_id, kind))')
     c.execute('CREATE TABLE IF NOT EXISTS settings (key TEXT PRIMARY KEY, value TEXT)')
     c.execute('''CREATE TABLE IF NOT EXISTS discount_codes (
         code TEXT PRIMARY KEY,
@@ -1518,7 +1439,6 @@ def init_db():
         'ALTER TABLE users ADD COLUMN kb_style TEXT',
         'ALTER TABLE users ADD COLUMN lang TEXT',
         'ALTER TABLE users ADD COLUMN referred_by INTEGER',
-        "ALTER TABLE reseller_api_configs ADD COLUMN source TEXT DEFAULT 'api'",
         'ALTER TABLE resellers ADD COLUMN username TEXT',
         'ALTER TABLE resellers ADD COLUMN password_hash TEXT',
         'ALTER TABLE resellers ADD COLUMN password_plain TEXT',
@@ -2494,7 +2414,8 @@ def donito_fetch_recent(force=False):
             ts = time.time()                    # تاریخ نامعتبر/نبود: همین الان فرض می‌شه (تطبیق با مبلغ یکتا و id یک‌بارمصرف امنه)
         if not did:
             continue
-        out.append({'id': did, 'amount': amount, 'ts': ts, 'message': str(it.get('donator_message') or '')})
+        out.append({'id': did, 'amount': amount, 'ts': ts, 'message': str(it.get('donator_message') or ''),
+                    'name': str(it.get('donator_name') or it.get('donor_name') or it.get('name') or '')})
     out.sort(key=lambda d: d['ts'])
     _donito_cache['t'], _donito_cache['v'] = time.time(), out
     _seen, _raw = set(), []
@@ -2590,7 +2511,9 @@ def donito_expire_old():
     for rid, uid in list_expired_donito_requests():
         try:
             if claim_topup_pending(rid, 'expired'):
-                send_message(uid, u(uid, 'topup_donito_expired'))
+                send_message(uid, u(uid, 'topup_donito_expired'),
+                             reply_markup={'inline_keyboard': [[{'text': u(uid, 'btn_donito_manual'),
+                                                                 'callback_data': 'donito_manual_' + str(rid)}]]})
         except Exception as e:
             print('⚠️ donito_expire_old:', _donito_scrub(e))
 
@@ -2654,10 +2577,100 @@ def donito_check_for_user_async(chat_id, req_id):
                 print('⚠️ donito check:', _donito_scrub(e))
             req = get_topup_request(req_id)
             if req and req[1] == chat_id and req[3] == 'pending':
-                send_message(chat_id, u(chat_id, 'topup_donito_not_yet'))
+                send_message(chat_id, u(chat_id, 'topup_donito_not_yet'),
+                             reply_markup={'inline_keyboard': [[{'text': u(chat_id, 'btn_donito_manual'),
+                                                                 'callback_data': 'donito_manual_' + str(req_id)}]]})
         except Exception as e:
             print('⚠️ donito_check_for_user_async:', _donito_scrub(e))
     threading.Thread(target=_run, daemon=True).start()
+
+
+
+@with_db_retry
+def donito_submit_manual(req_id, user_id, note):
+    """درخواست دونیتو رو (حتی اگه منقضی شده) برای بررسی دستیِ ادمین باز می‌کنه: method → donito_manual
+    تا نگهبانِ خودکار دیگه بهش دست نزنه. True اگه همین الان ثبت شد."""
+    conn = get_conn()
+    c = conn.cursor()
+    q = ("UPDATE topup_requests SET status='pending', method='donito_manual', user_note=? "
+         "WHERE id=? AND user_id=? AND status IN ('pending','expired') AND method IN ('donito','donito_manual')")
+    try:
+        c.execute(q + ' RETURNING id', (note, req_id, user_id))
+        ok = c.fetchone() is not None
+    except Exception as e:
+        if 'stream' in str(e).lower():
+            raise
+        c.execute(q, (note, req_id, user_id))
+        ok = (c.rowcount or 0) > 0
+    conn.commit()
+    conn.close()
+    return ok
+
+
+def donito_manual_start(chat_id, req_id):
+    req = get_topup_request(req_id)
+    if (not req or req[1] != chat_id or req[3] not in ('pending', 'expired')
+            or get_topup_method(req_id) not in ('donito', 'donito_manual')):
+        send_message(chat_id, u(chat_id, 'donito_manual_closed'))
+        return
+    user_steps[str(chat_id)] = {'step': 'donito_manual_proof', 'req_id': req_id}
+    send_message(chat_id, u(chat_id, 'donito_manual_ask', divider=DIVIDER, amount=f'{req[2]:,}'),
+                 reply_markup=cancel_kb(chat_id))
+
+
+def _donito_manual_hint(req_id, amount):
+    """خلاصه‌ی دونیت‌های اخیر برای ادمین؛ اگه دقیقاً یه دونیتِ مصرف‌نشده با همین مبلغ باشه، به درخواست وصلش می‌کنه
+    (تا با تایید ادمین «مصرف‌شده» حساب بشه و برای درخواست دیگه‌ای استفاده نشه)."""
+    try:
+        donations = donito_fetch_recent(force=True)
+    except Exception as e:
+        return '\n\n🔎 خواندن دونیت‌ها ناموفق بود: ' + _html.escape(_donito_scrub(e)[:150])
+    lines = []
+    same = [d for d in donations if d['amount'] == amount]
+    free_same = [d for d in same if not is_deposit_used('donito:' + d['id'])]
+    if len(free_same) == 1:
+        try:
+            set_request_matched_tx(req_id, 'donito:' + free_same[0]['id'])
+        except Exception as e:
+            print('⚠️ ثبت matched_tx دونیتو ناموفق:', e)
+    if same:
+        for d in same[-3:]:
+            used = ' (قبلاً مصرف شده ⚠️)' if is_deposit_used('donito:' + d['id']) else ' (مصرف‌نشده ✅)'
+            who = (' — ' + _html.escape(d['name'])) if d.get('name') else ''
+            lines.append(f"• {d['amount']:,} — {fmt_iran_datetime(d['ts'])}{who}{used}")
+        head = '🔎 دونیت هم‌مبلغ تو دونیتو پیدا شد:'
+    else:
+        head = '🔎 دونیتی با این مبلغ دقیق تو ۵۰ دونیت آخر پیدا نشد (ممکنه مبلغ اشتباه بوده یا قدیمی‌تره). آخرین دونیت‌ها:'
+        for d in donations[-5:]:
+            who = (' — ' + _html.escape(d['name'])) if d.get('name') else ''
+            msg = (' — «' + _html.escape(d['message'][:40]) + '»') if d.get('message') else ''
+            lines.append(f"• {d['amount']:,} — {fmt_iran_datetime(d['ts'])}{who}{msg}")
+    return '\n\n' + head + '\n' + '\n'.join(lines)
+
+
+def donito_manual_submit_flow(chat_id, req_id, note, photo_id, sender):
+    req = get_topup_request(req_id)
+    user_steps[str(chat_id)] = {}
+    if not req or req[1] != chat_id or not donito_submit_manual(req_id, chat_id, note[:500]):
+        send_message(chat_id, u(chat_id, 'donito_manual_closed'))
+        return
+    send_message(chat_id, u(chat_id, 'donito_manual_sent'))
+
+    def _notify():
+        try:
+            uname = (' (@' + _html.escape(sender.get('username')) + ')') if sender.get('username') else ''
+            text = u('fa', 'admin_donito_manual', divider=DIVIDER, user_id=str(chat_id), uname=uname,
+                     amount=f'{req[2]:,}', req_id=str(req_id), note=_html.escape(note[:500]))
+            text += _donito_manual_hint(req_id, req[2])
+            kb = {'inline_keyboard': [[
+                {'text': u('fa', 'admin_btn_accept'), 'callback_data': 'topup_acc_' + str(req_id)},
+                {'text': u('fa', 'admin_btn_reject'), 'callback_data': 'topup_rej_' + str(req_id)}]]}
+            send_message(ADMIN_ID, text, reply_markup=kb)
+            if photo_id:
+                send_photo(ADMIN_ID, photo_id, caption='📎 تصویر ارسالی کاربر برای درخواست #' + str(req_id))
+        except Exception as e:
+            print('⚠️ اطلاع‌رسانی تایید دستی دونیتو به ادمین ناموفق:', _donito_scrub(e))
+    threading.Thread(target=_notify, daemon=True).start()
 
 
 def donito_check_report():
@@ -2870,138 +2883,9 @@ def get_recent_orders(user_id, limit=3):
     return res
 
 
-@with_db_retry
-def get_reseller(user_id):
-    """(user_id, api_key, secret_hash, gb_balance, price_per_gb, status, created_at) یا None."""
-    conn = get_conn()
-    c = conn.cursor()
-    c.execute("SELECT user_id, api_key, secret_hash, gb_balance, price_per_gb, status, created_at "
-              "FROM resellers WHERE user_id=?", (user_id,))
-    res = c.fetchone()
-    conn.close()
-    return res
-
-
-@with_db_retry
-def create_reseller(user_id, api_key, secret_hash, gb):
-    conn = get_conn()
-    c = conn.cursor()
-    c.execute("""INSERT INTO resellers (user_id, api_key, secret_hash, gb_balance, price_per_gb, status, created_at)
-        VALUES (?, ?, ?, ?, ?, 'active', ?)
-        ON CONFLICT(user_id) DO UPDATE SET
-            gb_balance=resellers.gb_balance + excluded.gb_balance""",
-        (user_id, api_key, secret_hash, gb, get_reseller_price_per_gb(), datetime.now().isoformat()))
-    conn.commit()
-    conn.close()
-
-
 RESELLER_USERNAME_RE = re.compile(r'^[A-Za-z0-9_.]{3,20}$')
 RESELLER_PASSWORD_MIN = 6
 RESELLER_PASSWORD_MAX = 64
-_PBKDF2_ITERS = 200_000
-
-
-def hash_reseller_password(password):
-    """pbkdf2_sha256$تکرار$salt$hash — پنل با همین فرمت چک می‌کنه (رمز خام هیچ‌جا ذخیره نمی‌شه)."""
-    salt = secrets.token_hex(16)
-    dk = hashlib.pbkdf2_hmac('sha256', password.encode('utf-8'), salt.encode('utf-8'), _PBKDF2_ITERS)
-    return f'pbkdf2_sha256${_PBKDF2_ITERS}${salt}${dk.hex()}'
-
-
-@with_db_retry
-def get_reseller_username(user_id):
-    conn = get_conn()
-    c = conn.cursor()
-    c.execute("SELECT username FROM resellers WHERE user_id=?", (user_id,))
-    r = c.fetchone()
-    conn.close()
-    return (r[0] if r and r[0] else None)
-
-
-@with_db_retry
-def reseller_username_taken(username, except_user_id):
-    conn = get_conn()
-    c = conn.cursor()
-    c.execute("SELECT 1 FROM resellers WHERE username=? AND user_id<>?", (username, except_user_id))
-    r = c.fetchone()
-    conn.close()
-    return bool(r)
-
-
-@with_db_retry
-def set_reseller_username_db(user_id, username):
-    conn = get_conn()
-    c = conn.cursor()
-    c.execute("UPDATE resellers SET username=? WHERE user_id=?", (username, user_id))
-    conn.commit()
-    conn.close()
-
-
-@with_db_retry
-def set_reseller_password_db(user_id, password_hash, password_plain=None):
-    conn = get_conn()
-    c = conn.cursor()
-    c.execute("UPDATE resellers SET password_hash=?, password_plain=? WHERE user_id=?", (password_hash, password_plain, user_id))
-    conn.commit()
-    conn.close()
-
-
-@with_db_retry
-def set_reseller_credentials_db(user_id, username, password_hash, password_plain=None):
-    conn = get_conn()
-    c = conn.cursor()
-    c.execute("UPDATE resellers SET username=?, password_hash=?, password_plain=? WHERE user_id=?",
-              (username, password_hash, password_plain, user_id))
-    conn.commit()
-    conn.close()
-
-
-@with_db_retry
-def add_reseller_gb_db(user_id, gb, price):
-    conn = get_conn()
-    c = conn.cursor()
-    c.execute("UPDATE resellers SET gb_balance = gb_balance + ? WHERE user_id=?", (gb, user_id))
-    c.execute("INSERT INTO reseller_pool_log (user_id, gb, price, created_at) VALUES (?, ?, ?, ?)",
-               (user_id, gb, price, datetime.now().isoformat()))
-    conn.commit()
-    conn.close()
-
-
-@with_db_retry
-def deduct_reseller_gb_atomic(user_id, gb):
-    """فقط اگه واقعاً استخر کافی باشه کم می‌کنه (شرط تو خودِ WHERE)، تا اگه
-    فروشنده هم‌زمان هم تو بات و هم از طریق API بسازه، استخر منفی نشه."""
-    conn = get_conn()
-    c = conn.cursor()
-    c.execute('UPDATE resellers SET gb_balance = gb_balance - ? WHERE user_id=? AND gb_balance >= ?',
-              (gb, user_id, gb))
-    conn.commit()
-    ok = c.rowcount > 0
-    conn.close()
-    return ok
-
-
-@with_db_retry
-def refund_reseller_gb_db(user_id, gb):
-    conn = get_conn()
-    c = conn.cursor()
-    c.execute('UPDATE resellers SET gb_balance = gb_balance + ? WHERE user_id=?', (gb, user_id))
-    conn.commit()
-    conn.close()
-
-
-@with_db_retry
-def save_reseller_config_db(reseller_id, config_id, sub_url, gb, days, label, ctype, source='bot'):
-    conn = get_conn()
-    c = conn.cursor()
-    c.execute(
-        'INSERT INTO reseller_api_configs '
-        '(reseller_id, config_id, sub_url, gb, days, label, type, active, created_at, source) '
-        'VALUES (?, ?, ?, ?, ?, ?, ?, 1, ?, ?)',
-        (reseller_id, config_id, sub_url, gb, days, label, ctype, datetime.now().isoformat(), source)
-    )
-    conn.commit()
-    conn.close()
 
 
 @with_db_retry
@@ -4045,10 +3929,51 @@ def build_purchase_kb(chat_id):
     }
 
 
+def get_plans(active_only=True):
+    """بسته‌های آماده از settings (کلید plans، JSON). هر بسته: id, title, gb, days, price, type, active."""
+    raw = get_setting('plans', '') or ''
+    try:
+        data = json.loads(raw) if raw else []
+    except Exception:
+        data = []
+    types = get_config_types()
+    out = []
+    for p in (data if isinstance(data, list) else []):
+        try:
+            pid = str(p.get('id') or '').strip()
+            gb = float(p.get('gb'))
+            days = int(p.get('days'))
+            price = int(p.get('price'))
+        except Exception:
+            continue
+        if not pid or not math.isfinite(gb) or gb <= 0 or days <= 0 or price < 0:
+            continue
+        if active_only and not p.get('active', True):
+            continue
+        gb = int(gb) if gb == int(gb) else gb
+        ctype = p.get('type') if p.get('type') in types else 'both'
+        title = str(p.get('title') or '').strip() or f'{gb:g} گیگ / {days} روزه'
+        out.append({'id': pid, 'title': title, 'gb': gb, 'days': days, 'price': price, 'type': ctype})
+    return out
+
+
 def action_buy_menu(chat_id):
     if not is_feature_enabled('buy'):
         send_message(chat_id, u(chat_id, 'disabled_feature'))
         return
+    plans = get_plans()
+    if not plans:
+        _action_buy_custom_menu(chat_id)
+        return
+    user_steps[str(chat_id)] = {}
+    cur = u(chat_id, 'cur')
+    rows = [[{'text': f"📦 {p['title']} — {p['price']:,} {cur}", 'callback_data': 'plan_' + p['id']}] for p in plans]
+    rows.append([{'text': u(chat_id, 'btn_buy_custom'), 'callback_data': 'buy_custom'}])
+    send_message(chat_id, u(chat_id, 'plans_menu_text', divider=DIVIDER, wallet=f'{get_wallet_db(chat_id):,}'),
+                 reply_markup={'inline_keyboard': rows})
+
+
+def _action_buy_custom_menu(chat_id):
     wallet = get_wallet_db(chat_id)
     ct = get_config_types()
     user_steps[str(chat_id)] = {}
@@ -5208,6 +5133,11 @@ def get_label_to_action_key():
         en_label = get_setting('ui_en_btn_' + key, None) or UI_TEXT['en'].get('btn_' + key)
         if en_label:
             mapping[en_label] = key
+    # برچسب «وضعیت فروشندگی» (بعد از ساخت حساب) هم به همون اکشن فروشندگی می‌رسه
+    mapping[get_setting('btn_reseller_status', UI_TEXT['fa']['btn_reseller_status'])] = 'reseller'
+    _en_st = get_setting('ui_en_btn_reseller_status', None) or UI_TEXT['en'].get('btn_reseller_status')
+    if _en_st:
+        mapping[_en_st] = 'reseller'
     return mapping
 
 
@@ -5225,6 +5155,12 @@ def _chunk_pairs(items):
 def main_menu(chat_id, note=None):
     wallet = get_wallet_db(chat_id)
     labels = {key: get_button_label_for(chat_id, key, default_label) for key, default_label, _fn in BUTTON_ACTIONS}
+    try:
+        # کاربری که یک‌بار نام کاربری/رمز فروشندگی ساخته، به‌جای «دریافت پنل فروشندگی» «وضعیت فروشندگی» می‌بینه
+        if get_seller_account(chat_id):
+            labels['reseller'] = get_button_label_for(chat_id, 'reseller_status', UI_TEXT['fa']['btn_reseller_status'])
+    except Exception as e:
+        print('⚠️ تشخیص حساب فروشندگی برای برچسب دکمه ناموفق:', e)
     order = get_ordered_keys('menu_order_main', MAIN_MENU_DEFAULT_ORDER)
     if not referral_enabled():
         order = [k for k in order if k != 'referral']   # دکمه‌ی دعوت دوستان تا وقتی از پنل روشن نشده نمایش داده نمی‌شه
@@ -5357,7 +5293,7 @@ _GROUP_DISPLAY_ORDER = [
 # کلیدهای متنِ فروشندگیِ جدید (ساخت خودکار حساب روی سرویس). بقیه‌ی کلیدهای قدیمیِ ریسلر
 # (استخر گیگ، قیمت، افزایش موجودی و...) دیگه جایی استفاده نمی‌شن و تو پنل نشون داده نمی‌شن.
 _SELLER_ACTIVE_KEYS = {
-    'btn_reseller', 'btn_reseller_activate', 'btn_change_password', 'reseller_intro', 'reseller_dashboard',
+    'btn_reseller', 'btn_reseller_status', 'btn_reseller_activate', 'btn_change_password', 'reseller_intro', 'reseller_dashboard',
     'reseller_creds_line', 'reseller_ask_username', 'reseller_username_bad', 'reseller_username_taken',
     'reseller_ask_password', 'reseller_password_bad', 'reseller_creds_done', 'reseller_ask_new_password',
     'reseller_password_changed', 'seller_pass_line', 'seller_pass_missing', 'seller_error',
@@ -5399,7 +5335,7 @@ def build_text_registry():
         fa_defaults[k] = v
 
     # دکمه‌های اصلی منو و نام نوع سرویس‌های فارسی تو صفحه‌ی «ظاهر ربات» (با ترتیب) مدیریت می‌شن
-    skip_fa = {'btn_recentorders', 'btn_language', 'btn_reseller', 'btn_referral'}
+    skip_fa = {'btn_recentorders', 'btn_language', 'btn_reseller', 'btn_referral', 'btn_reseller_status'}
     fa_items = []
     # دکمه‌های منوی اصلی و نوع سرویس‌ها (فارسی) تو settings زیر کلیدهای قدیمی btn_<key> و
     # ctype_label_<key> ذخیره می‌شن (همون چیزی که صفحه‌ی «دکمه‌ها و ظاهر» هم می‌نویسه)؛
@@ -5407,6 +5343,8 @@ def build_text_registry():
     for key, default_label, _fn in BUTTON_ACTIONS:
         fa_items.append({'k': 'menu_btn_' + key, 's': 'btn_' + key, 'd': default_label, 'p': [],
                          'g': _text_group('menu_btn_' + key)})
+    fa_items.append({'k': 'menu_btn_reseller_status', 's': 'btn_reseller_status',
+                     'd': UI_TEXT['fa']['btn_reseller_status'], 'p': [], 'g': _text_group('menu_btn_reseller_status')})
     for key, default_label in CONFIG_TYPE_DEFAULT_LABELS.items():
         fa_items.append({'k': 'ctype_btn_' + key, 's': 'ctype_label_' + key, 'd': default_label, 'p': [],
                          'g': _text_group('ctype_btn_' + key)})
@@ -5562,6 +5500,115 @@ def start_health_server(port):
     return True
 
 
+
+# ---------------------------------------------------------------------------
+# هشدار انقضا و اتمام حجم کانفیگ‌ها
+# تنظیم از پنل ادمین (صفحه‌ی «هشدارها»): alerts_enabled, alert_expiry_days, alert_volume_percent,
+# alert_expired_notice, alert_interval_min. هر هشدار برای هر کانفیگ فقط یک‌بار می‌ره (تا وقتی تمدید نشه).
+# ---------------------------------------------------------------------------
+def alerts_enabled():
+    return get_setting('alerts_enabled', '1') == '1'
+
+
+@with_db_retry
+def _alerts_load_sent():
+    conn = get_conn()
+    c = conn.cursor()
+    c.execute('SELECT config_row_id, kind, ref FROM config_alerts')
+    rows = c.fetchall()
+    conn.close()
+    return {(r[0], r[1]): r[2] for r in rows}
+
+
+@with_db_retry
+def _alerts_mark(row_id, kind, ref):
+    conn = get_conn()
+    c = conn.cursor()
+    c.execute('INSERT INTO config_alerts (config_row_id, kind, ref, sent_at) VALUES (?, ?, ?, ?) '
+              'ON CONFLICT(config_row_id, kind) DO UPDATE SET ref=excluded.ref, sent_at=excluded.sent_at',
+              (row_id, kind, ref, datetime.now().isoformat()))
+    conn.commit()
+    conn.close()
+
+
+@with_db_retry
+def _alerts_candidates():
+    conn = get_conn()
+    c = conn.cursor()
+    c.execute("SELECT id, user_id, config_id, gb, label, expires_at FROM user_configs "
+              "WHERE COALESCE(status, 'active')='active' AND expires_at IS NOT NULL")
+    rows = c.fetchall()
+    conn.close()
+    return rows
+
+
+def _alert_send(uid, row_id, key, **kw):
+    kb = {'inline_keyboard': [[{'text': u(uid, 'btn_alert_manage'), 'callback_data': 'managecfg_' + str(row_id)}]]}
+    try:
+        send_message(uid, u(uid, key, divider=DIVIDER, **kw), reply_markup=kb)
+    except Exception as e:
+        print('⚠️ ارسال هشدار ناموفق:', e)
+
+
+def run_config_alerts():
+    exp_days = max(1, _setting_int('alert_expiry_days', 3))
+    vol_pct = min(100, max(1, _setting_int('alert_volume_percent', 90)))
+    notify_expired = get_setting('alert_expired_notice', '1') == '1'
+    trial_prefix = get_trial_label()
+    sent = _alerts_load_sent()
+    now = datetime.now()
+    for rid, uid, cfg_id, gb, label, expires_at in _alerts_candidates():
+        try:
+            exp = datetime.fromisoformat(expires_at)
+        except Exception:
+            continue
+        label = _html.escape(str(label or ''))
+        if trial_prefix and str(label).startswith(trial_prefix):
+            continue                                   # کانفیگ تست رایگان هشدار نمی‌گیره
+        left = (exp - now).total_seconds()
+        if left <= 0:
+            # فقط برای منقضی‌شده‌های تازه (حداکثر ۲ روز پیش) تا با اولین اجرا کل کانفیگ‌های قدیمی اسپم نشن
+            if notify_expired and -left <= 2 * 86400 and sent.get((rid, 'expired')) != expires_at:
+                _alert_send(uid, rid, 'alert_expired', label=label)
+                _alerts_mark(rid, 'expired', expires_at)
+            continue                                   # برای کانفیگِ منقضی هشدار حجم نمی‌فرستیم
+        days_left = math.ceil(left / 86400)
+        if days_left <= exp_days and sent.get((rid, 'exp_soon')) != expires_at:
+            jy, jm, jd = gregorian_to_jalali(exp.year, exp.month, exp.day)
+            _alert_send(uid, rid, 'alert_exp_soon', label=label, days=days_left, date=f'{jy:04d}/{jm:02d}/{jd:02d}')
+            _alerts_mark(rid, 'exp_soon', expires_at)
+        gb_total = float(gb or 0)
+        if gb_total <= 0:
+            continue
+        ref = '%g' % gb_total
+        if sent.get((rid, 'vol_done')) == ref:
+            continue
+        used = get_config_usage_gb(cfg_id)
+        time.sleep(0.15)                               # فشار نیاد روی API پنل
+        if used is None:
+            continue
+        used = max(0.0, float(used))
+        if used >= gb_total * 0.999:
+            _alert_send(uid, rid, 'alert_vol_done', label=label)
+            _alerts_mark(rid, 'vol_done', ref)
+            _alerts_mark(rid, 'vol_low', ref)
+        elif used / gb_total * 100 >= vol_pct and sent.get((rid, 'vol_low')) != ref:
+            _alert_send(uid, rid, 'alert_vol_low', label=label, percent=int(used / gb_total * 100),
+                        remaining=f'{max(0.0, gb_total - used):.2f}')
+            _alerts_mark(rid, 'vol_low', ref)
+
+
+def config_alerts_watcher():
+    time.sleep(90)
+    while True:
+        try:
+            if alerts_enabled():
+                run_config_alerts()
+        except Exception as e:
+            print('⚠️ config_alerts_watcher:', e)
+        time.sleep(max(5, _setting_int('alert_interval_min', 30)) * 60)
+
+
 _HEALTH_PORT = int(os.getenv("PORT", "8080"))
 # وقتی بات و پنل تو یه سرویس با start.py اجرا می‌شن، پورت مال پنله و start.py این رو ۱ می‌ذاره
 if os.getenv("DISABLE_HEALTH_SERVER") != "1" and start_health_server(_HEALTH_PORT):
@@ -5570,6 +5617,7 @@ threading.Thread(target=commands_watcher, daemon=True).start()
 threading.Thread(target=registry_watcher, daemon=True).start()
 threading.Thread(target=crypto_deposit_watcher, daemon=True).start()
 threading.Thread(target=donito_watcher, daemon=True).start()
+threading.Thread(target=config_alerts_watcher, daemon=True).start()
 print('✅ ربات با موفقیت اجرا شد.')
 last_update_id = 0
 
@@ -5606,75 +5654,6 @@ def process_update(update):
                 action_reseller_menu(chat_id)
             else:
                 _reseller_creds_start(chat_id)
-
-        elif data == 'reseller_activate_confirm':
-            s_ = user_steps.get(str(chat_id), {})
-            if get_reseller(chat_id):
-                user_steps[str(chat_id)] = {}
-                action_reseller_menu(chat_id)
-            elif s_.get('step') != 'reseller_activate_confirm':
-                main_menu(chat_id)
-            else:
-                activation_gb, activation_price = s_['gb'], s_['price']
-                wallet = get_wallet_db(chat_id)
-                if wallet < activation_price:
-                    shortfall = activation_price - wallet
-                    send_message(
-                        chat_id,
-                        u(chat_id, 'insufficient_balance', divider=DIVIDER, wallet=wallet,
-                          price=activation_price, shortfall=shortfall),
-                        reply_markup={'inline_keyboard': [[
-                            {'text': u(chat_id, 'btn_topup'), 'callback_data': 'menu_topup'}
-                        ]]}
-                    )
-                else:
-                    update_wallet_db(chat_id, -activation_price)
-                    create_reseller(chat_id, None, None, activation_gb)
-                    try:
-                        conn = get_conn(); c = conn.cursor()
-                        c.execute('INSERT INTO reseller_pool_log (user_id, gb, price, created_at) VALUES (?, ?, ?, ?)',
-                                   (chat_id, activation_gb, activation_price, datetime.now().isoformat()))
-                        conn.commit(); conn.close()
-                    except Exception as log_err:
-                        print('⚠️ ثبت لاگ فعال‌سازی فروشندگی انجام نشد:', log_err)
-                    send_message(
-                        chat_id,
-                        u(chat_id, 'reseller_activated', divider=DIVIDER, gb=activation_gb,
-                          panel_url=get_reseller_panel_url())
-                    )
-                    _reseller_creds_start(chat_id)
-
-        elif data == 'reseller_topup':
-            if not get_reseller(chat_id):
-                action_reseller_menu(chat_id)
-            else:
-                user_steps[str(chat_id)] = {'step': 'reseller_topup_gb'}
-                send_message(chat_id, u(chat_id, 'reseller_topup_prompt', divider=DIVIDER, tiers=reseller_tiers_text(chat_id),
-                                        min_gb=get_reseller_topup_min_gb()), reply_markup=cancel_kb(chat_id))
-
-        elif data == 'reseller_topup_confirm':
-            s_ = user_steps.get(str(chat_id), {})
-            if s_.get('step') == 'reseller_topup_confirm':
-                gb, price = s_['gb'], s_['price']
-                wallet = get_wallet_db(chat_id)
-                if wallet < price:
-                    shortfall = price - wallet
-                    send_message(
-                        chat_id,
-                        u(chat_id, 'insufficient_balance', divider=DIVIDER, wallet=wallet, price=price, shortfall=shortfall),
-                        reply_markup={'inline_keyboard': [[
-                            {'text': u(chat_id, 'btn_topup'), 'callback_data': 'menu_topup'}
-                        ]]}
-                    )
-                else:
-                    update_wallet_db(chat_id, -price)
-                    add_reseller_gb_db(chat_id, gb, price)
-                    row = get_reseller(chat_id)
-                    new_balance = row[3] if row else gb
-                    send_message(chat_id, u(chat_id, 'reseller_topup_done', gb=('%g' % gb), gb_balance=('%g' % new_balance)))
-                user_steps[str(chat_id)] = {}
-            else:
-                main_menu(chat_id)
 
         elif data in ('reseller_creds', 'reseller_cred_user'):
             action_reseller_menu(chat_id)
@@ -5974,6 +5953,22 @@ def process_update(update):
             send_message(chat_id, u(chat_id, 'ext_cancelled'))
             main_menu(chat_id)
 
+        elif data == 'buy_custom':
+            if is_feature_enabled('buy'):
+                _action_buy_custom_menu(chat_id)
+            else:
+                send_message(chat_id, u(chat_id, 'disabled_feature'))
+
+        elif data.startswith('plan_'):
+            _pid = data[len('plan_'):]
+            _plan = next((p for p in get_plans() if p['id'] == _pid), None)
+            if not _plan or not is_feature_enabled('buy'):
+                send_message(chat_id, u(chat_id, 'plan_not_found'))
+            else:
+                user_steps[str(chat_id)] = {'step': 'ask_label', 'gb': _plan['gb'], 'days': _plan['days'],
+                                            'price': _plan['price'], 'type': _plan['type']}
+                send_ask_label_prompt(chat_id)
+
         elif data.startswith('buytype_'):
             ctype = data.split('_', 1)[1]
             cfg_type = get_config_types().get(ctype)
@@ -6069,6 +6064,13 @@ def process_update(update):
                     start_crypto_topup(chat_id)
                 else:
                     send_message(chat_id, u(chat_id, 'disabled_feature'))
+
+        elif data.startswith('donito_manual_'):
+            try:
+                _rid = int(data.split('_')[2])
+            except (IndexError, ValueError):
+                _rid = 0
+            donito_manual_start(chat_id, _rid)
 
         elif data.startswith('donito_check_'):
             try:
@@ -6255,28 +6257,6 @@ def process_update(update):
                     action_reseller_menu(chat_id)
                 else:
                     send_message(chat_id, u(chat_id, 'seller_error', reason=res['reason']))
-
-        elif step.get('step') == 'reseller_topup_gb':
-            try:
-                gb = float(text)
-                if gb <= 0 or not math.isfinite(gb) or gb > 100000:
-                    send_message(chat_id, u(chat_id, 'ext_number_error'))
-                elif gb < get_reseller_topup_min_gb():
-                    send_message(chat_id, u(chat_id, 'reseller_topup_min', min_gb=get_reseller_topup_min_gb()))
-                else:
-                    rate = reseller_topup_rate(gb)
-                    price = round(gb * rate)
-                    user_steps[str(chat_id)] = {'step': 'reseller_topup_confirm', 'gb': gb, 'price': price}
-                    send_message(
-                        chat_id,
-                        u(chat_id, 'reseller_topup_confirm_title', gb=('%g' % gb), price=price, rate=rate),
-                        reply_markup={'inline_keyboard': [[
-                            {'text': u(chat_id, 'btn_confirm_pay'), 'callback_data': 'reseller_topup_confirm'},
-                            {'text': u(chat_id, 'btn_cancel'), 'callback_data': 'menu'},
-                        ]]}
-                    )
-            except ValueError:
-                send_message(chat_id, u(chat_id, 'number_only_error'))
 
         elif step.get('step') == 'ext_ask_gb':
             try:
@@ -6467,6 +6447,14 @@ def process_update(update):
                 send_message(ADMIN_ID, admin_caption, reply_markup=admin_kb)
             if is_crypto:
                 check_crypto_request_async(req_id)    # تطبیق با واریزهای نوبیتکس (نتیجه جدا برای ادمین می‌آد)
+
+        elif step.get('step') == 'donito_manual_proof':
+            _note = (text or message.get('caption') or '').strip()
+            _photo = message['photo'][-1]['file_id'] if 'photo' in message else None
+            if not _note and not _photo:
+                send_message(chat_id, u(chat_id, 'donito_manual_bad'), reply_markup=cancel_kb(chat_id))
+            else:
+                donito_manual_submit_flow(chat_id, step.get('req_id'), _note or '— (فقط تصویر) —', _photo, sender)
 
         elif step.get('step') == 'exchange_amount':
             handle_exchange_amount(chat_id, text)
@@ -7538,11 +7526,43 @@ def admin_remove_channel(chat_id, h):
     admin_channels_panel(chat_id, note=f'🗑 کانال {target} از عضویت اجباری حذف شد.')
 
 
+_ENV_BOOT = {}
+# (کلید settings که پنل ادمین می‌نویسه, اسم متغیرِ سراسری تو این فایل). مقدار خالی = برگشت به Environment/پیش‌فرض کد.
+_ENV_OVERRIDES = (
+    ('env_bot_token', 'TOKEN'),
+    ('env_config_api', 'CONFIG_API'),
+    ('env_config_key', 'CONFIG_KEY'),
+    ('env_seller_api_base', 'SELLER_API_BASE'),
+    ('env_seller_api_key', 'SELLER_API_KEY'),
+    ('env_nobitex_api_key', 'NOBITEX_API_KEY'),
+    ('env_nobitex_api_secret', 'NOBITEX_API_SECRET'),
+)
+
+
+def apply_env_overrides():
+    """متغیرهای محیطی‌ای که ادمین از پنل عوض می‌کنه، بدون ری‌استارت روی ربات اعمال می‌شن (حداکثر ~۱۵ ثانیه بعد)."""
+    g = globals()
+    for skey, gname in _ENV_OVERRIDES:
+        if gname not in g:
+            continue
+        _ENV_BOOT.setdefault(gname, g[gname])
+        v = (get_setting(skey, '') or '').strip()
+        newv = v or _ENV_BOOT[gname]
+        if gname in ('CONFIG_API', 'SELLER_API_BASE'):
+            newv = str(newv).rstrip('/')
+        if newv != g[gname]:
+            g[gname] = newv
+            if gname == 'TOKEN':
+                g['BASE_URL'] = 'https://api.splus.ir/bot' + newv
+            print('🔧 مقدار', gname, 'از پنل ادمین اعمال شد.')
+
+
 def apply_runtime_settings():
     """مقدارهایی که قبلاً فقط موقع استارت از Environment خونده می‌شدن (و تغییرشون ری‌استارت می‌خواست)
     حالا از جدول settings (پنل ادمین) هم خونده می‌شن؛ اگه تو پنل چیزی ثبت نشده باشه، مقدار Environment/کد می‌مونه."""
     global ADMIN_ID, GATE_ENABLED, GATE_FAIL_OPEN, GATE_CACHE_TTL, GATE_SYNC_INTERVAL, DIVIDER
     try:
+        apply_env_overrides()
         v = get_setting('admin_id', None)
         if v and str(v).strip().isdigit() and int(v) > 0:
             ADMIN_ID = int(v)
