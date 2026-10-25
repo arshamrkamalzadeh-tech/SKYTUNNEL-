@@ -28,7 +28,7 @@ except Exception:                      # بعضی ایمیج‌های سبک tzd
 TURSO_DATABASE_URL = os.getenv("TURSO_DATABASE_URL", "libsql://skytunnel-mikekamalzadeh-sys.aws-eu-west-1.turso.io")
 TURSO_AUTH_TOKEN = os.getenv("TURSO_AUTH_TOKEN", "eyJhbGciOiJFZERTQSIsInR5cCI6IkpXVCJ9.eyJhIjoicnciLCJpYXQiOjE3ODkwNzE5MDcsImlkIjoiMDFhMDhjZmQtMmMwMS03YWViLTlmYzQtOWYzMTkwNzEwMjA0Iiwia2lkIjoiNmltOXd5bGxUd2luNkVHWEJWNHVJUE01ZWNPM2JyZmJ3NzFqWTFIanFCTSIsInJpZCI6ImU5N2NmZmQwLTgxZDYtNDA3Yi1hZGQ4LTEzMTRjY2MyZTkxYyJ9.tZj3mmc_tNCVRPsLkwuWdrGsXZXmFCcvRCEPcN0iclAMk0QrHWfZxZiGqB5otvhlZaT9fs_WzsO6kTS_gnk1Bw")
 
-BOT_TOKEN = os.getenv("BOT_TOKEN", "69786607:p-AAjsil8xAOknphz-PxbDBsvFxFSWknCMg")
+BOT_TOKEN = os.getenv("BOT_TOKEN", "70578965:nZ8qtHO0j8BTSEcAghcWvq75m_-2PLEZVw8")
 BASE_URL = "https://api.splus.ir/bot" + BOT_TOKEN
 
 PANEL_USERNAME = os.getenv("PANEL_USERNAME", "admin")
@@ -104,7 +104,7 @@ CONFIG_GROUPS = [
         ("app_link_linux", "لینک لینوکس", os.getenv("APP_LINK_LINUX", "https://su.randomatic.ir/v2pro/1.1.2/v2pro-linux-x64.tar.gz"), "url"),
     ]),
     ("🛠 مدیریت و نگهداری ربات", [
-        ("admin_id", "آیدی عددی ادمین (تیکت‌ها و رسیدهای شارژ برای این آیدی میاد)", os.getenv("ADMIN_ID", "48198481"), "number"),
+        ("admin_id", "آیدی عددی ادمین (تیکت‌ها و رسیدهای شارژ برای این آیدی میاد)", os.getenv("ADMIN_ID", "48985781"), "number"),
         ("maintenance_text", "پیامی که تو «حالت تعمیر» به کاربران نشون داده می‌شه",
          "🛠 ربات موقتاً در حال بروزرسانی است. لطفاً کمی بعد دوباره تلاش کنید.", "text"),
     ]),
@@ -1949,6 +1949,15 @@ def dashboard():
     recent = get_users_page(offset=0, limit=7, sort="active")
 
     open_tickets, pending_topups = s["open_tickets"], s["pending_topups"]
+    today_topup = 0
+    try:
+        _today = datetime.now(TEHRAN).date()
+        for _r in fin_rows(2):
+            _d = parse_ts(_r[5])
+            if _r[3] == "approved" and _d and _d.astimezone(TEHRAN).date() == _today:
+                today_topup += int(_r[2] or 0)
+    except Exception as e:
+        print("⚠️ today_topup:", e)
     revenue = int(s["total_revenue"] or 0)
     configs_sold = int(s["total_configs"] or 0)
     avg_price = revenue // configs_sold if configs_sold else 0
@@ -2013,6 +2022,7 @@ def dashboard():
       <div class="stat"><span>عضو جدید ۷ روز اخیر</span><b class="num">{x['new_7d']:,}</b></div>
       <div class="stat"><span>مجموع کیف‌پول کاربران</span><b class="num">{int(s['total_wallet'] or 0):,}</b><small>تومان</small></div>
       <div class="stat"><span>میانگین قیمت هر کانفیگ</span><b class="num">{avg_price:,}</b><small>تومان</small></div>
+      <a class="stat" href="{url_for('finance_page')}" style="text-decoration:none;color:inherit;"><span>💎 شارژ امروز (مرکز مالی)</span><b class="num">{today_topup:,}</b><small>تومان ›</small></a>
     </div>
 
     <div class="grid cols-2">
@@ -2311,7 +2321,38 @@ def ticket_close(ticket_id):
 @app.route("/topups")
 @login_required
 def topups_page():
-    rows = get_topups()
+    f_status = request.args.get("status", "all")
+    f_method = request.args.get("method", "all")
+    f_q = (request.args.get("q") or "").strip()
+    rows = get_topups(300)
+    if f_status != "all":
+        rows = [r for r in rows if r[3] == f_status]
+    if f_method != "all":
+        rows = [r for r in rows if (r[5] or "card") == f_method]
+    if f_q.isdigit():
+        rows = [r for r in rows if str(r[1]) == f_q]
+    rows = rows[:120]
+
+    def _pill(label, key, val, cur):
+        args = {"status": f_status, "method": f_method, "q": f_q}
+        args[key] = val
+        args = {k: v for k, v in args.items() if v and v != "all"}
+        cls = "pill active" if cur == val else "pill"
+        return f'<a class="{cls}" href="{url_for("topups_page", **args)}">{label}</a>'
+
+    filter_bar = (
+        '<div class="chips-row">'
+        + _pill("همه", "status", "all", f_status) + _pill("⏳ در انتظار", "status", "pending", f_status)
+        + _pill("✅ تایید شده", "status", "approved", f_status) + _pill("❌ رد شده", "status", "rejected", f_status)
+        + _pill("⌛️ منقضی", "status", "expired", f_status) + '</div>'
+        + '<div class="chips-row">'
+        + _pill("همه روش‌ها", "method", "all", f_method) + _pill("⚡️ دونیتو", "method", "donito", f_method)
+        + _pill("💳 کارت‌به‌کارت", "method", "card", f_method) + _pill("🪙 رمزارز", "method", "crypto", f_method)
+        + '</div>'
+        + '<form method="get" class="flex" style="margin-bottom:14px;">'
+        + f'<input type="hidden" name="status" value="{esc(f_status)}"><input type="hidden" name="method" value="{esc(f_method)}">'
+        + f'<input type="search" name="q" value="{esc(f_q)}" placeholder="آیدی عددی کاربر…" inputmode="numeric" style="max-width:240px;">'
+        + '<button type="submit" class="sm">🔍 جستجو</button></form>')
     rows_html = ""
     for rid, user_id, amount, status, created_at, method, coin_symbol, coin_qty, tx_hash, matched_tx in rows:
         is_crypto = (method == "crypto")
@@ -2354,6 +2395,7 @@ def topups_page():
           <td data-label="عملیات">{actions}</td>
         </tr>"""
     content = f"""
+    {filter_bar}
     <table class="rt">
       <thead><tr><th>شماره</th><th>کاربر</th><th>نوع</th><th>مبلغ واریزی</th><th>وضعیت</th><th>تاریخ</th><th>عملیات</th></tr></thead>
       <tbody>{rows_html if rows_html else '<tr><td colspan="7">درخواستی ثبت نشده.</td></tr>'}</tbody>
@@ -2717,7 +2759,7 @@ def settings_page():
           <div><span>نام ربات</span><b>{esc(bot.get('first_name', '-'))}</b></div>
           <div><span>یوزرنیم</span><b dir="ltr">@{esc(bot.get('username', '-'))}</b></div>
           <div><span>آیدی ربات</span><b class="num">{esc(bot.get('id', '-'))}</b></div>
-          <div><span>آیدی عددی ادمین فعلی</span><b class="num">{esc(all_settings.get('admin_id', os.getenv('ADMIN_ID', '48198481')))}</b></div>
+          <div><span>آیدی عددی ادمین فعلی</span><b class="num">{esc(all_settings.get('admin_id', os.getenv('ADMIN_ID', '48985781')))}</b></div>
         </div></div>"""
     else:
         bot_card = ('<div class="card"><h3>اطلاعات ربات</h3><p class="empty-note">اتصال به API ربات برقرار نشد '
@@ -4468,6 +4510,338 @@ def restore_settings():
         set_setting(k, v)
     flash(f"{len(data)} تنظیم بازگردانی شد.")
     return redirect(url_for("backup_page"))
+
+
+
+# ---------------------------------------------------------------------------
+# 💎 مرکز مالی + ⚡️ مانیتور دونیتو
+# ---------------------------------------------------------------------------
+DONITO_API_BASE = os.getenv("DONITO_API_BASE", "https://donito.me/api/v1/thirdparty").rstrip("/")
+DONITO_DEFAULT_TOKEN = "BKEXR_KnkwEh1jEHov5oDOPvxAVfps1MwXHBpc"
+
+ICONS["finance"] = '<path d="M3 3v18h18"/><path d="M7 15l4-4 3 3 5-6"/>'
+ICONS["donito"] = '<path d="M13 2L4 14h7l-1 8 9-12h-7z"/>'
+NAV[2][1].append(("finance", "مرکز مالی", "finance_page"))
+NAV[2][1].append(("donito", "مانیتور دونیتو", "donito_page"))
+
+METHOD_LABELS = {"card": "💳 کارت‌به‌کارت", "crypto": "🪙 رمزارز", "donito": "⚡️ دونیتو"}
+STATUS_LABELS = {"pending": "در انتظار", "approved": "تایید شده", "rejected": "رد شده", "expired": "منقضی شده"}
+
+
+def donito_token():
+    return (get_setting("donito_token", "") or os.getenv("DONITO_TOKEN", "") or DONITO_DEFAULT_TOKEN).strip()
+
+
+def donito_masked():
+    t = donito_token()
+    return (t[:6] + "••••••" + t[-3:]) if len(t) > 12 else "—"
+
+
+def donito_scrub(text):
+    t = str(text)
+    tok = donito_token()
+    return t.replace(tok, "***") if tok else t
+
+
+def donito_fetch_recent():
+    """۵۰ دونیت آخر از API دونیتو → لیست dict (id, amount تومان, currency, created_at, ts). خطا: RuntimeError بدون توکن."""
+    try:
+        r = requests.get(f"{DONITO_API_BASE}/{donito_token()}/donations/recent", timeout=12,
+                         headers={"Accept": "application/json"})
+        r.raise_for_status()
+        data = r.json()
+    except Exception as e:
+        raise RuntimeError(donito_scrub(e)) from None
+    items = data.get("data") if isinstance(data, dict) else None
+    if not isinstance(items, list):
+        raise RuntimeError("پاسخ نامعتبر: " + donito_scrub(str(data)[:160]))
+    out = []
+    for it in items:
+        if not isinstance(it, dict):
+            continue
+        cur = str(it.get("currency_type") or "IRT").strip().upper()
+        try:
+            amount = int(round(float(str(it.get("amount")).replace(",", "").strip())))
+        except (TypeError, ValueError):
+            continue
+        if cur in ("IRR", "RIAL", "RLS"):
+            amount //= 10
+        out.append({"id": str(it.get("id") or ""), "amount": amount, "currency": cur,
+                    "created_at": it.get("created_at"), "ts": parse_ts(it.get("created_at"))})
+    out.sort(key=lambda d: d["ts"] or datetime.min.replace(tzinfo=timezone.utc), reverse=True)
+    return out
+
+
+@with_db_retry
+def fin_rows(days=30):
+    cutoff = (datetime.now(timezone.utc) - timedelta(days=days)).isoformat()
+    conn = get_conn()
+    c = conn.cursor()
+    c.execute("SELECT id, user_id, amount, status, COALESCE(method, 'card'), created_at, matched_tx "
+              "FROM topup_requests WHERE created_at >= ? ORDER BY id DESC", (cutoff,))
+    rows = c.fetchall()
+    conn.close()
+    return rows
+
+
+@with_db_retry
+def donito_requests(status=None, limit=30):
+    conn = get_conn()
+    c = conn.cursor()
+    sql = ("SELECT id, user_id, amount, status, created_at, req_ts, matched_tx FROM topup_requests "
+           "WHERE method='donito'")
+    args = []
+    if status:
+        sql += " AND status=?"
+        args.append(status)
+    c.execute(sql + " ORDER BY id DESC LIMIT ?", tuple(args) + (limit,))
+    rows = c.fetchall()
+    conn.close()
+    return rows
+
+
+def _day_label(d):
+    jy, jm, jd = g2j(d.year, d.month, d.day)
+    return fa(f"{jm:02d}/{jd:02d}")
+
+
+PAGE_CSS_FIN = """
+<style>
+  .mrow { margin: 12px 0; }
+  .mhead { display: flex; justify-content: space-between; gap: 8px; font-size: 13.5px; margin-bottom: 5px; }
+  .mbar { height: 10px; border-radius: 999px; background: var(--surface-2); overflow: hidden; border: 1px solid var(--border); }
+  .mbar i { display: block; height: 100%; background: var(--grad); border-radius: 999px; transition: width .6s; }
+  .big-ok { color: var(--ok); } .big-warn { color: var(--warn); }
+  .cd { font-variant-numeric: tabular-nums; font-weight: 700; }
+  .cd.low { color: var(--danger); }
+  .amt-copy { display: inline-flex; align-items: center; gap: 6px; }
+  .live-dot { display:inline-block; width:9px; height:9px; border-radius:50%; background:#2fd48a; box-shadow:0 0 0 4px var(--ok-dim); animation: pulse 1.6s infinite; }
+  @keyframes pulse { 50% { box-shadow: 0 0 0 7px transparent; } }
+</style>
+"""
+
+
+@app.route("/finance")
+@login_required
+def finance_page():
+    rows = fin_rows(30)
+    today = datetime.now(TEHRAN).date()
+    by_day = {today - timedelta(days=i): 0 for i in range(13, -1, -1)}
+    tot = {"today": 0, "d7": 0, "d30": 0}
+    cnt, by_method, top = {}, {}, {}
+    dn = {"created": 0, "approved": 0, "expired": 0, "pending": 0, "rejected": 0}
+    approved_n = 0
+    for _rid, uid, amt, status, method, created, _mt in rows:
+        dt = parse_ts(created)
+        if not dt:
+            continue
+        d = dt.astimezone(TEHRAN).date()
+        age = (today - d).days
+        amt = int(amt or 0)
+        cnt[status] = cnt.get(status, 0) + 1
+        if status == "approved":
+            approved_n += 1
+            tot["d30"] += amt
+            if age <= 6:
+                tot["d7"] += amt
+            if age == 0:
+                tot["today"] += amt
+            if d in by_day:
+                by_day[d] += amt
+            by_method[method] = by_method.get(method, 0) + amt
+            top[uid] = top.get(uid, 0) + amt
+        if method == "donito" and age <= 6:
+            dn["created"] += 1
+            dn[status] = dn.get(status, 0) + 1
+
+    avg = tot["d30"] // approved_n if approved_n else 0
+    settled = dn["created"] - dn["pending"]
+    rate = f"{dn['approved'] * 100 // settled}٪" if settled > 0 else "—"
+    chart = bar_chart([(_day_label(d), v) for d, v in by_day.items()], lambda v: f"{int(v):,} تومان")
+
+    mtot = sum(by_method.values()) or 1
+    methods_html = ""
+    for m, v in sorted(by_method.items(), key=lambda kv: -kv[1]):
+        pct = v * 100 // mtot
+        methods_html += (f'<div class="mrow"><div class="mhead"><span>{METHOD_LABELS.get(m, esc(m))}</span>'
+                         f'<b class="num">{v:,} تومان · {fa(str(pct))}٪</b></div>'
+                         f'<div class="mbar"><i style="width:{pct}%"></i></div></div>')
+    if not methods_html:
+        methods_html = '<p class="empty-note">هنوز شارژ تاییدشده‌ای نیست.</p>'
+
+    top_html = ""
+    for uid, v in sorted(top.items(), key=lambda kv: -kv[1])[:6]:
+        top_html += (f'<a class="row-link" href="{url_for("user_detail", user_id=uid)}">'
+                     f'<span class="row-main"><b class="num">{uid}</b><small>شارژ ۳۰ روز اخیر</small></span>'
+                     f'<b class="num">{v:,}</b></a>')
+    if not top_html:
+        top_html = '<p class="empty-note">—</p>'
+
+    content = f"""{PAGE_CSS_FIN}
+    <div class="stats">
+      <div class="stat"><span>شارژ امروز</span><b class="num big-ok">{tot['today']:,}</b><small>تومان</small></div>
+      <div class="stat"><span>۷ روز اخیر</span><b class="num">{tot['d7']:,}</b><small>تومان</small></div>
+      <div class="stat"><span>۳۰ روز اخیر</span><b class="num">{tot['d30']:,}</b><small>تومان</small></div>
+      <div class="stat"><span>میانگین هر شارژ</span><b class="num">{avg:,}</b><small>تومان · {approved_n:,} شارژ</small></div>
+      <div class="stat"><span>در انتظار تایید</span><b class="num {'big-warn' if cnt.get('pending') else ''}">{cnt.get('pending', 0):,}</b>
+        <small>{cnt.get('rejected', 0):,} رد · {cnt.get('expired', 0):,} منقضی</small></div>
+      <div class="stat"><span>موفقیت دونیتو (۷ روز)</span><b class="num">{rate}</b>
+        <small>{dn['approved']:,} از {settled:,} درخواست</small></div>
+    </div>
+    <div class="card"><h3>شارژ تاییدشده‌ی ۱۴ روز اخیر</h3>
+      <small class="muted num">{sum(by_day.values()):,} تومان</small>{chart}</div>
+    <div class="grid cols-2">
+      <div class="card"><h3>سهم روش‌های پرداخت (۳۰ روز)</h3>{methods_html}</div>
+      <div class="card"><h3>پرشارژترین کاربران (۳۰ روز)</h3>{top_html}</div>
+    </div>
+    <div class="flex" style="margin-top:6px;">
+      <a class="btn secondary sm" href="{url_for('topups_page')}">📋 همه‌ی شارژها</a>
+      <a class="btn secondary sm" href="{url_for('donito_page')}">⚡️ مانیتور دونیتو</a>
+      <a class="btn secondary sm" href="{url_for('export_csv', name='topup_requests')}">⬇️ خروجی CSV شارژها</a>
+    </div>"""
+    return render_page("مرکز مالی", "finance", content)
+
+
+@app.route("/donito")
+@login_required
+def donito_page():
+    ensure_settings_table()
+    enabled = get_setting("donito_enabled", "1") == "1"
+    page_url = get_setting("donito_page_url", DEFAULT_DONITO_PAGE_URL) or DEFAULT_DONITO_PAGE_URL
+    try:
+        window = max(10, int(float(get_setting("donito_window_min", "180") or 180))) * 60
+    except (TypeError, ValueError):
+        window = 180 * 60
+    live = request.args.get("live") == "1"
+    now = time.time()
+
+    hist = donito_requests(limit=200)
+    pend = [r for r in hist if r[3] == "pending"]
+    matched = {r[6]: (r[0], r[1]) for r in hist if r[6] and str(r[6]).startswith("donito:")}
+    pend_amounts = {r[2]: r[0] for r in pend}
+
+    # --- درخواست‌های در انتظار (شمارش معکوس) ---
+    pend_html = ""
+    for rid, uid, amt, _st, created, req_ts, _mt in pend:
+        exp = (req_ts or now) + window
+        pend_html += f"""
+        <tr>
+          <td data-label="شماره">#{rid}</td>
+          <td data-label="کاربر"><a class="num" href="{url_for('user_detail', user_id=uid)}">{uid}</a></td>
+          <td data-label="مبلغ دقیق"><span class="amt-copy"><b class="num">{int(amt):,}</b>
+            <button type="button" class="sm secondary" onclick="cp('{int(amt)}', this)">📋</button></span></td>
+          <td data-label="زمان باقی‌مانده"><span class="cd" data-exp="{exp:.0f}">…</span></td>
+          <td data-label="عملیات">
+            <form method="post" action="{url_for('topup_approve', req_id=rid)}" style="display:inline;"
+                  onsubmit="return confirm('درخواست #{rid} دستی تایید بشه؟ (فقط اگه پرداخت رو تو دونیتو دیدی)');">
+              <button type="submit" class="sm">✅ تایید دستی</button></form>
+            <form method="post" action="{url_for('topup_reject', req_id=rid)}" style="display:inline;"
+                  onsubmit="return confirm('رد بشه؟');"><button type="submit" class="danger sm">❌</button></form>
+          </td>
+        </tr>"""
+    pend_block = (f'<table class="rt"><thead><tr><th>شماره</th><th>کاربر</th><th>مبلغ دقیق</th><th>زمان باقی‌مانده</th>'
+                  f'<th>عملیات</th></tr></thead><tbody>{pend_html}</tbody></table>') if pend_html else \
+        '<p class="empty-note">الان درخواست پرداخت بازی نیست. ✨</p>'
+
+    # --- دونیت‌های زنده از API دونیتو ---
+    live_block = ""
+    if live:
+        try:
+            dons = donito_fetch_recent()
+        except RuntimeError as e:
+            dons = None
+            live_block = f'<div class="alert">⚠️ خواندن از دونیتو ناموفق بود: {esc(str(e)[:250])}</div>'
+        if dons is not None:
+            body = ""
+            for d in dons[:30]:
+                key = "donito:" + d["id"]
+                if key in matched:
+                    rid, uid = matched[key]
+                    status = f'<span class="badge approved">✅ شارژ شد</span> <small class="muted">#{rid} · کاربر {uid}</small>'
+                elif d["amount"] in pend_amounts:
+                    status = (f'<span class="badge pending">⏳ در انتظار تطبیق</span> '
+                              f'<small class="muted">#{pend_amounts[d["amount"]]}</small>')
+                else:
+                    status = '<span class="badge closed">❔ بدون درخواست</span>'
+                body += (f'<tr><td data-label="مبلغ" class="num">{d["amount"]:,}</td>'
+                         f'<td data-label="زمان"><small class="muted">{fmt_dt(d["created_at"])}</small></td>'
+                         f'<td data-label="شناسه"><small class="muted num" dir="ltr">{esc(d["id"])}</small></td>'
+                         f'<td data-label="وضعیت">{status}</td></tr>')
+            live_block = (f'<table class="rt"><thead><tr><th>مبلغ (تومان)</th><th>زمان</th><th>شناسه</th><th>وضعیت</th>'
+                          f'</tr></thead><tbody>{body or "<tr><td colspan=4>دونیتی نیست.</td></tr>"}</tbody></table>'
+                          f'<p><small class="muted">«بدون درخواست» یعنی دونیتی که مبلغش با هیچ درخواست شارژی نخورده '
+                          f'(حامی عادی یا مبلغ اشتباه). اگه کاربر مبلغ اشتباه داد، از صفحه‌ی کاربر کیف پولش رو دستی شارژ کن.</small></p>')
+    else:
+        live_block = ('<p class="empty-note">برای دیدن ۵۰ دونیت آخر مستقیم از دونیتو و اینکه کدوم‌ها شارژ شدن، دکمه‌ی زیر رو بزن.</p>')
+
+    # --- تاریخچه‌ی اخیر ---
+    hist_html = ""
+    for rid, uid, amt, st, created, _rt, mt in hist[:12]:
+        hist_html += (f'<tr><td data-label="شماره">#{rid}</td><td data-label="کاربر"><a class="num" href="{url_for("user_detail", user_id=uid)}">{uid}</a></td>'
+                      f'<td data-label="مبلغ" class="num">{int(amt or 0):,}</td>'
+                      f'<td data-label="وضعیت"><span class="badge {esc(st)}">{esc(STATUS_LABELS.get(st, st))}</span></td>'
+                      f'<td data-label="تاریخ"><small class="muted">{fmt_dt(created)}</small></td></tr>')
+
+    live_dot_html = '<span class="live-dot"></span>'
+    dot_on = (live_dot_html + " ") if enabled else ""
+    dot_live = (" " + live_dot_html) if live else ""
+    state_txt = "روشن" if enabled else "خاموش"
+    content = f"""{PAGE_CSS_FIN}
+    <div class="card">
+      <div class="switch-row" style="padding-top:0;">
+        <div><b>{dot_on}پرداخت ریالی خودکار — {state_txt}</b><br>
+          <small class="muted">صفحه‌ی دونیت: <span dir="ltr">{esc(page_url)}</span> · توکن: <span dir="ltr">{esc(donito_masked())}</span>
+          · مهلت هر درخواست: {fa(str(window // 60))} دقیقه</small></div>
+        <form method="post" action="{url_for('donito_master')}">{tgl_btn(enabled)}</form>
+      </div>
+      <div class="flex" style="margin-top:10px;">
+        <a class="btn sm" href="{url_for('donito_page')}?live=1">🔄 دونیت‌های زنده از دونیتو</a>
+        <form method="post" action="{url_for('donito_test')}" style="display:inline;"><button type="submit" class="secondary sm">🔌 تست اتصال</button></form>
+        <a class="btn secondary sm" href="{url_for('settings_page')}">⚙️ تنظیمات</a>
+        <a class="btn secondary sm" href="{url_for('finance_page')}">💎 مرکز مالی</a>
+      </div>
+    </div>
+    <div class="card"><h3>درخواست‌های در انتظار پرداخت <span class="badge pending">{len(pend)}</span></h3>{pend_block}</div>
+    <div class="card"><h3>دونیت‌های اخیر{dot_live}</h3>{live_block}</div>
+    <div class="card"><h3>۱۲ درخواست آخر</h3>
+      <table class="rt"><thead><tr><th>شماره</th><th>کاربر</th><th>مبلغ</th><th>وضعیت</th><th>تاریخ</th></tr></thead>
+      <tbody>{hist_html or '<tr><td colspan="5">هنوز درخواستی نیست.</td></tr>'}</tbody></table></div>
+    <script>
+      function cp(t, b) {{
+        function ok() {{ if (b) {{ var o = b.textContent; b.textContent = '✔️'; setTimeout(function () {{ b.textContent = o; }}, 1200); }} }}
+        if (navigator.clipboard && navigator.clipboard.writeText) {{ navigator.clipboard.writeText(t).then(ok, ok); return; }}
+        var a = document.createElement('textarea'); a.value = t; document.body.appendChild(a); a.select();
+        try {{ document.execCommand('copy'); }} catch (e) {{}} document.body.removeChild(a); ok();
+      }}
+      (function () {{
+        var els = document.querySelectorAll('.cd[data-exp]');
+        function tick() {{
+          var now = Date.now() / 1000;
+          els.forEach(function (el) {{
+            var left = Math.floor(parseFloat(el.dataset.exp) - now);
+            if (left <= 0) {{ el.textContent = 'منقضی'; el.classList.add('low'); return; }}
+            var m = Math.floor(left / 60), s = left % 60;
+            el.textContent = m + ':' + (s < 10 ? '0' : '') + s;
+            el.classList.toggle('low', left < 300);
+          }});
+        }}
+        if (els.length) {{ tick(); setInterval(tick, 1000); setTimeout(function () {{ location.reload(); }}, 20000); }}
+      }})();
+    </script>"""
+    return render_page("مانیتور دونیتو", "donito", content)
+
+
+@app.route("/donito/test", methods=["POST"])
+@login_required
+def donito_test():
+    try:
+        dons = donito_fetch_recent()
+        last = dons[0] if dons else None
+        flash(f"✅ اتصال به دونیتو برقراره؛ {len(dons)} دونیت خونده شد"
+              + (f" (آخرین: {last['amount']:,} تومان)" if last else "") + ".")
+    except RuntimeError as e:
+        flash("⚠️ اتصال به دونیتو ناموفق بود: " + str(e)[:250])
+    return redirect(url_for("donito_page"))
 
 
 
