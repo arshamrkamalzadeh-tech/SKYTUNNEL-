@@ -87,7 +87,7 @@ CONFIG_GROUPS = [
         ("refund_ratio", "نسبت بازگشت وجه هنگام حذف کانفیگ (بین 0 تا 1؛ مثلاً 0.5 یعنی نصف ارزش باقی‌مانده)", "0.5", "float"),
     ]),
     ("🏪 فروشندگی (پنل فروشنده)", [
-        ("reseller_panel_url", "آدرس پنل فروشندگی — فقط وقتی سرویس آدرس نداد (یا برای فروشنده‌های قدیمی) به‌عنوان جایگزین نشون داده می‌شه. متن‌ها و دکمه‌های این بخش: منوی «متن‌ها» ← گروه «🏪 فروشندگی»", DEFAULT_RESELLER_PANEL_URL, "url"),
+        ("reseller_panel_url", "آدرس پنل فروشندگی — فقط وقتی سرویس آدرس نداد به‌عنوان جایگزین نشون داده می‌شه. متن‌ها و دکمه‌های این بخش: منوی «متن‌ها» ← گروه «🏪 فروشندگی»", DEFAULT_RESELLER_PANEL_URL, "url"),
     ]),
     ("🎁 دعوت دوستان (رفرال)", [
         ("referral_enabled", "سیستم دعوت دوستان", "0", "toggle"),
@@ -147,7 +147,7 @@ BOT_BUTTONS = [
     ("support", "دکمه‌ی پشتیبانی", "🎧 پشتیبانی"),
     ("guide", "دکمه‌ی اپ مخصوص کانفیگ‌ها", "📲 اپ مخصوص کانفیگ‌ها"),
     ("language", "دکمه‌ی تغییر زبان", "🌐 تغییر زبان"),
-    ("reseller", "دکمه‌ی فروشنده شو", "🧑‍💼 فروشنده شو"),
+    ("reseller", "دکمه‌ی دریافت پنل فروشندگی", "🏪 دریافت پنل فروشندگی"),
     ("referral", "دکمه‌ی دعوت دوستان", "🎁 دعوت دوستان"),
 ]
 MAIN_MENU_KEYS = [key for key, _label, _default in BOT_BUTTONS]
@@ -194,7 +194,7 @@ FEATURES = {
     "exchange": "💱 صرافی (محاسبه‌ی خرید ارز)",
     "delete_config": "🗑 حذف کانفیگ",
     "support": "🎧 پشتیبانی",
-    "reseller": "🧑‍💼 فروشنده شو",
+    "reseller": "🏪 دریافت پنل فروشندگی",
     "guide": "📲 اپ مخصوص کانفیگ‌ها",
 }
 
@@ -518,7 +518,7 @@ def delete_discount_code(code):
 def get_all_user_ids():
     conn = get_conn()
     c = conn.cursor()
-    c.execute("SELECT user_id FROM users")
+    c.execute("SELECT user_id FROM users WHERE COALESCE(banned, 0) = 0")
     res = [r[0] for r in c.fetchall()]
     conn.close()
     return res
@@ -596,9 +596,9 @@ def ensure_schema():
             "ALTER TABLE users ADD COLUMN lang TEXT",
             "ALTER TABLE free_trials ADD COLUMN trial_count INTEGER DEFAULT 1",
             "ALTER TABLE free_trials ADD COLUMN last_at TEXT",
-            "ALTER TABLE resellers ADD COLUMN username TEXT",
-            "ALTER TABLE resellers ADD COLUMN password_hash TEXT",
-            "ALTER TABLE resellers ADD COLUMN password_plain TEXT",
+            "ALTER TABLE user_configs ADD COLUMN base_gb REAL",
+            "ALTER TABLE user_configs ADD COLUMN base_days INTEGER",
+            "ALTER TABLE users ADD COLUMN banned INTEGER DEFAULT 0",
         ):
             try:
                 c.execute(stmt)
@@ -718,10 +718,9 @@ CB_LABELS = {
     "setlang_en": "تغییر زبان به انگلیسی",
     "skip_label": "رد شدن از انتخاب اسم کانفیگ",
     "reseller_activate": "شروع فعال‌سازی فروشندگی",
-    "reseller_activate_confirm": "تایید پرداخت فعال‌سازی فروشندگی",
 }
 CB_PREFIXES = (
-    ("reply_ticket_", "پاسخ به تیکت"), ("close_ticket_", "بستن تیکت"),
+    ("cbtn_", "دکمه‌ی سفارشی"), ("reply_ticket_", "پاسخ به تیکت"), ("close_ticket_", "بستن تیکت"),
     ("topup_acc_", "تایید شارژ"), ("topup_rej_", "رد شارژ"),
 )
 STEP_LABELS = {
@@ -788,8 +787,10 @@ USER_SORTS = {
 }
 
 
-def _users_where(search, only_recent):
+def _users_where(search, only_recent, only_banned=False):
     where, params = [], []
+    if only_banned:
+        where.append("banned = 1")
     if search:
         like = f"%{search}%"
         where.append("(CAST(user_id AS TEXT) LIKE ? OR username LIKE ? OR first_name LIKE ?)")
@@ -802,10 +803,10 @@ def _users_where(search, only_recent):
 
 
 @with_db_retry
-def get_users_count(search=None, only_recent=False):
+def get_users_count(search=None, only_recent=False, only_banned=False):
     conn = get_conn()
     c = conn.cursor()
-    where, params = _users_where(search, only_recent)
+    where, params = _users_where(search, only_recent, only_banned)
     c.execute(f"SELECT COUNT(*) FROM users {where}", params)
     total = c.fetchone()[0]
     conn.close()
@@ -813,10 +814,10 @@ def get_users_count(search=None, only_recent=False):
 
 
 @with_db_retry
-def get_users_page(offset=0, limit=USERS_PAGE_SIZE, search=None, sort="active", only_recent=False):
+def get_users_page(offset=0, limit=USERS_PAGE_SIZE, search=None, sort="active", only_recent=False, only_banned=False):
     conn = get_conn()
     c = conn.cursor()
-    where, params = _users_where(search, only_recent)
+    where, params = _users_where(search, only_recent, only_banned)
     order = USER_SORTS.get(sort, USER_SORTS["active"])
     c.execute(
         f"""SELECT user_id, username, first_name, wallet, joined_at, last_active, last_action
@@ -837,6 +838,34 @@ def get_user(user_id):
     res = c.fetchone()
     conn.close()
     return res
+
+
+@with_db_retry
+def get_banned_ids(ids):
+    """مجموعه‌ی آیدی‌های مسدود بین ids."""
+    ids = [int(i) for i in ids if i]
+    if not ids:
+        return set()
+    conn = get_conn()
+    c = conn.cursor()
+    try:
+        c.execute("SELECT user_id FROM users WHERE banned=1 AND user_id IN (%s)" % ",".join("?" * len(ids)), ids)
+        res = {r[0] for r in c.fetchall()}
+    except Exception as e:
+        if "stream" in str(e).lower():
+            raise
+        res = set()
+    conn.close()
+    return res
+
+
+@with_db_retry
+def set_user_banned(user_id, banned):
+    conn = get_conn()
+    c = conn.cursor()
+    c.execute("UPDATE users SET banned=? WHERE user_id=?", (1 if banned else 0, user_id))
+    conn.commit()
+    conn.close()
 
 
 @with_db_retry
@@ -1044,41 +1073,6 @@ def panel_reject_topup(req_id):
     return True, f"درخواست #{req_id} رد شد." + ("" if sent else " ⚠️ ولی ارسال پیام به کاربر ناموفق بود.")
 
 
-@with_db_retry
-def get_all_resellers():
-    """(user_id, username_ورود, رمز_تنظیم_شده؟, gb_balance, price_per_gb, status, revenue, configs_count, tg_username, tg_name)"""
-    conn = get_conn()
-    c = conn.cursor()
-    c.execute("""
-        SELECT r.user_id, r.username,
-               CASE WHEN r.password_hash IS NOT NULL AND r.password_hash <> '' THEN 1 ELSE 0 END,
-               r.gb_balance, r.price_per_gb, r.status,
-               0, 0,
-               u.username, u.first_name
-        FROM resellers r LEFT JOIN users u ON u.user_id = r.user_id
-        ORDER BY r.created_at DESC
-    """)
-    res = c.fetchall()
-    conn.close()
-    return res
-
-
-@with_db_retry
-def get_reseller_plain_passwords():
-    """{user_id: رمز_خام}. فقط برای رمزهایی که بعد از این آپدیت ثبت/تغییر کردن پر می‌شه."""
-    conn = get_conn()
-    c = conn.cursor()
-    try:
-        c.execute("SELECT user_id, password_plain FROM resellers WHERE password_plain IS NOT NULL AND password_plain <> ''")
-        res = {row[0]: row[1] for row in c.fetchall()}
-    except Exception as e:
-        if "stream" in str(e).lower():
-            raise
-        res = {}
-    conn.close()
-    return res
-
-
 RESELLER_PASSWORD_MIN, RESELLER_PASSWORD_MAX = 6, 64
 
 
@@ -1104,7 +1098,6 @@ def login_info_text(username, password):
 # ---------------------------------------------------------------------------
 # فروشندگان روی سرویس (Seller API → resale/subs)
 # حجم، قیمت، وضعیت و رمز هر فروشنده مستقیم روی سرویس اصلی خونده و تغییر داده می‌شه؛
-# دیتابیس قدیمی خود ربات (استخر محلی) دیگه تغییر نمی‌کنه.
 # ---------------------------------------------------------------------------
 
 SELLER_API_BASE = (os.getenv("SELLER_API_BASE", "").strip() or "https://su.randomatic.ir/api/v1").rstrip("/")
@@ -1220,61 +1213,40 @@ def save_seller_password_local(tg_id, sub_id, username, panel_url, password):
     conn.close()
 
 
-@with_db_retry
-def set_old_reseller_status(user_id, status):
-    conn = get_conn()
-    c = conn.cursor()
-    c.execute("UPDATE resellers SET status=? WHERE user_id=?", (status, user_id))
-    conn.commit()
-    conn.close()
-
-
 def build_vendors():
     """(لیست فروشنده‌ها, سرویس_جواب_داد؟). هر فروشنده یه dict:
     key, sub_id, tg_id, name, status (active/suspended), credit, price, purchases, paid, panel_url,
-    password, tg_user, tg_name, on_service."""
+    password, tg_user, tg_name, on_service. فقط فروشندگی جدید (seller_accounts + لیست زیرمجموعه‌های سرویس)."""
     subs = fetch_service_subs()
     accounts = get_seller_accounts()
-    old = get_all_resellers()
-    plain = get_reseller_plain_passwords()
     by_sub = {str(a[1]): a for a in accounts if a[1]}
     acc_by_tg = {a[0]: a for a in accounts}
-    old_by_tg = {r[0]: r for r in old}
-    by_uname = {}
-    for a in accounts:
-        if a[2]:
-            by_uname[str(a[2]).lower()] = a[0]
-    for r in old:
-        if r[1]:
-            by_uname.setdefault(str(r[1]).lower(), r[0])
+    by_uname = {str(a[2]).lower(): a[0] for a in accounts if a[2]}
     vendors, used_tg = [], set()
-    for s in (subs or []):
-        sid = str(s.get("userId") or "")
-        name = str(s.get("displayName") or "")
+    for s_ in (subs or []):
+        sid = str(s_.get("userId") or "")
+        name = str(s_.get("displayName") or "")
         a = by_sub.get(sid)
         tg = a[0] if a else by_uname.get(name.lower())
         if tg in used_tg:
             tg = None
         if tg:
             used_tg.add(tg)
-        pw = (a[4] if a and a[4] else (plain.get(tg) if tg else None))
-        price = s.get("gbTomanOverride") if s.get("modeOverride") == "price" and s.get("gbTomanOverride") else None
+        pw = a[4] if a and a[4] else None
+        price = s_.get("gbTomanOverride") if s_.get("modeOverride") == "price" and s_.get("gbTomanOverride") else None
         vendors.append({
             "key": sid, "sub_id": sid, "tg_id": tg, "name": name,
-            "status": "suspended" if s.get("status") == "suspended" else "active",
-            "credit": float(s.get("creditGb") or 0), "price": price,
-            "purchases": to_int(s.get("purchases"), 0) or 0, "paid": to_int(s.get("paidToman"), 0) or 0,
+            "status": "suspended" if s_.get("status") == "suspended" else "active",
+            "credit": float(s_.get("creditGb") or 0), "price": price,
+            "purchases": to_int(s_.get("purchases"), 0) or 0, "paid": to_int(s_.get("paidToman"), 0) or 0,
             "panel_url": (a[3] if a else None), "password": pw, "on_service": True,
         })
-    for tg in sorted((set(acc_by_tg) | set(old_by_tg)) - used_tg):
-        a, r = acc_by_tg.get(tg), old_by_tg.get(tg)
-        name = (a[2] if a and a[2] else (r[1] if r and r[1] else ""))
+    for tg in sorted(set(acc_by_tg) - used_tg):
+        a = acc_by_tg[tg]
         vendors.append({
-            "key": f"tg{tg}", "sub_id": None, "tg_id": tg, "name": name or "—",
-            "status": "suspended" if (r and r[5] != "active") else "active",
-            "credit": None, "price": None, "purchases": 0, "paid": 0,
-            "panel_url": (a[3] if a else None),
-            "password": (a[4] if a and a[4] else plain.get(tg)), "on_service": False,
+            "key": f"tg{tg}", "sub_id": None, "tg_id": tg, "name": a[2] or "—",
+            "status": "active", "credit": None, "price": None, "purchases": 0, "paid": 0,
+            "panel_url": a[3], "password": a[4], "on_service": False,
         })
     tgu = get_tg_users([v["tg_id"] for v in vendors])
     for v in vendors:
@@ -1729,6 +1701,85 @@ BASE_HTML = """<!DOCTYPE html>
   .login-logo .mark::after { inset: 15px; border-width: 3.5px; }
   .login-box h2 { margin: 0; font-size: 24px; text-align: center; }
   .login-box .sub { text-align: center; color: var(--muted); font-size: 13px; margin-bottom: 8px; }
+
+  /* ======================================================================
+     بازطراحی: خوانایی بیشتر + استیکرها و شکل‌های تزئینی
+     ====================================================================== */
+  :root {
+    --muted: #46547f; --ink: #0d1433; --border: rgba(80,90,200,.22);
+    --surface: #ffffff; --surface-2: #eef1ff;
+    --shadow: 0 1px 2px rgba(20,24,70,.06), 0 8px 24px rgba(60,60,160,.10);
+  }
+  [data-theme="dark"] {
+    --bg: #070b1c; --surface: #111a3a; --surface-2: #1a2652; --border: rgba(150,170,255,.24);
+    --ink: #f5f7ff; --muted: #b9c4e8;
+    --ok: #45e6a1; --warn: #ffd072; --danger: #ff8fa5;
+    --shadow: 0 2px 4px rgba(0,0,0,.35), 0 10px 28px rgba(0,0,0,.30);
+  }
+  body { font-size: 15.5px; line-height: 1.95; }
+  body::after { display: none; }                         /* شبکه‌ی پس‌زمینه حواس‌پرتی می‌آورد */
+  .panel, .card, .stat, table, .login-box { -webkit-backdrop-filter: none; backdrop-filter: none; }
+  .card, .panel { padding: 20px 22px; border-radius: 22px; }
+  .card h3, .panel h3 { font-size: 18px; }
+  .card > h3:first-child::before, .panel > h3:first-child::before {
+    content: ''; display: inline-block; width: 6px; height: 1.15em; border-radius: 6px; margin-left: 10px; vertical-align: -3px;
+    background: var(--grad); }
+  .muted, small.muted { font-size: 13.5px; }
+  small { font-size: 13px; }
+  label { font-size: 14px; color: var(--ink); opacity: .85; margin: 16px 0 7px; }
+  input[type=text], input[type=number], input[type=password], input[type=search], textarea, select {
+    font-size: 15.5px; padding: 12px 16px; border-radius: 15px; border-width: 2px; }
+  button, .btn { font-size: 15px; padding: 10px 22px; border-radius: 15px; }
+  button.sm, .btn.sm { font-size: 13.5px; padding: 6px 15px; border-radius: 12px; }
+  button.secondary, .btn.secondary { border-width: 2px; }
+  th { font-size: 13.5px; padding: 13px 16px; color: var(--ink); opacity: .8; }
+  td { font-size: 14.5px; padding: 13px 16px; }
+  tbody tr:nth-child(even) td { background: rgba(120,135,255,.06); }
+  tbody tr:hover td { background: var(--brand-dim); }
+  table { border-radius: 20px; border-width: 1.5px; }
+  .badge { font-size: 12.5px; padding: 3px 13px; }
+  .badge::before { content: ''; display: inline-block; width: 7px; height: 7px; border-radius: 50%; background: currentColor; margin-left: 7px; }
+  .flash { font-size: 15px; padding: 13px 18px; border-radius: 16px; }
+
+  /* ---- استیکرهای منو ---- */
+  .stk { display: inline-grid; place-items: center; width: 36px; height: 36px; border-radius: 12px; font-size: 19px; line-height: 1;
+         background: var(--c, rgba(139,123,255,.25)); flex-shrink: 0; transition: transform .2s; font-style: normal; }
+  .side-link { padding: 8px 12px; font-size: 15px; gap: 12px; }
+  .side-link:hover .stk { transform: rotate(-8deg) scale(1.12); }
+  .side-link.active .stk { background: rgba(255,255,255,.26); }
+  .nav-group { font-size: 12px; opacity: .65; }
+  .bottom-nav a .stk { width: 40px; height: 30px; border-radius: 11px; font-size: 18px; }
+  .bottom-nav a.active .stk { background: var(--grad); box-shadow: var(--glow); }
+  .drawer a.dl { padding: 10px 2px; font-size: 15.5px; }
+
+  /* ---- عنوان صفحه با استیکر ---- */
+  .title-row { display: flex; align-items: center; gap: 14px; }
+  .title-stk { display: grid; place-items: center; width: 54px; height: 54px; border-radius: 18px; font-size: 28px;
+               background: var(--grad); box-shadow: var(--glow); transform: rotate(-6deg); flex-shrink: 0; }
+  .page-title { background: none; -webkit-text-fill-color: var(--ink); color: var(--ink); font-size: 26px; }
+
+  /* ---- کارت‌های آمار: دایره‌ی تزئینی و عدد درشت‌تر ---- */
+  .stat { padding: 16px 18px; border-radius: 22px; }
+  .stat::after { content: ''; position: absolute; left: -22px; bottom: -30px; width: 96px; height: 96px; border-radius: 50%;
+                 background: var(--grad); opacity: .14; pointer-events: none; }
+  .stat:nth-child(3n+2)::after { background: linear-gradient(135deg, var(--g3), var(--g1)); border-radius: 30% 70% 60% 40%; }
+  .stat:nth-child(3n)::after { background: linear-gradient(135deg, var(--g2), var(--ok)); border-radius: 22px; transform: rotate(18deg); }
+  .stat span { font-size: 13.5px; color: var(--ink); opacity: .8; }
+  .stat b { font-size: 27px; }
+  .hero { border-radius: 28px; }
+  .hero-number { font-size: 50px; }
+
+  /* ---- اشکال شناور تو پس‌زمینه‌ی ورود ---- */
+  .fl { position: absolute; font-size: 38px; z-index: 1; opacity: .9; animation: floaty 9s ease-in-out infinite; pointer-events: none;
+        filter: drop-shadow(0 6px 14px rgba(0,0,0,.35)); }
+  .fl.f1 { top: 12%; right: 12%; } .fl.f2 { top: 20%; left: 10%; animation-delay: -3s; font-size: 46px; }
+  .fl.f3 { bottom: 14%; right: 16%; animation-delay: -5s; } .fl.f4 { bottom: 20%; left: 14%; animation-delay: -7s; font-size: 34px; }
+  .login-box { border-radius: 30px; }
+  @media (max-width: 700px) {
+    .title-stk { width: 46px; height: 46px; font-size: 24px; border-radius: 15px; }
+    .page-title { font-size: 22px; }
+    .fl { font-size: 28px; }
+  }
   @media (prefers-reduced-motion: reduce) { *, *::before, *::after { animation: none !important; transition: none !important; } html { scroll-behavior: auto; } }
 </style>
 </head>
@@ -1799,7 +1850,25 @@ ICONS = {
 }
 
 
+STICKERS = {
+    "dashboard": ("🏠", "rgba(109,74,255,.35)"), "users": ("👥", "rgba(34,211,255,.30)"),
+    "tickets": ("🎫", "rgba(255,179,36,.32)"), "resellers": ("🏪", "rgba(255,95,174,.30)"),
+    "discounts": ("🏷️", "rgba(61,220,151,.30)"), "topups": ("💰", "rgba(255,196,87,.34)"),
+    "crypto": ("🪙", "rgba(255,150,60,.32)"), "broadcast": ("📣", "rgba(255,95,174,.30)"),
+    "salenotify": ("📢", "rgba(34,211,255,.30)"), "settings": ("⚙️", "rgba(139,123,255,.35)"),
+    "texts": ("✍️", "rgba(61,220,151,.30)"), "appearance": ("🎨", "rgba(255,95,174,.32)"), "custombtn": ("🔘", "rgba(34,211,255,.30)"),
+    "orders": ("🧾", "rgba(34,211,255,.30)"), "channels": ("📡", "rgba(139,123,255,.35)"),
+    "backup": ("💾", "rgba(61,220,151,.30)"), "finance": ("📊", "rgba(255,196,87,.34)"),
+    "donito": ("⚡", "rgba(255,196,87,.36)"), "plans": ("📦", "rgba(255,150,60,.32)"),
+    "alerts": ("⏰", "rgba(255,95,174,.30)"), "envvars": ("🔑", "rgba(139,123,255,.35)"),
+    "more": ("☰", "rgba(255,255,255,.14)"), "logout": ("🚪", "rgba(255,123,147,.30)"),
+}
+
+
 def icon(name):
+    if name in STICKERS:
+        emo, col = STICKERS[name]
+        return f'<span class="stk" style="--c:{col}" aria-hidden="true">{emo}</span>'
     return ('<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" '
             f'stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">{ICONS[name]}</svg>')
 
@@ -1811,7 +1880,8 @@ NAV = [
               ("crypto", "رمزارزها", "crypto_page"), ("broadcast", "پیام همگانی", "broadcast"),
               ("salenotify", "اعلان فروش", "sale_notify_page")]),
     ("ربات", [("settings", "تنظیمات ربات", "settings_page"), ("texts", "متن‌های ربات", "texts_page"),
-              ("appearance", "دکمه‌ها و ظاهر", "appearance_page")]),
+              ("appearance", "دکمه‌ها و ظاهر", "appearance_page"),
+              ("custombtn", "دکمه‌های سفارشی", "custom_buttons_page")]),
 ]
 BOTTOM = [("dashboard", "داشبورد", "dashboard"), ("users", "کاربران", "users"), ("tickets", "تیکت‌ها", "tickets")]
 
@@ -1873,7 +1943,7 @@ def render_page(title, active, content_html, actions=""):
     <div class="shell">
       {render_topbar()}
       <main class="app">
-        <div class="page-head"><h2 class="page-title">{title}</h2><div class="flex">{actions}</div></div>
+        <div class="page-head"><div class="title-row">{('<span class="title-stk">' + STICKERS[active][0] + '</span>') if active in STICKERS and active not in ('more', 'logout') else ''}<h2 class="page-title">{title}</h2></div><div class="flex">{actions}</div></div>
         {flashes}
         {content_html}
       </main>
@@ -1913,6 +1983,7 @@ def bar_chart(points, fmt, color_class="bar"):
 LOGIN_HTML = """
 <div class="login-wrap">
   <div class="orb o1"></div><div class="orb o2"></div><div class="orb o3"></div>
+  <span class="fl f1">🚀</span><span class="fl f2">🛡️</span><span class="fl f3">⚡</span><span class="fl f4">🔐</span>
   <form method="post" class="login-box">
     <div class="login-logo"><div class="mark"></div><h2>SkyTunnel</h2></div>
     <div class="sub">ورود به پنل مدیریت</div>
@@ -2070,16 +2141,20 @@ def users():
     if sort not in USER_SORTS:
         sort = "active"
     only_recent = request.args.get("recent") == "1"
+    only_banned = request.args.get("banned") == "1"
     offset = max(0, to_int(request.args.get("offset"), 0))
-    total = get_users_count(search or None, only_recent)
-    rows = get_users_page(offset=offset, search=search or None, sort=sort, only_recent=only_recent)
+    total = get_users_count(search or None, only_recent, only_banned)
+    rows = get_users_page(offset=offset, search=search or None, sort=sort, only_recent=only_recent, only_banned=only_banned)
+    banned_ids = get_banned_ids([r[0] for r in rows])
 
     rows_html = ""
     for user_id, username, first_name, wallet, joined_at, last_active, last_action in rows:
         state = activity_state(last_active)
+        is_b = user_id in banned_ids
+        b_badge = ' <span class="badge off">مسدود</span>' if is_b else ""
         rows_html += f"""
         <tr>
-          <td data-label="کاربر" class="wrap">{user_display(first_name, username, user_id)}<br><small class="muted num">{user_id}</small></td>
+          <td data-label="کاربر" class="wrap">{user_display(first_name, username, user_id)}{b_badge}<br><small class="muted num">{user_id}</small></td>
           <td data-label="موجودی" class="num">{int(wallet or 0):,} تومان</td>
           <td data-label="آخرین فعالیت"><span class="act" title="{fmt_dt(last_active)}"><i class="{state}"></i>{rel_time(last_active)}</span></td>
           <td data-label="آخرین دستور" class="wrap">{esc(action_label(last_action))}</td>
@@ -2091,11 +2166,15 @@ def users():
               <button type="submit" name="sign" value="1">➕</button>
               <button type="submit" name="sign" value="-1" class="secondary">➖</button>
             </form></td>
-          <td data-label=""><a class="btn secondary sm" href="{url_for('user_detail', user_id=user_id)}">مشاهده</a></td>
+          <td data-label=""><div class="flex"><a class="btn secondary sm" href="{url_for('user_detail', user_id=user_id)}">مشاهده</a>
+            <form method="post" action="{url_for('user_ban', user_id=user_id)}" style="margin:0;"
+                  {'' if is_b else 'onsubmit="return confirm(' + chr(39) + 'این کاربر مسدود بشه؟' + chr(39) + ');"'}>
+              <input type="hidden" name="action" value="{'unban' if is_b else 'ban'}"><input type="hidden" name="next" value="list">
+              <button type="submit" class="{'' if is_b else 'danger '}sm">{'✅ آزاد' if is_b else '⛔ مسدود'}</button></form></div></td>
         </tr>"""
 
     def link(**kw):
-        params = {"q": search, "sort": sort, "recent": "1" if only_recent else ""}
+        params = {"q": search, "sort": sort, "recent": "1" if only_recent else "", "banned": "1" if only_banned else ""}
         params.update(kw)
         return url_for("users", **{k: v for k, v in params.items() if v not in ("", None)})
 
@@ -2108,12 +2187,14 @@ def users():
     sorts = [("active", "آخرین فعالیت"), ("joined", "جدیدترین عضو"), ("wallet", "بیشترین موجودی")]
     pills = "".join(f'<a class="pill {"active" if sort == k else ""}" href="{link(sort=k, offset="")}">{label}</a>' for k, label in sorts)
     pills += f'<a class="pill {"active" if only_recent else ""}" href="{link(recent="" if only_recent else "1", offset="")}">🟢 فعال در ۲۴ ساعت اخیر</a>'
+    pills += f'<a class="pill {"active" if only_banned else ""}" href="{link(banned="" if only_banned else "1", offset="")}">⛔ مسدودها</a>'
 
     content = f"""
     <div class="card">
       <form method="get" class="flex">
         <input type="hidden" name="sort" value="{esc(sort)}">
         {'<input type="hidden" name="recent" value="1">' if only_recent else ''}
+        {'<input type="hidden" name="banned" value="1">' if only_banned else ''}
         <input type="text" name="q" placeholder="جستجو با آیدی، یوزرنیم یا نام..." value="{esc(search)}" style="flex:1;min-width:200px;">
         <button type="submit">جستجو</button>
       </form>
@@ -2124,7 +2205,7 @@ def users():
       <tbody>{rows_html if rows_html else '<tr><td colspan="7">کاربری یافت نشد.</td></tr>'}</tbody>
     </table>
     <div class="pager">{pager}</div>
-    <p><small class="muted num">{total:,} کاربر{' (با فیلتر فعلی)' if (search or only_recent) else ' ثبت‌شده'}</small></p>
+    <p><small class="muted num">{total:,} کاربر{' (با فیلتر فعلی)' if (search or only_recent or only_banned) else ' ثبت‌شده'}</small></p>
     <p><small class="muted">«آخرین دستور» همون آخرین دستور، دکمه یا مرحله‌ایه که کاربر تو ربات زده. زمان‌ها به وقت تهران و تاریخ شمسی است.
     برای کاربرانی که از آخرین بروزرسانی ربات به بعد هنوز پیامی نداده‌اند، فعالیت ثبت نشده.</small></p>
     """
@@ -2153,6 +2234,16 @@ def user_detail(user_id):
           <td data-label="تاریخ ساخت"><small class="muted">{fmt_dt(created_at, with_time=False)}</small></td>
           <td data-label="وضعیت"><span class="badge {'on' if active else 'off'}">{'فعال' if active else esc(status)}</span></td>
         </tr>"""
+
+    is_b = user_id in get_banned_ids([user_id])
+    ban_card = f"""
+    <div class="card"><h3>⛔ مسدودسازی</h3>
+      <p>وضعیت: {'<span class="badge off">مسدود</span>' if is_b else '<span class="badge on">آزاد</span>'}</p>
+      <small class="muted">کاربر مسدود دیگه به هیچ بخشی از ربات دسترسی نداره و فقط پیام «دسترسی شما مسدود شده» می‌بینه. اعمال تغییر تا حدود ۱۵ ثانیه طول می‌کشه.</small>
+      <form method="post" action="{url_for('user_ban', user_id=user_id)}" style="margin-top:10px;">
+        <input type="hidden" name="action" value="{'unban' if is_b else 'ban'}">
+        <button type="submit" class="{'' if is_b else 'danger'}">{'✅ آزاد کردن کاربر' if is_b else '⛔ مسدود کردن کاربر'}</button>
+      </form></div>"""
 
     trial_count, trial_last = get_trial_info(user_id)
     trial_card = f"""
@@ -2195,6 +2286,7 @@ def user_detail(user_id):
         </form></div>
     </div>
 
+    {ban_card}
     {trial_card}
     <p><a class="btn" href="{url_for('user_configs_admin', user_id=user_id)}">⚙️ مدیریت کانفیگ‌های این کاربر (تمدید، توقف، حذف، ساخت هدیه)</a></p>
 
@@ -2224,6 +2316,20 @@ def adjust_wallet():
         update_wallet(user_id, amount * sign)
         flash(f"موجودی کاربر {user_id} به مقدار {amount:,} تومان {'افزایش' if sign > 0 else 'کاهش'} یافت.")
     return redirect(back)
+
+
+@app.route("/users/<int:user_id>/ban", methods=["POST"])
+@login_required
+def user_ban(user_id):
+    if get_user(user_id) is None:
+        flash("⚠️ کاربر پیدا نشد.")
+        return redirect(url_for("users"))
+    ban = request.form.get("action") == "ban"
+    set_user_banned(user_id, ban)
+    flash(f"کاربر {user_id} " + ("مسدود شد." if ban else "آزاد شد."))
+    if request.form.get("next") == "list":
+        return redirect(url_for("users"))
+    return redirect(url_for("user_detail", user_id=user_id))
 
 
 @app.route("/users/<int:user_id>/trial-reset", methods=["POST"])
@@ -3047,11 +3153,6 @@ def reseller_toggle(vkey):
     res = seller_api("PATCH", f"/resale/subs/{v['sub_id']}", {"status": new_status})
     invalidate_subs_cache()
     if res["success"]:
-        if v["tg_id"]:
-            try:
-                set_old_reseller_status(v["tg_id"], "active" if new_status == "active" else "blocked")
-            except Exception:
-                pass
         flash(f"فروشنده {v['name']} {'فعال' if new_status == 'active' else 'مسدود'} شد.")
     else:
         flash("⚠️ وضعیت تغییر نکرد: " + seller_reason(res))
@@ -3075,6 +3176,186 @@ def reseller_price(vkey):
     else:
         flash("⚠️ قیمت تغییر نکرد: " + seller_reason(res))
     return _after_vendor_action(vkey)
+
+
+
+# ---------- دکمه‌های سفارشی منوی ربات ----------
+# ذخیره تو settings با کلید custom_buttons (JSON). بات هر ~۲۰ ثانیه می‌خونه و تو منوی اصلی نشون می‌ده.
+# هر دکمه: id, label, label_en, type (message|link|goto), text, url, url_label, target, enabled
+
+CUSTOM_BTN_KEY = "custom_buttons"
+CUSTOM_BTN_MAX = 12
+CUSTOM_BTN_TYPES = (("message", "📝 ارسال یک پیام"), ("link", "🔗 باز کردن یک لینک"), ("goto", "↪️ رفتن به یکی از بخش‌های ربات"))
+CUSTOM_BTN_GOTO = [(k, d) for k, _l, d in BOT_BUTTONS]
+
+
+def load_custom_buttons():
+    try:
+        items = json.loads(get_setting(CUSTOM_BTN_KEY, "") or "[]")
+    except Exception:
+        return []
+    return [i for i in items if isinstance(i, dict) and i.get("id")] if isinstance(items, list) else []
+
+
+def save_custom_buttons(items):
+    set_setting(CUSTOM_BTN_KEY, json.dumps(items, ensure_ascii=False))
+
+
+def parse_custom_button(form):
+    """(dict, None) یا (None, پیام خطا)."""
+    label = form.get("label", "").strip()
+    kind = form.get("type", "message")
+    text = form.get("text", "").strip()
+    url = form.get("url", "").strip()
+    target = form.get("target", "").strip()
+    if not label or len(label) > 40:
+        return None, "اسم دکمه باید بین ۱ تا ۴۰ حرف باشه."
+    if kind not in dict(CUSTOM_BTN_TYPES):
+        return None, "نوع دکمه نامعتبره."
+    if len(text) > 3500:
+        return None, "متن پیام خیلی طولانیه (حداکثر ۳۵۰۰ حرف)."
+    if url and not url.lower().startswith(("http://", "https://")):
+        return None, "لینک باید با http:// یا https:// شروع بشه."
+    if kind == "message" and not text:
+        return None, "برای نوع «ارسال پیام»، متن پیام رو بنویسید."
+    if kind == "link" and not url:
+        return None, "برای نوع «باز کردن لینک»، لینک رو بنویسید."
+    if kind == "goto" and target not in dict(CUSTOM_BTN_GOTO):
+        return None, "بخش مقصد رو انتخاب کنید."
+    return {
+        "label": label, "label_en": form.get("label_en", "").strip()[:40], "type": kind,
+        "text": text, "url": url, "url_label": form.get("url_label", "").strip()[:40],
+        "target": target if kind == "goto" else "", "enabled": form.get("enabled") == "1",
+    }, None
+
+
+def custom_button_fields(it):
+    it = it or {}
+    kind = it.get("type", "message")
+    type_opts = "".join(f'<option value="{k}"{" selected" if k == kind else ""}>{esc(v)}</option>' for k, v in CUSTOM_BTN_TYPES)
+    goto_opts = "".join(f'<option value="{k}"{" selected" if k == it.get("target") else ""}>{esc(v)}</option>' for k, v in CUSTOM_BTN_GOTO)
+    return f"""
+      <label>اسم دکمه (فارسی)</label>
+      <input type="text" name="label" value="{esc(it.get('label', ''))}" maxlength="40" placeholder="مثلاً 📣 کانال ما" required>
+      <label>اسم دکمه برای کاربران انگلیسی‌زبان (اختیاری)</label>
+      <input type="text" name="label_en" value="{esc(it.get('label_en', ''))}" maxlength="40" dir="ltr">
+      <label>وقتی کاربر روش می‌زنه چی بشه؟</label>
+      <select name="type" onchange="cbtnType(this)">{type_opts}</select>
+      <div data-for="message link">
+        <label>متن پیامی که ربات می‌فرسته (HTML تلگرام مجاز است؛ برای نوع «لینک» اختیاری)</label>
+        <textarea name="text" style="min-height:90px;">{esc(it.get('text', ''))}</textarea>
+        <label>لینک (اختیاری برای پیام؛ الزامی برای نوع «لینک»)</label>
+        <input type="url" name="url" value="{esc(it.get('url', ''))}" dir="ltr" placeholder="https://...">
+        <label>نوشته‌ی دکمه‌ی لینک (اختیاری)</label>
+        <input type="text" name="url_label" value="{esc(it.get('url_label', ''))}" maxlength="40" placeholder="🔗 باز کردن لینک">
+      </div>
+      <div data-for="goto">
+        <label>کاربر به کدوم بخش ربات بره؟</label>
+        <select name="target">{goto_opts}</select>
+      </div>
+      <label style="display:flex;align-items:center;gap:8px;cursor:pointer;margin-top:14px;">
+        <input type="checkbox" name="enabled" value="1"{" checked" if it.get("enabled", True) else ""}> <span>نمایش تو منوی ربات</span></label>"""
+
+
+@app.route("/custom-buttons")
+@login_required
+def custom_buttons_page():
+    items = load_custom_buttons()
+    cards = ""
+    for n, it in enumerate(items):
+        bid = it["id"]
+        kind_txt = dict(CUSTOM_BTN_TYPES).get(it.get("type"), "—")
+        on = it.get("enabled", True)
+        cards += f"""
+    <div class="card">
+      <h3>{esc(it.get('label', ''))} <span class="badge {'on' if on else 'off'}">{'نمایش' if on else 'مخفی'}</span></h3>
+      <small class="muted">{esc(kind_txt)}</small>
+      <form method="post" action="{url_for('custom_button_save', bid=bid)}">{custom_button_fields(it)}
+        <div class="flex" style="margin-top:14px;"><button type="submit">💾 ذخیره</button></div>
+      </form>
+      <div class="flex" style="margin-top:10px;">
+        <form method="post" action="{url_for('custom_button_move', bid=bid, direction='up')}"><button type="submit" class="secondary sm"{' disabled' if n == 0 else ''}>⬆️ بالاتر</button></form>
+        <form method="post" action="{url_for('custom_button_move', bid=bid, direction='down')}"><button type="submit" class="secondary sm"{' disabled' if n == len(items) - 1 else ''}>⬇️ پایین‌تر</button></form>
+        <form method="post" action="{url_for('custom_button_delete', bid=bid)}" onsubmit="return confirm('این دکمه حذف بشه؟');"><button type="submit" class="danger sm">🗑 حذف</button></form>
+      </div>
+    </div>"""
+    add_card = (f"""
+    <div class="card"><h3>➕ دکمه‌ی جدید</h3>
+      <form method="post" action="{url_for('custom_button_add')}">{custom_button_fields(None)}
+        <div style="margin-top:14px;"><button type="submit">➕ اضافه کن</button></div>
+      </form></div>""" if len(items) < CUSTOM_BTN_MAX else
+        f'<div class="alert">⚠️ حداکثر {CUSTOM_BTN_MAX} دکمه‌ی سفارشی مجازه؛ برای اضافه کردن، یکی رو حذف کنید.</div>')
+    content = f"""
+    <div class="card"><small class="muted">دکمه‌هایی که اینجا بسازید، زیر دکمه‌های اصلی منوی ربات نمایش داده می‌شن (تا ۲۰ ثانیه بعد از ذخیره).
+    می‌تونید تعیین کنید با زدن هر دکمه ربات یک پیام بفرسته، لینکی رو باز کنه، یا کاربر رو به یکی از بخش‌های خود ربات (خرید، پشتیبانی، ...) ببره.</small></div>
+    {add_card}
+    {cards}
+    <script>
+    function cbtnType(sel){{var f=sel.closest('form');f.querySelectorAll('[data-for]').forEach(function(e){{e.style.display=e.getAttribute('data-for').split(' ').indexOf(sel.value)>-1?'':'none';}});}}
+    document.querySelectorAll('select[name=type]').forEach(cbtnType);
+    </script>"""
+    return render_page("دکمه‌های سفارشی", "custombtn", content)
+
+
+@app.route("/custom-buttons/add", methods=["POST"])
+@login_required
+def custom_button_add():
+    items = load_custom_buttons()
+    if len(items) >= CUSTOM_BTN_MAX:
+        flash(f"⚠️ حداکثر {CUSTOM_BTN_MAX} دکمه‌ی سفارشی مجازه.")
+        return redirect(url_for("custom_buttons_page"))
+    it, err = parse_custom_button(request.form)
+    if err:
+        flash("⚠️ " + err)
+        return redirect(url_for("custom_buttons_page"))
+    it["id"] = secrets.token_hex(3)
+    items.append(it)
+    save_custom_buttons(items)
+    flash(f"دکمه‌ی «{it['label']}» اضافه شد.")
+    return redirect(url_for("custom_buttons_page"))
+
+
+@app.route("/custom-buttons/<bid>/save", methods=["POST"])
+@login_required
+def custom_button_save(bid):
+    items = load_custom_buttons()
+    idx = next((i for i, x in enumerate(items) if x["id"] == bid), None)
+    if idx is None:
+        flash("⚠️ دکمه پیدا نشد.")
+        return redirect(url_for("custom_buttons_page"))
+    it, err = parse_custom_button(request.form)
+    if err:
+        flash("⚠️ " + err)
+        return redirect(url_for("custom_buttons_page"))
+    it["id"] = bid
+    items[idx] = it
+    save_custom_buttons(items)
+    flash(f"دکمه‌ی «{it['label']}» ذخیره شد.")
+    return redirect(url_for("custom_buttons_page"))
+
+
+@app.route("/custom-buttons/<bid>/move/<direction>", methods=["POST"])
+@login_required
+def custom_button_move(bid, direction):
+    items = load_custom_buttons()
+    idx = next((i for i, x in enumerate(items) if x["id"] == bid), None)
+    if idx is not None:
+        j = idx - 1 if direction == "up" else idx + 1
+        if 0 <= j < len(items):
+            items[idx], items[j] = items[j], items[idx]
+            save_custom_buttons(items)
+    return redirect(url_for("custom_buttons_page"))
+
+
+@app.route("/custom-buttons/<bid>/delete", methods=["POST"])
+@login_required
+def custom_button_delete(bid):
+    items = load_custom_buttons()
+    new = [x for x in items if x["id"] != bid]
+    if len(new) != len(items):
+        save_custom_buttons(new)
+        flash("دکمه حذف شد.")
+    return redirect(url_for("custom_buttons_page"))
 
 
 # ---------- پیام همگانی ----------
@@ -4309,8 +4590,10 @@ def user_config_action(user_id, rid, action):
             return back
         base = parse_ts(expires_at)
         base = base.replace(tzinfo=None) if base else datetime.now()
-        db_run("UPDATE user_configs SET gb=?, days=?, expires_at=? WHERE id=?",
-               ((gb or 0) + egb, (days or 0) + edays, (base + timedelta(days=edays)).isoformat(), rid))
+        base = max(base, datetime.now())
+        db_run("UPDATE user_configs SET base_gb=COALESCE(base_gb, ?), base_days=COALESCE(base_days, ?), "
+               "gb=?, days=?, expires_at=? WHERE id=?",
+               (gb or 0, days or 0, (gb or 0) + egb, (days or 0) + edays, (base + timedelta(days=edays)).isoformat(), rid))
         flash(f"تمدید شد: +{egb:g} گیگ، +{edays} روز.")
         if notify:
             _notify(user_id, f"✅ کانفیگ «{esc(label)}» تمدید شد: +{egb:g} گیگ، +{edays} روز.")
@@ -5021,11 +5304,15 @@ def alerts_page():
         <input type="number" name="alert_volume_percent" min="1" max="99" value="{esc(st.get('alert_volume_percent', '90'))}">
         <label style="margin-top:12px;">هر چند دقیقه یک‌بار بررسی بشه؟ (حداقل ۵)</label>
         <input type="number" name="alert_interval_min" min="5" max="1440" value="{esc(st.get('alert_interval_min', '30'))}">
+        <hr style="margin:18px 0;border:0;border-top:1px solid var(--border,#ddd);">
+        <label style="display:flex;gap:8px;align-items:center;"><input type="checkbox" name="nudge_trial_enabled" value="1"{' checked' if st.get('nudge_trial_enabled', '1') == '1' else ''}> <b>👋 یادآوری به کسی که تست گرفته و نخریده (فقط یک‌بار)</b></label>
+        <label style="margin-top:12px;">چند ساعت بعد از گرفتن تست پیام بره؟</label>
+        <input type="number" name="nudge_trial_hours" min="1" max="168" value="{esc(st.get('nudge_trial_hours', '48'))}">
         <div style="margin-top:14px;"><button type="submit">💾 ذخیره</button></div>
       </div>
     </form>
     <div class="card"><small class="muted">هر هشدار برای هر کانفیگ فقط یک‌بار فرستاده می‌شه و بعد از تمدید دوباره مجازه. کانفیگ‌های تست رایگان و متوقف‌شده هشدار نمی‌گیرن. پیام «حجم تموم شد» هم جداست. متن هشدارها از صفحه‌ی «متن‌های ربات» قابل ویرایشه.</small></div>"""
-    return render_page("هشدار انقضا و حجم", "alerts", content)
+    return render_page("هشدارها و یادآوری‌ها", "alerts", content)
 
 
 @app.route("/alerts/save", methods=["POST"])
@@ -5043,6 +5330,8 @@ def alerts_save():
     set_setting("alert_expiry_days", num("alert_expiry_days", 1, 60, 3))
     set_setting("alert_volume_percent", num("alert_volume_percent", 1, 99, 90))
     set_setting("alert_interval_min", num("alert_interval_min", 5, 1440, 30))
+    set_setting("nudge_trial_enabled", "1" if f.get("nudge_trial_enabled") == "1" else "0")
+    set_setting("nudge_trial_hours", num("nudge_trial_hours", 1, 168, 48))
     flash("تنظیمات هشدار ذخیره شد.")
     return redirect(url_for("alerts_page"))
 
