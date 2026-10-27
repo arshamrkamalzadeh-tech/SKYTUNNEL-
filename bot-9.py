@@ -2528,6 +2528,49 @@ def create_donito_request(user_id, base_amount):
     return None, None
 
 
+DONITO_DONATE_URL = os.getenv("DONITO_DONATE_URL", "https://donito.me/api/v1/public/transactions/skytunnel/donate")
+
+
+def donito_create_pay_link(pay_amount):
+    """از API عمومی دونیتو یه تراکنش می‌سازه و لینک مستقیم درگاه شاپرک (سامان) رو برمی‌گردونه.
+    خروجی: URL یا None (اگه نشد، بات به صفحه‌ی دونیتو برمی‌گرده)."""
+    payload = {
+        "amount": int(pay_amount),
+        "currency": "IRT",
+        "donator_name": get_setting('donito_donator_name', '') or "SkyTunnel",
+        "donator_email": None,
+        "donator_cellphone": None,
+        "donator_message": "",
+        "is_visible_donator_message": False,
+        "is_visible_donator_name": False,
+        "is_visible_donator_on_list": False,
+        "is_visible_alert": False,
+    }
+    # attribution_token رو صفحه‌ی دونیتو می‌سازه (اعتبار ~۲۴ ساعت). اول بدون اون تست می‌شه؛
+    # اگه سرور خواستش، از تنظیمات (donito_attribution_token) خونده می‌شه.
+    attr = get_setting('donito_attribution_token', '').strip()
+    if attr:
+        payload["attribution_token"] = attr
+    try:
+        r = requests.post(
+            DONITO_DONATE_URL, json=payload, timeout=20,
+            headers={"Origin": "https://donito.me", "Referer": get_donito_page_url(),
+                     "Accept": "application/json, text/plain, */*",
+                     "User-Agent": "Mozilla/5.0 (Linux; Android 10; K) AppleWebKit/537.36 "
+                                   "(KHTML, like Gecko) Chrome/155.0.0.0 Mobile Safari/537.36"})
+        j = r.json()
+        if (j.get("meta") or {}).get("code") != 201:
+            print("⚠️ donito donate:", r.status_code, _donito_scrub(str(j)[:300]))
+            return None
+        tok = ((j.get("data") or {}).get("params") or {}).get("Token")
+        if not tok:
+            return None
+        return "https://sep.shaparak.ir/OnlinePG/SendToken?token=" + tok
+    except Exception as e:
+        print("⚠️ donito_create_pay_link:", _donito_scrub(e))
+        return None
+
+
 def donito_match_and_approve():
     """دونیت‌های اخیر رو با درخواست‌های معلق تطبیق می‌ده و شارژ رو خودکار تأیید می‌کنه. تعداد تأییدها رو برمی‌گردونه."""
     pending = list_pending_donito_requests()
@@ -2598,7 +2641,7 @@ def send_donito_topup_info(chat_id, amount):
         send_message(chat_id, u(chat_id, 'topup_donito_busy'))
         return
     user_steps[str(chat_id)] = {}
-    page = get_donito_page_url()
+    page = donito_create_pay_link(pay) or get_donito_page_url()
     rows = []
     if page.lower().startswith(('http://', 'https://')):
         rows.append([{'text': u(chat_id, 'btn_donito_pay'), 'url': page}])
