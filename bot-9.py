@@ -1017,6 +1017,18 @@ UI_TEXT['en'].update({
     'reseller_creds_line': '👤 Panel username: <code>{username}</code>',
 })
 
+# ---- مسدودسازی کاربر و دکمه‌های سفارشی ----
+UI_TEXT['fa'].update({
+    'banned_notice': '⛔ دسترسی شما به این ربات توسط مدیریت مسدود شده است.',
+    'btn_back_menu': '🏠 منوی اصلی',
+    'btn_open_link': '🔗 باز کردن لینک',
+})
+UI_TEXT['en'].update({
+    'banned_notice': '⛔ Your access to this bot has been blocked by the administrator.',
+    'btn_back_menu': '🏠 Main menu',
+    'btn_open_link': '🔗 Open link',
+})
+
 # ---- فروشندگی جدید: ساخت خودکار حساب فروشنده روی پنل سرویس‌دهنده (بدون پرداخت) ----
 UI_TEXT['fa'].update({
     'btn_reseller': '🏪 دریافت پنل فروشندگی',
@@ -1139,6 +1151,32 @@ UI_TEXT['fa'].update({
         '🚫 <b>حجم تموم شد</b>\n{divider}\n'
         'حجم کانفیگ <b>{label}</b> به پایان رسیده. برای ادامه‌ی استفاده، تمدیدش کنید.'
     ),
+})
+UI_TEXT['fa'].update({
+    'btn_alert_renew': '🔄 تمدید سریع',
+    'qrenew_low_balance': (
+        '⚠️ <b>موجودی کیف پول کافی نیست</b>\n{divider}\n'
+        'تمدید «{label}» با همون بسته‌ی قبلی ({extra_gb} گیگ / {extra_days} روز) <b>{price}</b> تومان می‌شه.\n'
+        '💳 موجودی شما: <b>{wallet}</b> تومان\n\nاول کیف پولتون رو شارژ کنید، بعد دوباره «تمدید سریع» رو بزنید.'
+    ),
+    'nudge_trial': (
+        '👋 <b>تستت چطور بود؟</b>\n{divider}\n'
+        'اگه از سرعت و کیفیت سرویس راضی بودی، همین الان می‌تونی یه بسته بخری و بدون قطعی ادامه بدی.'
+    ),
+    'btn_nudge_buy': '🛍 مشاهده بسته‌ها و خرید',
+})
+UI_TEXT['en'].update({
+    'btn_alert_renew': '🔄 Quick renew',
+    'qrenew_low_balance': (
+        '⚠️ <b>Insufficient wallet balance</b>\n{divider}\n'
+        'Renewing “{label}” with the same pack ({extra_gb} GB / {extra_days} days) costs <b>{price}</b> Toman.\n'
+        '💳 Your balance: <b>{wallet}</b> Toman\n\nTop up your wallet first, then tap “Quick renew” again.'
+    ),
+    'nudge_trial': (
+        '👋 <b>How was your trial?</b>\n{divider}\n'
+        'If you liked the speed and quality, you can buy a plan now and keep going without interruption.'
+    ),
+    'btn_nudge_buy': '🛍 View plans & buy',
 })
 UI_TEXT['en'].update({
     'btn_reseller_status': '📊 Seller status',
@@ -1417,6 +1455,7 @@ def init_db():
             pass  # ستون از قبل هست
     c.execute('CREATE TABLE IF NOT EXISTS crypto_deposits_used (tx TEXT PRIMARY KEY, req_id INTEGER, created_at TEXT)')
     # هشدارهای ارسال‌شده‌ی انقضا/حجم؛ ref = تاریخ انقضا یا حجم کل زمان ارسال (با تمدید عوض می‌شه و هشدار دوباره مجازه)
+    c.execute('CREATE TABLE IF NOT EXISTS user_nudges (user_id INTEGER, kind TEXT, sent_at TEXT, PRIMARY KEY (user_id, kind))')
     c.execute('CREATE TABLE IF NOT EXISTS config_alerts (config_row_id INTEGER, kind TEXT, ref TEXT, sent_at TEXT, '
               'PRIMARY KEY (config_row_id, kind))')
     c.execute('CREATE TABLE IF NOT EXISTS settings (key TEXT PRIMARY KEY, value TEXT)')
@@ -1439,12 +1478,15 @@ def init_db():
         'ALTER TABLE users ADD COLUMN kb_style TEXT',
         'ALTER TABLE users ADD COLUMN lang TEXT',
         'ALTER TABLE users ADD COLUMN referred_by INTEGER',
+        'ALTER TABLE users ADD COLUMN banned INTEGER DEFAULT 0',
         'ALTER TABLE resellers ADD COLUMN username TEXT',
         'ALTER TABLE resellers ADD COLUMN password_hash TEXT',
         'ALTER TABLE resellers ADD COLUMN password_plain TEXT',
         'ALTER TABLE free_trials ADD COLUMN trial_count INTEGER DEFAULT 1',
         'ALTER TABLE seller_accounts ADD COLUMN password TEXT',
         'ALTER TABLE free_trials ADD COLUMN last_at TEXT',
+        'ALTER TABLE user_configs ADD COLUMN base_gb REAL',
+        'ALTER TABLE user_configs ADD COLUMN base_days INTEGER',
     ):
         try:
             c.execute(statement)
@@ -2697,6 +2739,50 @@ def donito_check_report():
     return '\n'.join(lines)
 
 
+def donito_probe_report():
+    """دستور ادمین /donitoprobe: صفحه‌ی دونیتوی خودت رو می‌خونه و فرم/آدرس‌های API داخلش رو گزارش می‌ده
+    (فقط برای عیب‌یابی؛ هیچ پرداخت یا درخواست ثبتی انجام نمی‌ده)."""
+    url = get_donito_page_url()
+    if not url:
+        return '⚠️ DONITO_PAGE_URL تنظیم نشده.'
+    hdr = {'User-Agent': 'Mozilla/5.0 (Linux; Android 13) AppleWebKit/537.36 Chrome/120 Mobile Safari/537.36',
+           'Accept-Language': 'fa,en;q=0.8'}
+    try:
+        r = requests.get(url, headers=hdr, timeout=20)
+    except Exception as e:
+        return '❌ باز کردن صفحه‌ی دونیتو ناموفق بود: ' + _donito_scrub(e)[:300]
+    html = r.text or ''
+    out = [f'صفحه: {url}', f'وضعیت: {r.status_code} | آدرس نهایی: {r.url} | حجم: {len(html)}']
+    forms = re.findall(r'<form[^>]*>', html, re.I)
+    out.append('فرم‌ها: ' + (' | '.join(f[:200] for f in forms[:4]) or 'ندارد'))
+    names = sorted(set(re.findall(r'<(?:input|textarea|select)[^>]*\bname=["\']([^"\']+)', html, re.I)))
+    out.append('فیلدها: ' + (', '.join(names[:30]) or 'ندارد'))
+    if re.search(r'captcha|recaptcha|turnstile|hcaptcha', html, re.I):
+        out.append('⚠️ نشانه‌ی کپچا تو صفحه هست')
+    metas = re.findall(r'<meta[^>]+name=["\'](?:csrf[^"\']*|_token)["\'][^>]*>', html, re.I)
+    if metas:
+        out.append('csrf متا: دارد')
+    scripts = re.findall(r'<script[^>]+src=["\']([^"\']+)', html, re.I)
+    out.append('اسکریپت‌ها: ' + ', '.join(scripts[:12]))
+    # آدرس‌های API تو خود صفحه و اسکریپت‌های هم‌دامنه
+    found = set()
+    pat = re.compile(r'["\'`]((?:https?://[^"\'`\s]*donito[^"\'`\s]*)|(?:/api[^"\'`\s]*)|(?:/[A-Za-z0-9_\-/]*(?:donat|pay|checkout|gateway|invoice|order)[A-Za-z0-9_\-/]*))["\'`]', re.I)
+    found.update(pat.findall(html))
+    from urllib.parse import urljoin
+    for sc in scripts[:8]:
+        try:
+            full = urljoin(r.url, sc)
+            if 'donito' not in full.split('/')[2]:
+                continue
+            js = requests.get(full, headers=hdr, timeout=20).text[:1500000]
+            found.update(pat.findall(js))
+        except Exception:
+            continue
+    items = sorted(x for x in found if len(x) < 160)[:60]
+    out.append('آدرس‌های احتمالی API:\n' + ('\n'.join(items) or 'چیزی پیدا نشد'))
+    return _donito_scrub('\n'.join(out))
+
+
 def nobitex_check_report():
     """گزارش تست اتصال برای دستور ادمین /nobitexcheck."""
     if not nobitex_keys_configured():
@@ -2781,6 +2867,9 @@ def _describe_update(update, step_name):
         key = get_label_to_action_key().get(text)
         if key:
             return 'btn:' + key
+        _cb = find_custom_button_by_label(text)
+        if _cb:
+            return 'cb:cbtn_' + str(_cb.get('id'))
     if message.get('photo'):
         return 'photo'
     if step_name:
@@ -2952,9 +3041,12 @@ def extend_config_db(row_id, extra_gb, extra_days):
             base = datetime.fromisoformat(expires_at) if expires_at else datetime.now()
         except Exception:
             base = datetime.now()
+        base = max(base, datetime.now())          # کانفیگِ منقضی‌شده از همین الان تمدید می‌شه
         new_expires = (base + timedelta(days=extra_days)).isoformat()
-        c.execute('UPDATE user_configs SET gb=?, days=?, expires_at=? WHERE id=?',
-                   (new_gb, new_days, new_expires, row_id))
+        # base_gb/base_days = بسته‌ی اولیه‌ی خرید (برای «تمدید سریع با همون بسته»)؛ فقط بار اول پر می‌شه
+        c.execute('UPDATE user_configs SET base_gb=COALESCE(base_gb, ?), base_days=COALESCE(base_days, ?), '
+                  'gb=?, days=?, expires_at=? WHERE id=?',
+                  (gb or 0, days or 0, new_gb, new_days, new_expires, row_id))
         conn.commit()
     conn.close()
 
@@ -5152,6 +5244,74 @@ def _chunk_pairs(items):
     return [items[i:i + 2] for i in range(0, len(items), 2)]
 
 
+# ---------------------------------------------------------------------------
+# دکمه‌های سفارشی منو (از پنل وب: تنظیم custom_buttons به‌صورت JSON)
+# هر دکمه: id, label, label_en, type (message | link | goto), text, url, url_label, target, enabled
+#   message: متن رو می‌فرسته (اگه url هم باشه، زیرش دکمه‌ی لینک)
+#   link   : لینک رو به‌صورت دکمه می‌فرسته (متن اختیاریه)
+#   goto   : کاربر رو به یکی از بخش‌های خود ربات می‌بره (خرید، پشتیبانی و...)
+# ---------------------------------------------------------------------------
+CUSTOM_BUTTONS_MAX = 12
+
+
+def get_custom_buttons():
+    raw = get_setting('custom_buttons', '') or ''
+    if not raw:
+        return []
+    try:
+        items = json.loads(raw)
+    except Exception:
+        return []
+    if not isinstance(items, list):
+        return []
+    out = []
+    for it in items:
+        if (isinstance(it, dict) and it.get('enabled', True)
+                and str(it.get('id') or '').strip() and str(it.get('label') or '').strip()):
+            out.append(it)
+    return out[:CUSTOM_BUTTONS_MAX]
+
+
+def _cbtn_label(chat_id, it):
+    if get_user_lang(chat_id) == 'en' and str(it.get('label_en') or '').strip():
+        return str(it['label_en']).strip()
+    return str(it['label']).strip()
+
+
+def find_custom_button_by_label(text):
+    t = (text or '').strip()
+    if not t:
+        return None
+    for it in get_custom_buttons():
+        if t in (str(it['label']).strip(), str(it.get('label_en') or '').strip()):
+            return it
+    return None
+
+
+def run_custom_button(chat_id, it):
+    """کاری که با زدن دکمه‌ی سفارشی انجام می‌شه."""
+    user_steps[str(chat_id)] = {}
+    kind = str(it.get('type') or 'message')
+    if kind == 'goto':
+        handler = get_action_handlers().get(str(it.get('target') or ''))
+        if handler:
+            handler(chat_id)
+        else:
+            main_menu(chat_id)
+        return
+    text = str(it.get('text') or '').strip() or _cbtn_label(chat_id, it)
+    rows = []
+    url = str(it.get('url') or '').strip()
+    if url.lower().startswith(('http://', 'https://')):
+        rows.append([{'text': str(it.get('url_label') or '').strip() or u(chat_id, 'btn_open_link'), 'url': url}])
+    rows.append([{'text': u(chat_id, 'btn_back_menu'), 'callback_data': 'menu'}])
+    markup = {'inline_keyboard': rows}
+    res = send_message(chat_id, text, reply_markup=markup)
+    if not (isinstance(res, dict) and res.get('ok')):
+        # HTML خراب بود؟ همون متن رو ساده بفرست
+        send_message(chat_id, text, parse_mode=None, reply_markup=markup)
+
+
 def main_menu(chat_id, note=None):
     wallet = get_wallet_db(chat_id)
     labels = {key: get_button_label_for(chat_id, key, default_label) for key, default_label, _fn in BUTTON_ACTIONS}
@@ -5192,6 +5352,17 @@ def main_menu(chat_id, note=None):
             'keyboard': [[{'text': labels[k]} for k in row] for row in _chunk_pairs(order)],
             'resize_keyboard': True
         }
+
+    # دکمه‌های سفارشی ادمین (از پنل) — بعد از دکمه‌های اصلی
+    try:
+        custom = [(_cbtn_label(chat_id, it), str(it['id'])) for it in get_custom_buttons()]
+        if style == 'inline':
+            keyboard['inline_keyboard'].extend(
+                [{'text': t, 'callback_data': 'cbtn_' + i} for t, i in row] for row in _chunk_pairs(custom))
+        else:
+            keyboard['keyboard'].extend([{'text': t} for t, _i in row] for row in _chunk_pairs(custom))
+    except Exception as e:
+        print('⚠️ ساخت دکمه‌های سفارشی ناموفق بود:', e)
 
     # دکمه‌ی مخصوص ادمین (برای بقیه‌ی کاربرها هیچ‌وقت نمایش داده نمی‌شه)
     if chat_id == ADMIN_ID:
@@ -5265,7 +5436,7 @@ _TEXT_GROUP_RULES = [
     (('menu_btn_', 'ctype_btn_'), '🔘 دکمه‌های منوی اصلی و نوع سرویس'),
     (('reseller_', 'btn_reseller', 'tier_line', 'price_range', 'seller_', 'btn_change_'), '🏪 فروشندگی (پنل فروشنده)'),
     (('referral_', 'btn_referral'), '🎁 دعوت دوستان'),
-    (('admin_', 'config_note', 'no_username', 'disabled_feature'), '🛠 پیام‌های ادمین و سیستمی'),
+    (('admin_', 'config_note', 'no_username', 'disabled_feature', 'banned_', 'btn_back_menu', 'btn_open_link'), '🛠 پیام‌های ادمین و سیستمی'),
     (('qty_', 'btn_qty', 'ask_label', 'invoice_', 'btn_confirm_purchase', 'btn_cancel_purchase', 'btn_apply_discount',
       'discount_', 'building_config', 'insufficient_balance', 'purchase_success', 'output_label',
       'proto_unavailable', 'dns_unavailable', 'server_error', 'buy_menu', 'btn_buy', 'svc_',
@@ -5506,6 +5677,78 @@ def start_health_server(port):
 # تنظیم از پنل ادمین (صفحه‌ی «هشدارها»): alerts_enabled, alert_expiry_days, alert_volume_percent,
 # alert_expired_notice, alert_interval_min. هر هشدار برای هر کانفیگ فقط یک‌بار می‌ره (تا وقتی تمدید نشه).
 # ---------------------------------------------------------------------------
+def quick_renew_pack(user_id, row_id):
+    """(ردیف کانفیگ, گیگ, روز, قیمت) برای تمدید سریع با همون بسته‌ی اولیه‌ی خرید؛ None اگه کانفیگ مال کاربر نباشه.
+    اگه بسته‌ی آماده‌ی هم‌مشخصات (نوع/گیگ/روز) وجود داشته باشه، قیمت همون بسته؛ وگرنه حجم × قیمت هر گیگِ نوع سرویس."""
+    cfg = get_config_row(user_id, row_id)
+    if not cfg:
+        return None
+    conn = get_conn()
+    c = conn.cursor()
+    c.execute('SELECT COALESCE(base_gb, gb), COALESCE(base_days, days) FROM user_configs WHERE id=?', (row_id,))
+    r = c.fetchone()
+    conn.close()
+    try:
+        gb = float(r[0] or 0)
+        days = int(r[1] or 0)
+    except Exception:
+        return None
+    if gb <= 0 or days <= 0:
+        return None
+    ctype = cfg[9] if len(cfg) > 9 and cfg[9] else 'both'
+    price = None
+    for p in get_plans(active_only=False):
+        if p['type'] == ctype and float(p['gb']) == gb and p['days'] == days:
+            price = p['price']
+            break
+    if price is None:
+        types = get_config_types()
+        price = round(gb * types.get(ctype, types['both'])['price_per_gb'])
+    gb = int(gb) if gb == int(gb) else gb
+    return cfg, gb, days, int(price)
+
+
+@with_db_retry
+def _nudge_candidates(min_age_hours, max_age_days):
+    now = datetime.now()
+    newest = (now - timedelta(hours=min_age_hours)).isoformat()
+    oldest = (now - timedelta(days=max_age_days)).isoformat()
+    conn = get_conn()
+    c = conn.cursor()
+    c.execute("SELECT user_id FROM free_trials WHERE last_at IS NOT NULL AND last_at <= ? AND last_at >= ? "
+              "AND user_id NOT IN (SELECT user_id FROM orders WHERE user_id IS NOT NULL) "
+              "AND user_id NOT IN (SELECT user_id FROM user_nudges WHERE kind='trial')", (newest, oldest))
+    rows = [r[0] for r in c.fetchall()]
+    conn.close()
+    return rows
+
+
+@with_db_retry
+def _nudge_mark(user_id, kind):
+    conn = get_conn()
+    c = conn.cursor()
+    c.execute('INSERT OR IGNORE INTO user_nudges (user_id, kind, sent_at) VALUES (?, ?, ?)',
+              (user_id, kind, datetime.now().isoformat()))
+    conn.commit()
+    conn.close()
+
+
+def run_trial_nudges():
+    """یک پیام یادآوری (فقط یک‌بار) به کسی که تست رایگان گرفته و هنوز هیچ خریدی نکرده.
+    فقط تست‌های ۷ روز اخیر، تا با اولین اجرا به کاربرای قدیمی پیام نره."""
+    if get_setting('nudge_trial_enabled', '1') != '1':
+        return
+    hours = max(1, _setting_int('nudge_trial_hours', 48))
+    for uid in _nudge_candidates(hours, 7):
+        _nudge_mark(uid, 'trial')          # اول ثبت می‌کنیم تا حتی با خطا دوباره‌کاری نشه
+        try:
+            send_message(uid, u(uid, 'nudge_trial', divider=DIVIDER),
+                         reply_markup={'inline_keyboard': [[{'text': u(uid, 'btn_nudge_buy'), 'callback_data': 'menu_buy'}]]})
+        except Exception as e:
+            print('⚠️ ارسال یادآوری تست ناموفق:', e)
+        time.sleep(0.1)
+
+
 def alerts_enabled():
     return get_setting('alerts_enabled', '1') == '1'
 
@@ -5543,7 +5786,9 @@ def _alerts_candidates():
 
 
 def _alert_send(uid, row_id, key, **kw):
-    kb = {'inline_keyboard': [[{'text': u(uid, 'btn_alert_manage'), 'callback_data': 'managecfg_' + str(row_id)}]]}
+    kb = {'inline_keyboard': [
+        [{'text': u(uid, 'btn_alert_renew'), 'callback_data': 'qrenew_' + str(row_id)}],
+        [{'text': u(uid, 'btn_alert_manage'), 'callback_data': 'managecfg_' + str(row_id)}]]}
     try:
         send_message(uid, u(uid, key, divider=DIVIDER, **kw), reply_markup=kb)
     except Exception as e:
@@ -5606,6 +5851,10 @@ def config_alerts_watcher():
                 run_config_alerts()
         except Exception as e:
             print('⚠️ config_alerts_watcher:', e)
+        try:
+            run_trial_nudges()
+        except Exception as e:
+            print('⚠️ run_trial_nudges:', e)
         time.sleep(max(5, _setting_int('alert_interval_min', 30)) * 60)
 
 
@@ -5642,6 +5891,13 @@ def process_update(update):
             handler = get_action_handlers().get(action_key)
             if handler:
                 handler(chat_id)
+
+        elif data.startswith('cbtn_'):
+            _cb = next((x for x in get_custom_buttons() if str(x.get('id')) == data[5:]), None)
+            if _cb:
+                run_custom_button(chat_id, _cb)
+            else:
+                main_menu(chat_id)
 
         elif data in ('setlang_fa', 'setlang_en'):
             new_lang = 'fa' if data == 'setlang_fa' else 'en'
@@ -5840,6 +6096,31 @@ def process_update(update):
                 send_message(chat_id, u(chat_id, 'config_not_found'))
             else:
                 send_manage_panel(chat_id, cfg)
+
+        elif data.startswith('qrenew_'):
+            try:
+                _rid = int(data.split('_', 1)[1])
+            except ValueError:
+                _rid = 0
+            _pack = quick_renew_pack(chat_id, _rid)
+            if not _pack:
+                send_message(chat_id, u(chat_id, 'config_not_found'))
+            else:
+                _cfg, _gb, _days, _price = _pack
+                _wallet = get_wallet_db(chat_id)
+                if _wallet < _price:
+                    send_message(chat_id, u(chat_id, 'qrenew_low_balance', divider=DIVIDER, label=_cfg[4],
+                                            extra_gb=_gb, extra_days=_days, price=f'{_price:,}', wallet=f'{_wallet:,}'),
+                                 reply_markup={'inline_keyboard': [[{'text': u(chat_id, 'btn_topup'),
+                                                                     'callback_data': 'menu_topup'}]]})
+                else:
+                    user_steps[str(chat_id)] = {'step': 'ext_confirm', 'row_id': _rid, 'extra_gb': _gb,
+                                                'extra_days': _days, 'price': _price}
+                    send_message(chat_id, u(chat_id, 'ext_confirm_title', divider=DIVIDER, label=_cfg[4],
+                                            extra_gb=_gb, extra_days=_days, price=_price),
+                                 reply_markup={'inline_keyboard': [[
+                                     {'text': u(chat_id, 'btn_confirm_pay'), 'callback_data': 'extconfirm_yes'},
+                                     {'text': u(chat_id, 'btn_cancel'), 'callback_data': 'extconfirm_no'}]]})
 
         elif data.startswith('cfgext_'):
             row_id = int(data.split('_', 1)[1])
@@ -6137,12 +6418,18 @@ def process_update(update):
         upsert_user_info(chat_id, sender.get('username'), sender.get('first_name'))
 
         matched_action_key = COMMAND_TO_ACTION_KEY.get(text) or get_label_to_action_key().get(text)
+        custom_btn = None if matched_action_key else find_custom_button_by_label(text)
 
         if text == '/nobitexcheck' and chat_id == ADMIN_ID:
             send_message(chat_id, nobitex_check_report())
 
         elif text == '/donitocheck' and chat_id == ADMIN_ID:
             send_message(chat_id, donito_check_report())
+
+        elif text == '/donitoprobe' and chat_id == ADMIN_ID:
+            _rep = donito_probe_report()
+            for _i in range(0, len(_rep), 3500):
+                send_message(chat_id, _rep[_i:_i + 3500], parse_mode=None)
 
         elif chat_id == ADMIN_ID and text in (admin_add_channel_label(), '/channels'):
             user_steps[str(chat_id)] = {}
@@ -6156,6 +6443,9 @@ def process_update(update):
 
         elif matched_action_key:
             get_action_handlers()[matched_action_key](chat_id)
+
+        elif custom_btn:
+            run_custom_button(chat_id, custom_btn)
 
         # ---------------- step-based flows ----------------
 
@@ -7367,6 +7657,68 @@ def join_keyboard(chat_id, links=None):
     return {'inline_keyboard': rows}
 
 
+# ---------------------------------------------------------------------------
+# مسدودسازی کاربر (از پنل وب: users.banned = 1). ادمین هیچ‌وقت مسدود نمی‌شه.
+# ---------------------------------------------------------------------------
+_ban_cache = {}            # user_id -> (مسدوده؟, زمان چک)
+BAN_CACHE_TTL = 15         # ثانیه؛ مسدود/آزاد کردن از پنل حداکثر با همین تاخیر اعمال می‌شه
+_ban_notice_at = {}        # user_id -> زمان آخرین پیام «مسدودی» (تا اسپم نشه)
+BAN_NOTICE_EVERY = 600
+
+
+@with_db_retry
+def _fetch_banned(user_id):
+    conn = get_conn()
+    c = conn.cursor()
+    c.execute('SELECT banned FROM users WHERE user_id=?', (user_id,))
+    row = c.fetchone()
+    conn.close()
+    return bool(row and row[0])
+
+
+def is_user_banned(user_id):
+    if user_id is None or user_id == ADMIN_ID:
+        return False
+    now = time.time()
+    hit = _ban_cache.get(user_id)
+    if hit and now - hit[1] < BAN_CACHE_TTL:
+        return hit[0]
+    try:
+        val = _fetch_banned(user_id)
+    except Exception as e:
+        print('⚠️ چک مسدودی کاربر ناموفق بود:', e)
+        return hit[0] if hit else False
+    if len(_ban_cache) > 20000:
+        _ban_cache.clear()
+    _ban_cache[user_id] = (val, now)
+    return val
+
+
+def ban_gate(update):
+    """True یعنی فرستنده مسدوده و آپدیت همین‌جا تموم شد."""
+    if 'callback_query' in update:
+        q = update['callback_query']
+        chat_id = (q.get('message') or {}).get('chat', {}).get('id')
+        cb_id = q.get('id')
+    elif 'message' in update:
+        chat_id = (update['message'].get('chat') or {}).get('id')
+        cb_id = None
+    else:
+        return False
+    if chat_id is None or not is_user_banned(chat_id):
+        return False
+    if cb_id:
+        try:
+            answer_callback(cb_id)
+        except Exception:
+            pass
+    now = time.time()
+    if now - _ban_notice_at.get(chat_id, 0) > BAN_NOTICE_EVERY:
+        _ban_notice_at[chat_id] = now
+        send_message(chat_id, u(chat_id, 'banned_notice'), reply_markup={'remove_keyboard': True})
+    return True
+
+
 def join_gate(update):
     """True یعنی این آپدیت همین‌جا مدیریت شد (کاربر عضو همه‌ی کانال‌ها نیست) و نباید به
     process_update بره؛ False یعنی ادامه بده."""
@@ -7624,7 +7976,7 @@ def safe_process_update(update):
             track_activity(update)
         except Exception as e:
             print('⚠️ track_activity:', e)
-        handled = admin_gate_handler(update) or join_gate(update)
+        handled = ban_gate(update) or admin_gate_handler(update) or join_gate(update)
         t1 = time.time()
         if not handled:
             process_update(update)
