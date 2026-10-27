@@ -2528,104 +2528,6 @@ def create_donito_request(user_id, base_amount):
     return None, None
 
 
-DONITO_DONATE_URL = os.getenv("DONITO_DONATE_URL", "https://donito.me/api/v1/public/transactions/skytunnel/donate")
-
-
-_PAY_PAGES = {}          # id -> (ساخته‌شده در, {فیلدهای فرم POST به سپ})
-_PAY_PAGES_LOCK = threading.Lock()
-_SEP_POST_URL = "https://sep.shaparak.ir/OnlinePG/OnlinePG"
-
-
-def _public_base_url():
-    for cand in (os.getenv("PUBLIC_BASE_URL", ""), os.getenv("KEEPALIVE_URL", ""), os.getenv("RENDER_EXTERNAL_URL", "")):
-        cand = (cand or "").strip().rstrip("/")
-        if cand.endswith("/healthz"):
-            cand = cand[:-len("/healthz")]
-        if cand.lower().startswith(("http://", "https://")):
-            return cand
-    return ""
-
-
-def _pay_page_store(fields):
-    now = time.time()
-    with _PAY_PAGES_LOCK:
-        for k in [k for k, v in _PAY_PAGES.items() if now - v[0] > 4 * 3600]:
-            _PAY_PAGES.pop(k, None)
-        pid = secrets.token_urlsafe(12)
-        _PAY_PAGES[pid] = (now, fields)
-    return pid
-
-
-def _pay_page_html(pid):
-    """صفحه‌ی HTML که فرم POST رو خودکار به درگاه سپ می‌فرسته (مثل خود سایت دونیتو). None اگه پیدا نشد."""
-    with _PAY_PAGES_LOCK:
-        item = _PAY_PAGES.get(pid)
-    if not item:
-        return None
-    fields = item[1]
-    inputs = ''.join('<input type="hidden" name="%s" value="%s">' % (_html.escape(str(k), True), _html.escape(str(v), True))
-                     for k, v in fields.items())
-    return ('<!DOCTYPE html><html lang="fa" dir="rtl"><head><meta charset="utf-8">'
-            '<meta name="viewport" content="width=device-width, initial-scale=1">'
-            '<meta name="referrer" content="unsafe-url"><title>پرداخت</title>'
-            '<style>body{font-family:sans-serif;text-align:center;padding-top:25vh;color:#333}'
-            'button{font-size:18px;padding:12px 28px;border:0;border-radius:10px;background:#2f74e0;color:#fff}</style>'
-            '</head><body><p>در حال انتقال به درگاه پرداخت...</p>'
-            '<form id="f" method="POST" action="' + _SEP_POST_URL + '">' + inputs +
-            '<noscript><button type="submit">ادامه به درگاه</button></noscript></form>'
-            '<script>document.getElementById("f").submit();</script></body></html>')
-
-
-def donito_create_pay_link(pay_amount):
-    """از API عمومی دونیتو یه تراکنش می‌سازه و یه لینک (صفحه‌ی auto-POST روی همین سرویس) برمی‌گردونه که کاربر رو
-    با فرم POST کامل (Token + RedirectURL ...) به درگاه سپ می‌بره؛ لینک GET خالیِ SendToken خطای «آدرس ارجاع‌دهنده» می‌داد.
-    خروجی: URL یا None (اگه نشد، بات به صفحه‌ی دونیتو برمی‌گرده)."""
-    payload = {
-        "amount": int(pay_amount),
-        "currency": "IRT",
-        "donator_name": get_setting('donito_donator_name', '') or "SkyTunnel",
-        "donator_email": None,
-        "donator_cellphone": None,
-        "donator_message": "",
-        "is_visible_donator_message": False,
-        "is_visible_donator_name": False,
-        "is_visible_donator_on_list": False,
-        "is_visible_alert": False,
-    }
-    attr = get_setting('donito_attribution_token', '').strip()
-    if attr:
-        payload["attribution_token"] = attr
-    try:
-        r = requests.post(
-            DONITO_DONATE_URL, json=payload, timeout=20,
-            headers={"Origin": "https://donito.me", "Referer": get_donito_page_url(),
-                     "Accept": "application/json, text/plain, */*",
-                     "User-Agent": "Mozilla/5.0 (Linux; Android 10; K) AppleWebKit/537.36 "
-                                   "(KHTML, like Gecko) Chrome/155.0.0.0 Mobile Safari/537.36"})
-        j = r.json()
-        if (j.get("meta") or {}).get("code") != 201:
-            print("⚠️ donito donate:", r.status_code, _donito_scrub(str(j)[:300]))
-            return None
-        data = j.get("data") or {}
-        params = data.get("params") or {}
-        tok = params.get("Token")
-        if not tok:
-            return None
-        # برای عیب‌یابی: فقط اسم فیلدها (بدون مقدار/توکن)
-        print("[donito] data keys:", list(data.keys()), "| params keys:", list(params.keys()))
-        fields = {str(k): v for k, v in params.items() if v is not None and not isinstance(v, (dict, list))}
-        if not any(k.lower() == 'redirecturl' for k in fields):
-            fields['RedirectURL'] = (data.get('redirect_url') or data.get('callback_url')
-                                     or data.get('RedirectURL') or get_donito_page_url())
-        base = _public_base_url()
-        if base and os.getenv("DISABLE_HEALTH_SERVER") != "1":
-            return base + "/pay/" + _pay_page_store(fields)
-        return "https://sep.shaparak.ir/OnlinePG/SendToken?token=" + tok
-    except Exception as e:
-        print("⚠️ donito_create_pay_link:", _donito_scrub(e))
-        return None
-
-
 def donito_match_and_approve():
     """دونیت‌های اخیر رو با درخواست‌های معلق تطبیق می‌ده و شارژ رو خودکار تأیید می‌کنه. تعداد تأییدها رو برمی‌گردونه."""
     pending = list_pending_donito_requests()
@@ -2696,7 +2598,7 @@ def send_donito_topup_info(chat_id, amount):
         send_message(chat_id, u(chat_id, 'topup_donito_busy'))
         return
     user_steps[str(chat_id)] = {}
-    page = donito_create_pay_link(pay) or get_donito_page_url()
+    page = get_donito_page_url()
     rows = []
     if page.lower().startswith(('http://', 'https://')):
         rows.append([{'text': u(chat_id, 'btn_donito_pay'), 'url': page}])
@@ -5750,22 +5652,6 @@ def start_health_server(port):
 
     class _H(BaseHTTPRequestHandler):
         def do_GET(self):
-            path = (self.path or "").split("?", 1)[0]
-            if path.startswith("/pay/"):
-                try:
-                    page = _pay_page_html(path[5:])
-                except Exception:
-                    page = None
-                body = (page or "<html><body dir='rtl' style='font-family:sans-serif;text-align:center;padding-top:20vh'>"
-                        "این لینک منقضی شده. دوباره از ربات درخواست پرداخت بدید.</body></html>").encode("utf-8")
-                self.send_response(200 if page else 404)
-                self.send_header("Content-Type", "text/html; charset=utf-8")
-                self.send_header("Cache-Control", "no-store")
-                self.send_header("Referrer-Policy", "unsafe-url")
-                self.end_headers()
-                if self.command != "HEAD":
-                    self.wfile.write(body)
-                return
             self.send_response(200)
             self.send_header("Content-Type", "text/plain")
             self.end_headers()
