@@ -197,6 +197,11 @@ def _setting_float(key, default):
         return float(default)
 
 
+def get_reseller_price():
+    """هزینه‌ی ساخت حساب فروشندگی (تومان) که از کیف پول کم می‌شه؛ 0 = رایگان. از پنل قابل‌تنظیمه."""
+    return max(0, _setting_int('reseller_price', 0))
+
+
 def get_reseller_panel_url():
     return get_setting('reseller_panel_url', RESELLER_PANEL_URL) or RESELLER_PANEL_URL
 
@@ -423,6 +428,9 @@ UI_TEXT = {
         'btn_confirm_pay': '✅ تایید و پرداخت',
         'ext_success': '✅ کانفیگ «{label}» تمدید شد: +{extra_gb} گیگابایت، +{extra_days} روز — <b>{price:,}</b> تومان کسر شد.',
         'ext_panel_error': '❌ خطا در تمدید کانفیگ از سمت پنل. لطفاً بعداً دوباره تلاش کنید.',
+        'ext_uncertain': ('⚠️ پاسخ پنل برای تمدید کانفیگ «{label}» مشخص نشد و نتونستیم وضعیتش رو چک کنیم.\n'
+                          'مبلغ <b>{price:,}</b> تومان فعلاً کسر شده؛ پشتیبانی بررسی می‌کنه و یا تمدید رو تایید یا پولتون رو برمی‌گردونه. '
+                          'لطفاً دوباره تمدید نزنید.'),
         'ext_cancelled': '❌ تمدید لغو شد.',
         'ext_insufficient': '⚠️ موجودی کیف پول کافی نیست.',
         'rename_ask': '✏️ نام جدید کانفیگ را ارسال کنید:',
@@ -710,6 +718,9 @@ UI_TEXT = {
         'btn_confirm_pay': '✅ Confirm & Pay',
         'ext_success': '✅ Config "{label}" was extended: +{extra_gb} GB, +{extra_days} day(s) — <b>{price:,}</b> Toman was deducted.',
         'ext_panel_error': '❌ Error extending the config on the panel. Please try again later.',
+        'ext_uncertain': ('⚠️ The panel did not confirm the extension of “{label}” and we could not verify its status.\n'
+                          '<b>{price:,}</b> Toman is on hold; support will check and either confirm the extension or refund you. '
+                          'Please do not extend again.'),
         'ext_cancelled': '❌ Extension cancelled.',
         'ext_insufficient': '⚠️ Your wallet balance is insufficient.',
         'rename_ask': '✏️ Please send the new name for the config:',
@@ -1115,7 +1126,13 @@ UI_TEXT['fa'].update({
         '🏪 <b>پنل فروشندگی</b>\n{divider}\n'
         'با چند قدم ساده یه حساب فروشندگی مخصوص خودتون می‌گیرید و از طریق پنلش به مشتری‌هاتون سرویس می‌فروشید.\n\n'
         'فقط کافیه یه <b>نام کاربری</b> و <b>رمز عبور</b> انتخاب کنید؛ حساب و آدرس پنل همون لحظه ساخته می‌شه.\n\n'
-        '💵 برای ساخت حساب هیچ مبلغی پرداخت نمی‌کنید.\n'
+    ),
+    'reseller_free_line': '💵 برای ساخت حساب هیچ مبلغی پرداخت نمی‌کنید.\n',
+    'reseller_price_line': '💵 هزینه‌ی ساخت حساب: <b>{price}</b> تومان (از کیف پولتون کم می‌شه).\n',
+    'reseller_insufficient': (
+        '⚠️ موجودی کیف پولتون برای ساخت حساب فروشندگی کافی نیست.\n'
+        '💵 هزینه: <b>{price}</b> تومان\n💳 موجودی شما: <b>{wallet}</b> تومان\n\n'
+        'اول کیف پولتون رو شارژ کنید، بعد دوباره امتحان کنید.'
     ),
     'reseller_ask_password': (
         '🔑 حالا یه <b>رمز عبور</b> بفرستید (حداقل {min_len} کاراکتر).\n'
@@ -1149,7 +1166,13 @@ UI_TEXT['en'].update({
         '🏪 <b>Seller panel</b>\n{divider}\n'
         'Get your own seller account in a few steps and sell services to your customers from its panel.\n\n'
         'Just pick a <b>username</b> and a <b>password</b>; the account and panel address are created instantly.\n\n'
-        '💵 Creating the account is free.\n'
+    ),
+    'reseller_free_line': '💵 Creating the account is free.\n',
+    'reseller_price_line': '💵 Account creation fee: <b>{price}</b> Toman (deducted from your wallet).\n',
+    'reseller_insufficient': (
+        '⚠️ Your wallet balance is not enough to create a seller account.\n'
+        '💵 Fee: <b>{price}</b> Toman\n💳 Your balance: <b>{wallet}</b> Toman\n\n'
+        'Top up your wallet first, then try again.'
     ),
     'reseller_ask_password': (
         '🔑 Now send a <b>password</b> (at least {min_len} characters).\n'
@@ -1741,6 +1764,23 @@ def get_referral_reward_invitee():
     return _referral_int('referral_reward_invitee', 0)
 
 
+def get_referral_daily_limit():
+    """حداکثر تعداد پاداشی که یک دعوت‌کننده تو هر ۲۴ ساعت می‌گیره؛ 0 = بدون سقف.
+    جلوی ساخت پشت‌سرهم اکانت جعلی (مخصوصاً تو حالت «پاداش به‌محض ورود») رو می‌گیره."""
+    return _referral_int('referral_daily_limit', 10)
+
+
+@with_db_retry
+def count_referral_rewards_since(inviter_id, hours=24):
+    conn = get_conn()
+    c = conn.cursor()
+    since = (datetime.now() - timedelta(hours=hours)).isoformat()
+    c.execute('SELECT COUNT(*) FROM referral_rewards WHERE inviter_id=? AND created_at>=?', (inviter_id, since))
+    n = (c.fetchone() or [0])[0] or 0
+    conn.close()
+    return int(n)
+
+
 def get_referral_min_purchase():
     """حداقل مبلغ خرید (تومان) که پاداش رفرال بعدش داده بشه؛ جلوی خریدهای چند‌صدتومانیِ الکیِ حساب‌های جعلی رو می‌گیره."""
     return _referral_int('referral_min_purchase', 20000)
@@ -1898,6 +1938,9 @@ def process_referral_reward(invitee_id, event, amount=None):
             return
         if event == 'purchase' and (amount is None or int(amount) < get_referral_min_purchase()):
             return   # خرید خیلی کوچیک پاداش نمی‌سازه؛ خریدِ بزرگ‌تر بعدی هنوز می‌تونه
+        _lim = get_referral_daily_limit()
+        if _lim > 0 and count_referral_rewards_since(inviter) >= _lim:
+            return   # سقف ۲۴ ساعته‌ی این دعوت‌کننده پر شده
         if not referral_invitee_is_member(invitee_id):
             return   # هنوز عضو کانال نشده؛ بعداً که عضو شد و شرط پاداش پیش اومد پرداخت می‌شه
         a_inviter, a_invitee = get_referral_reward_inviter(), get_referral_reward_invitee()
@@ -3276,6 +3319,27 @@ def resume_config_on_panel(config_id):
 
 def rotate_link_config_on_panel(config_id):
     return _panel_action('POST', '/rotate-link', config_id)
+
+
+def get_config_limit_gb(config_id):
+    """حجم کل کانفیگ (limitGb) از GET /configs/:id طبق مستندات پنل.
+    خروجی: ('ok', عدد) | ('nofield', None) اگه پنل جواب داد ولی فیلد نبود | ('error', None) اگه نتونست بخونه."""
+    if not config_id:
+        return 'error', None
+    try:
+        res = SESSION.get(CONFIG_API + '/' + str(config_id),
+                          headers={'Authorization': 'Bearer ' + CONFIG_KEY}, timeout=15)
+        if res.status_code not in (200, 201):
+            return 'error', None
+        data = res.json()
+        if isinstance(data, dict) and isinstance(data.get('configs'), list) and data['configs']:
+            data = data['configs'][0]
+        v = data.get('limitGb') if isinstance(data, dict) else None
+        if v is None:
+            return 'nofield', None
+        return 'ok', float(v)
+    except Exception:
+        return 'error', None
 
 
 def get_config_usage_gb(config_id):
@@ -5183,7 +5247,9 @@ def _action_reseller_menu(chat_id):
     if not acc:
         send_message(
             chat_id,
-            u(chat_id, 'reseller_intro', divider=DIVIDER),
+            u(chat_id, 'reseller_intro', divider=DIVIDER) + (
+                u(chat_id, 'reseller_price_line', price=f'{get_reseller_price():,}') if get_reseller_price() > 0
+                else u(chat_id, 'reseller_free_line')),
             reply_markup={'inline_keyboard': [[
                 {'text': u(chat_id, 'btn_reseller_activate'), 'callback_data': 'reseller_activate'}
             ]]}
@@ -5782,6 +5848,7 @@ _SELLER_ACTIVE_KEYS = {
     'reseller_creds_line', 'reseller_ask_username', 'reseller_username_bad', 'reseller_username_taken',
     'reseller_ask_password', 'reseller_password_bad', 'reseller_creds_done', 'reseller_ask_new_password',
     'reseller_password_changed', 'seller_pass_line', 'seller_pass_missing', 'seller_error',
+    'reseller_free_line', 'reseller_price_line', 'reseller_insufficient',
 }
 
 
@@ -6246,6 +6313,11 @@ def process_update(update):
         elif data == 'reseller_activate':
             if _sync_seller_account(chat_id)[0]:
                 action_reseller_menu(chat_id)
+            elif get_reseller_price() > get_wallet_db(chat_id):
+                send_message(chat_id, u(chat_id, 'reseller_insufficient', price=f'{get_reseller_price():,}',
+                                         wallet=f'{get_wallet_db(chat_id):,}'),
+                             reply_markup={'inline_keyboard': [[{'text': u(chat_id, 'btn_topup'),
+                                                                 'callback_data': 'menu_topup'}]]})
             else:
                 _reseller_creds_start(chat_id)
 
@@ -6617,12 +6689,17 @@ def process_update(update):
                 extra_days = s['extra_days']
                 price = s['price']
                 cfg = get_config_row(chat_id, row_id)
+                _lim_st, _lim_before = ('error', None)
+                if cfg:
+                    _lim_st, _lim_before = get_config_limit_gb(cfg[2])   # حجم کل قبل از تمدید (برای تشخیص نتیجه‌ی مبهم)
                 if not cfg:
                     send_message(chat_id, u(chat_id, 'config_not_found'))
                 elif get_wallet_db(chat_id) < price:
                     send_message(chat_id, u(chat_id, 'ext_insufficient'))
                 elif extra_gb < get_extend_min_gb():
                     send_message(chat_id, u(chat_id, 'ext_min_gb_error', min_gb=f'{get_extend_min_gb():g}'))
+                elif _lim_st == 'error':
+                    send_message(chat_id, u(chat_id, 'ext_panel_error'))      # پنل در دسترس نیست؛ هنوز پولی کم نشده
                 elif not try_deduct_wallet_db(chat_id, price, 'extend'):
                     send_message(chat_id, u(chat_id, 'ext_insufficient'))
                 else:
@@ -6631,7 +6708,26 @@ def process_update(update):
                     except Exception as _ex_err:
                         print('⚠️ استثنا هنگام تمدید روی پنل:', _ex_err)
                         res = {'success': False}
-                    if res['success']:
+                    _uncertain = False
+                    if not res['success'] and _lim_st == 'ok':
+                        # جواب پنل نیومد/خطا داد؛ ولی ممکنه تمدید انجام شده باشه (مثلاً تایم‌اوت). حجم کل رو دوباره می‌خونیم.
+                        _st2, _lim_after = get_config_limit_gb(cfg[2])
+                        if _st2 == 'ok':
+                            if (_lim_after - _lim_before) > (extra_gb / 2.0):
+                                res = {'success': True}          # تمدید واقعاً انجام شده بود
+                                print('ℹ️ تمدید روی پنل انجام شده بود (تایید با limitGb):', chat_id, row_id)
+                        else:
+                            _uncertain = True                    # نه می‌دونیم انجام شده نه نشده
+                    if _uncertain:
+                        try:
+                            send_message(ADMIN_ID, f'⚠️ نتیجه‌ی تمدید نامشخص است؛ پول برنگشت.\nکاربر: {chat_id}\nکانفیگ: {cfg[4]} '
+                                                   f'(panel id: {cfg[2]})\nمبلغ: {price} تومان — {extra_gb} گیگ / {extra_days} روز\n'
+                                                   f'حجم کل قبل از تمدید: {_lim_before} گیگ. پنل رو چک کن؛ اگه تمدید نشده بود دستی پول رو برگردون.',
+                                         parse_mode=None)
+                        except Exception:
+                            pass
+                        send_message(chat_id, u(chat_id, 'ext_uncertain', label=cfg[4], price=price))
+                    elif res['success']:
                         try:
                             extend_config_db(row_id, extra_gb, extra_days, price)
                         except Exception as _ed_err:
@@ -6929,7 +7025,29 @@ def process_update(update):
                 action_reseller_menu(chat_id)
             else:
                 uname = step.get('username')
-                res = seller_create_sub(chat_id, uname, pw)
+                _fee = get_reseller_price()
+                if _fee > 0 and not try_deduct_wallet_db(chat_id, _fee, 'reseller_activate'):
+                    user_steps[str(chat_id)] = {}
+                    send_message(chat_id, u(chat_id, 'reseller_insufficient', price=f'{_fee:,}',
+                                             wallet=f'{get_wallet_db(chat_id):,}'),
+                                 reply_markup={'inline_keyboard': [[{'text': u(chat_id, 'btn_topup'),
+                                                                     'callback_data': 'menu_topup'}]]})
+                    return
+                try:
+                    res = seller_create_sub(chat_id, uname, pw)
+                except Exception as _sc_err:
+                    print('⚠️ استثنا هنگام ساخت حساب فروشندگی:', _sc_err)
+                    res = {'success': False, 'reason': 'مشکل موقتی از سمت سرویس پیش اومده.'}
+                if _fee > 0 and not res.get('success'):
+                    try:
+                        update_wallet_db(chat_id, _fee, 'refund_reseller_failed')   # ساخت نشد → پول برمی‌گرده
+                    except Exception as _rf_err:
+                        print('🚨 برگشت پول ساخت حساب فروشندگی ناموفق بود:', chat_id, _fee, _rf_err)
+                        try:
+                            send_message(ADMIN_ID, f'🚨 برگشت پول ساخت حساب فروشندگی کاربر {chat_id} ({_fee} تومان) انجام نشد؛ دستی برگردون.',
+                                         parse_mode=None)
+                        except Exception:
+                            pass
                 if res['success']:
                     user_steps[str(chat_id)] = {}
                     send_message(chat_id, u(chat_id, 'reseller_creds_done', divider=DIVIDER, username=uname,
