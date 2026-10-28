@@ -1017,6 +1017,97 @@ def get_extra_stats():
 
 
 @with_db_retry
+def get_full_stats():
+    """آمار کامل ربات برای پیشخوان؛ هر کوئری مستقل است و جدول/ستون ناموجود صفر برمی‌گردونه."""
+    conn = get_conn()
+    c = conn.cursor()
+
+    def rows(sql, params=()):
+        try:
+            c.execute(sql, params)
+            return c.fetchall()
+        except Exception as e:
+            if "stream" in str(e).lower():
+                raise
+            return []
+
+    def val(sql, params=()):
+        r = rows(sql, params)
+        return (r[0][0] if r and r[0] and r[0][0] is not None else 0)
+
+    now_utc = datetime.now(timezone.utc)
+    iso_utc = lambda **kw: (now_utc - timedelta(**kw)).isoformat(timespec="seconds")
+    today = datetime.now().date()
+    d_today = today.isoformat()
+    d7 = (today - timedelta(days=6)).isoformat()
+    d30 = (today - timedelta(days=29)).isoformat()
+    s = {}
+    # کاربران
+    s["users_total"] = val("SELECT COUNT(*) FROM users")
+    s["users_banned"] = val("SELECT COUNT(*) FROM users WHERE banned=1")
+    s["users_online"] = val("SELECT COUNT(*) FROM users WHERE last_active >= ?", (iso_utc(minutes=5),))
+    s["users_24h"] = val("SELECT COUNT(*) FROM users WHERE last_active >= ?", (iso_utc(hours=24),))
+    s["users_7d"] = val("SELECT COUNT(*) FROM users WHERE last_active >= ?", (iso_utc(days=7),))
+    s["users_30d"] = val("SELECT COUNT(*) FROM users WHERE last_active >= ?", (iso_utc(days=30),))
+    s["new_today"] = val("SELECT COUNT(*) FROM users WHERE substr(joined_at,1,10) >= ?", (d_today,))
+    s["new_7d"] = val("SELECT COUNT(*) FROM users WHERE substr(joined_at,1,10) >= ?", (d7,))
+    s["new_30d"] = val("SELECT COUNT(*) FROM users WHERE substr(joined_at,1,10) >= ?", (d30,))
+    s["users_en"] = val("SELECT COUNT(*) FROM users WHERE lang='en'")
+    s["users_with_wallet"] = val("SELECT COUNT(*) FROM users WHERE wallet > 0")
+    s["buyers"] = val("SELECT COUNT(DISTINCT user_id) FROM user_configs")
+    s["referred"] = val("SELECT COUNT(*) FROM users WHERE referred_by IS NOT NULL AND referred_by != 0")
+    # کیف پول
+    s["wallet_total"] = val("SELECT COALESCE(SUM(wallet),0) FROM users")
+    s["wallet_avg"] = val("SELECT COALESCE(AVG(wallet),0) FROM users WHERE wallet > 0")
+    s["wallet_max"] = val("SELECT COALESCE(MAX(wallet),0) FROM users")
+    # کانفیگ‌ها
+    s["cfg_total"] = val("SELECT COUNT(*) FROM user_configs")
+    s["cfg_gb"] = val("SELECT COALESCE(SUM(gb),0) FROM user_configs")
+    s["cfg_by_status"] = rows("SELECT COALESCE(status,'active'), COUNT(*) FROM user_configs GROUP BY 1 ORDER BY 2 DESC")
+    s["cfg_by_type"] = rows("SELECT COALESCE(type,'نامشخص'), COUNT(*), COALESCE(SUM(price),0), COALESCE(SUM(gb),0) "
+                            "FROM user_configs GROUP BY 1 ORDER BY 2 DESC")
+    s["cfg_expired"] = val("SELECT COUNT(*) FROM user_configs WHERE expires_at IS NOT NULL AND expires_at != '' AND expires_at < ?",
+                           (datetime.now().isoformat(timespec="seconds"),))
+    s["cfg_per_user"] = (s["cfg_total"] / s["buyers"]) if s["buyers"] else 0
+    # سفارش‌ها / درآمد
+    s["ord_total"] = val("SELECT COUNT(*) FROM orders")
+    s["ord_revenue"] = val("SELECT COALESCE(SUM(price),0) FROM orders")
+    s["ord_gb"] = val("SELECT COALESCE(SUM(gb),0) FROM orders")
+    for k, d in (("today", d_today), ("7d", d7), ("30d", d30)):
+        s["ord_n_" + k] = val("SELECT COUNT(*) FROM orders WHERE substr(created_at,1,10) >= ?", (d,))
+        s["ord_rev_" + k] = val("SELECT COALESCE(SUM(price),0) FROM orders WHERE substr(created_at,1,10) >= ?", (d,))
+        s["ord_gb_" + k] = val("SELECT COALESCE(SUM(gb),0) FROM orders WHERE substr(created_at,1,10) >= ?", (d,))
+    s["ord_avg"] = (s["ord_revenue"] // s["ord_total"]) if s["ord_total"] else 0
+    s["ord_by_type"] = rows("SELECT COALESCE(type,'نامشخص'), COUNT(*), COALESCE(SUM(price),0), COALESCE(SUM(gb),0) "
+                            "FROM orders GROUP BY 1 ORDER BY 3 DESC")
+    # تست رایگان
+    s["trial_users"] = val("SELECT COUNT(*) FROM free_trials")
+    # شارژ کیف پول
+    s["top_status"] = rows("SELECT COALESCE(status,'?'), COUNT(*), COALESCE(SUM(amount),0) FROM topup_requests GROUP BY 1 ORDER BY 2 DESC")
+    s["top_method"] = rows("SELECT COALESCE(method,'card'), COUNT(*), COALESCE(SUM(amount),0) FROM topup_requests "
+                           "WHERE status='approved' GROUP BY 1 ORDER BY 3 DESC")
+    for k, d in (("today", d_today), ("7d", d7), ("30d", d30)):
+        s["top_" + k] = val("SELECT COALESCE(SUM(amount),0) FROM topup_requests WHERE status='approved' "
+                            "AND substr(created_at,1,10) >= ?", (d,))
+    s["top_total"] = val("SELECT COALESCE(SUM(amount),0) FROM topup_requests WHERE status='approved'")
+    # تیکت‌ها
+    s["tk"] = rows("SELECT COALESCE(status,'?'), COUNT(*) FROM tickets GROUP BY 1 ORDER BY 2 DESC")
+    s["tk_total"] = val("SELECT COUNT(*) FROM tickets")
+    # تخفیف
+    s["dc_total"] = val("SELECT COUNT(*) FROM discount_codes")
+    s["dc_active"] = val("SELECT COUNT(*) FROM discount_codes WHERE active=1")
+    s["dc_used"] = val("SELECT COALESCE(SUM(used_count),0) FROM discount_codes")
+    # رفرال
+    s["ref_count"] = val("SELECT COUNT(*) FROM referral_rewards")
+    s["ref_paid"] = val("SELECT COALESCE(SUM(inviter_amount + invitee_amount),0) FROM referral_rewards")
+    # فروشنده/نماینده
+    s["sellers"] = val("SELECT COUNT(*) FROM seller_accounts")
+    s["resellers"] = val("SELECT COUNT(*) FROM resellers")
+    conn.close()
+    return s
+
+
+@with_db_retry
 def get_topups(limit=60):
     """(id, user_id, amount, status, created_at, method, coin_symbol, coin_qty, tx_hash, matched_tx)
     درخواست‌های در انتظار اول می‌آن."""
@@ -2246,6 +2337,84 @@ def dashboard():
     if not BOT_TOKEN:
         warn += '<div class="alert">⚠️ متغیر <code>BOT_TOKEN</code> تنظیم نشده؛ ارسال پیام (پاسخ تیکت، پیام همگانی) کار نمی‌کنه.</div>'
 
+
+    # ---------- آمار کامل ربات ----------
+    full_html = ""
+    try:
+        f = get_full_stats()
+        N = lambda v: f"{int(v or 0):,}"
+        T = lambda v: f"{int(v or 0):,} تومان"
+        def kv(items):
+            return '<div class="kv">' + "".join(
+                f'<div><span>{esc(str(k))}</span><b class="num">{v}</b></div>' for k, v in items) + "</div>"
+        def table(head, data, fmt):
+            if not data:
+                return '<p class="empty-note">داده‌ای نیست.</p>'
+            h = "".join(f"<th>{esc(x)}</th>" for x in head)
+            b = "".join("<tr>" + "".join(f'<td class="num">{esc(str(v)) if i == 0 else v}</td>'
+                                         for i, v in enumerate(fmt(r))) + "</tr>" for r in data)
+            return f'<div style="overflow-x:auto"><table class="tbl"><thead><tr>{h}</tr></thead><tbody>{b}</tbody></table></div>'
+        st_fa = {"active": "فعال", "paused": "متوقف", "expired": "منقضی", "disabled": "غیرفعال", "trial": "تست",
+                 "pending": "در انتظار", "approved": "تایید شده", "rejected": "رد شده", "open": "باز",
+                 "closed": "بسته", "answered": "پاسخ داده شده", "card": "کارت", "crypto": "ارز دیجیتال"}
+        tr = lambda k: st_fa.get(str(k), str(k))
+        pct = lambda a, b: f"{(a * 100 / b):.1f}%" if b else "۰%"
+
+        full_html = f"""
+    <h2 style="margin:22px 0 10px;">📊 آمار کامل ربات</h2>
+    <div class="grid cols-2">
+      <div class="card"><h3>👥 کاربران</h3>{kv([
+        ("کل کاربران", N(f['users_total'])), ("آنلاین (۵ دقیقه)", N(f['users_online'])),
+        ("فعال ۲۴ ساعت", N(f['users_24h'])), ("فعال ۷ روز", N(f['users_7d'])), ("فعال ۳۰ روز", N(f['users_30d'])),
+        ("عضو جدید امروز", N(f['new_today'])), ("عضو جدید ۷ روز", N(f['new_7d'])), ("عضو جدید ۳۰ روز", N(f['new_30d'])),
+        ("خریداران (حداقل یک کانفیگ)", f"{N(f['buyers'])} ({pct(f['buyers'], f['users_total'])})"),
+        ("دارای موجودی کیف پول", N(f['users_with_wallet'])), ("مسدود شده", N(f['users_banned'])),
+        ("زبان انگلیسی", N(f['users_en'])), ("دعوت شده با رفرال", N(f['referred']))])}</div>
+      <div class="card"><h3>💰 فروش و درآمد</h3>{kv([
+        ("درآمد کل", T(f['ord_revenue'])), ("تعداد کل سفارش‌ها", N(f['ord_total'])),
+        ("میانگین هر سفارش", T(f['ord_avg'])), ("کل گیگ فروخته‌شده", f"{float(f['ord_gb'] or 0):,.1f}"),
+        ("امروز", f"{T(f['ord_rev_today'])} · {N(f['ord_n_today'])} سفارش"),
+        ("۷ روز اخیر", f"{T(f['ord_rev_7d'])} · {N(f['ord_n_7d'])} سفارش"),
+        ("۳۰ روز اخیر", f"{T(f['ord_rev_30d'])} · {N(f['ord_n_30d'])} سفارش"),
+        ("گیگ ۷ روز / ۳۰ روز", f"{float(f['ord_gb_7d'] or 0):,.1f} / {float(f['ord_gb_30d'] or 0):,.1f}")])}</div>
+    </div>
+    <div class="grid cols-2">
+      <div class="card"><h3>📦 کانفیگ‌ها</h3>{kv([
+        ("کل کانفیگ‌ها", N(f['cfg_total'])), ("منقضی‌شده (بر اساس تاریخ)", N(f['cfg_expired'])),
+        ("مجموع حجم کانفیگ‌ها (گیگ)", f"{float(f['cfg_gb'] or 0):,.1f}"),
+        ("میانگین کانفیگ برای هر خریدار", f"{f['cfg_per_user']:.2f}")])}
+        <h4 style="margin:10px 0 4px;">بر اساس وضعیت</h4>
+        {table(["وضعیت", "تعداد"], f['cfg_by_status'], lambda r: (tr(r[0]), N(r[1])))}
+        <h4 style="margin:10px 0 4px;">بر اساس نوع</h4>
+        {table(["نوع", "تعداد", "مبلغ", "گیگ"], f['cfg_by_type'], lambda r: (r[0], N(r[1]), N(r[2]), f"{float(r[3] or 0):,.1f}"))}</div>
+      <div class="card"><h3>🧾 سفارش‌ها بر اساس نوع</h3>
+        {table(["نوع", "تعداد", "درآمد", "گیگ"], f['ord_by_type'], lambda r: (r[0], N(r[1]), N(r[2]), f"{float(r[3] or 0):,.1f}"))}
+        <h3 style="margin-top:14px;">🎁 تست رایگان</h3>{kv([
+        ("کاربران استفاده‌کننده", N(f['trial_users'])),
+        ("درصد از کل کاربران", pct(f['trial_users'], f['users_total']))])}</div>
+    </div>
+    <div class="grid cols-2">
+      <div class="card"><h3>💳 شارژ کیف پول</h3>{kv([
+        ("کل شارژ تاییدشده", T(f['top_total'])), ("امروز", T(f['top_today'])),
+        ("۷ روز اخیر", T(f['top_7d'])), ("۳۰ روز اخیر", T(f['top_30d'])),
+        ("مجموع موجودی کیف‌پول‌ها", T(f['wallet_total'])),
+        ("میانگین موجودی (دارندگان)", T(f['wallet_avg'])), ("بیشترین موجودی", T(f['wallet_max']))])}
+        <h4 style="margin:10px 0 4px;">بر اساس وضعیت درخواست</h4>
+        {table(["وضعیت", "تعداد", "مبلغ"], f['top_status'], lambda r: (tr(r[0]), N(r[1]), N(r[2])))}
+        <h4 style="margin:10px 0 4px;">روش‌های پرداخت (تاییدشده)</h4>
+        {table(["روش", "تعداد", "مبلغ"], f['top_method'], lambda r: (tr(r[0]), N(r[1]), N(r[2])))}</div>
+      <div class="card"><h3>🎧 تیکت‌ها</h3>{kv([("کل تیکت‌ها", N(f['tk_total']))] + [(tr(k), N(v)) for k, v in f['tk']])}
+        <h3 style="margin-top:14px;">🏷 کد تخفیف</h3>{kv([
+        ("کل کدها", N(f['dc_total'])), ("کدهای فعال", N(f['dc_active'])), ("دفعات استفاده", N(f['dc_used']))])}
+        <h3 style="margin-top:14px;">🤝 رفرال و فروشندگان</h3>{kv([
+        ("دعوت‌های موفق (پاداش‌دار)", N(f['ref_count'])), ("مجموع پاداش پرداخت‌شده", T(f['ref_paid'])),
+        ("حساب‌های فروشنده", N(f['sellers'])), ("نمایندگان", N(f['resellers']))])}</div>
+    </div>
+    """
+    except Exception as e:
+        print("⚠️ full_stats:", e)
+        full_html = '<div class="alert">⚠️ دریافت آمار کامل با خطا مواجه شد؛ لاگ سرور را ببینید.</div>'
+
     content = f"""
     {warn}
     <section class="hero">
@@ -2279,6 +2448,7 @@ def dashboard():
       <div class="card"><h3>آخرین فعالیت کاربران</h3>{recent_html}
         <div style="margin-top:10px;"><a class="btn secondary sm" href="{url_for('users')}">همه‌ی کاربران ›</a></div></div>
     </div>
+    {full_html}
     """
     return render_page("پیشخوان", "dashboard", content)
 
@@ -3338,7 +3508,10 @@ SETTINGS_PAGE_JS = """
     saveBtn.textContent = n ? ('💾 ذخیره‌ی ' + n.toLocaleString('fa') + ' تغییر') : '💾 ذخیره‌ی تغییرات';
     saveBtn.classList.toggle('dirty', n > 0);
   }
-  form.addEventListener('input', function (e) { syncRow(e.target); countDirty(); });
+  form.addEventListener('input', function (e) {
+    if (e.target.classList && e.target.classList.contains('zsw')) return;   // خودِ کلید رو change هندل می‌کنه
+    syncRow(e.target); countDirty();
+  });
   form.addEventListener('change', function (e) {
     var t = e.target;
     if (t.classList && t.classList.contains('zsw')) {
@@ -3370,8 +3543,9 @@ SETTINGS_PAGE_JS = """
   tabs.forEach(function (t) {
     t.addEventListener('click', function () { showTab(t.getAttribute('data-tab')); history.replaceState(null, '', '#' + t.getAttribute('data-tab')); });
   });
+  function validTab(id) { var ok = false; tabs.forEach(function (t) { if (t.getAttribute('data-tab') === id) ok = true; }); return ok; }
   var start = (location.hash || '').slice(1);
-  if (!start) { try { start = localStorage.getItem('sky-stab') || ''; } catch (e) {} }
+  if (!validTab(start)) { start = ''; try { start = localStorage.getItem('sky-stab') || ''; } catch (e) {} }
   showTab(start);
 
   var sq = document.getElementById('sq'), box = document.getElementById('spanels'), none = document.getElementById('snone');
@@ -3438,7 +3612,7 @@ def settings_page():
     {bot_card}
     <div class="set-search"><input type="search" id="sq" placeholder="🔎 دنبال چی می‌گردی؟ (مثلاً: قیمت، کارت، تست، دعوت، تعمیر…)" autocomplete="off"></div>
     <div class="stabs" id="stabs">{tab_btns}</div>
-    <form method="post" action="{url_for('save_config')}" id="cfgform">
+    <form method="post" action="{url_for('save_config')}" id="cfgform" novalidate>
       <div id="spanels">{panels}</div>
       <div id="snone" class="card" style="display:none;"><p class="empty-note">چیزی پیدا نشد؛ یه کلمه‌ی دیگه امتحان کن.</p></div>
       <p class="muted" style="font-size:12.5px;">
