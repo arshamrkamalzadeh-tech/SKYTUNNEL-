@@ -4935,7 +4935,24 @@ def release_trial_number(number):
         conn.close()
 
 
+_trial_locks = {}
+_trial_locks_guard = threading.Lock()
+
+
 def action_trial(chat_id):
+    """هر کاربر هم‌زمان فقط یک درخواست تست رایگان داره؛ کلیک دوباره‌ی همزمان نادیده گرفته می‌شه
+    (جلوگیری از گرفتن چند تست با دو بار زدن سریع، چون چک تعداد و ثبت تست از هم جدان)."""
+    with _trial_locks_guard:
+        _lk = _trial_locks.setdefault(str(chat_id), threading.Lock())
+    if not _lk.acquire(blocking=False):
+        return
+    try:
+        _action_trial_impl(chat_id)
+    finally:
+        _lk.release()
+
+
+def _action_trial_impl(chat_id):
     if not is_feature_enabled('trial'):
         send_message(chat_id, u(chat_id, 'disabled_feature'))
         return
@@ -5062,11 +5079,10 @@ def get_seller_account(user_id):
 def save_seller_account(user_id, sub_user_id, username, panel_url, password):
     conn = get_conn()
     c = conn.cursor()
-    password = None   # رمز دیگه تو دیتابیس ذخیره نمی‌شه (فقط موقع ساخت/تغییر یک‌بار به خود کاربر نشون داده می‌شه)
     c.execute('INSERT INTO seller_accounts (user_id, sub_user_id, username, panel_url, created_at, password) '
               'VALUES (?, ?, ?, ?, ?, ?) '
               'ON CONFLICT(user_id) DO UPDATE SET sub_user_id=excluded.sub_user_id, username=excluded.username, '
-              'panel_url=excluded.panel_url, password=excluded.password',
+              'panel_url=excluded.panel_url, password=COALESCE(excluded.password, seller_accounts.password)',
               (user_id, sub_user_id, username, panel_url, datetime.now().isoformat(), password))
     conn.commit()
     conn.close()
@@ -5085,7 +5101,7 @@ def delete_seller_account_db(user_id):
 def set_seller_password_db(user_id, password):
     conn = get_conn()
     c = conn.cursor()
-    c.execute('UPDATE seller_accounts SET password=NULL WHERE user_id=?', (user_id,))
+    c.execute('UPDATE seller_accounts SET password=? WHERE user_id=?', (password, user_id))
     conn.commit()
     conn.close()
 
@@ -5997,6 +6013,7 @@ def reset_seller_text_overrides_once():
 def purge_seller_plain_passwords_once():
     """فقط یک‌بار: رمزهای فروشنده که قبلاً به‌صورت متن ساده تو دیتابیس ذخیره شده بودن پاک می‌شن.
     از این به بعد رمز ذخیره نمی‌شه؛ کاربر اگه یادش رفت با «تغییر رمز عبور» یکی جدید می‌ذاره."""
+    return  # غیرفعال: رمز فروشنده‌ها حالا تو دیتابیس نگه داشته می‌شه تا از پنل دیده بشه
     conn = get_conn()
     c = conn.cursor()
     c.execute("SELECT 1 FROM settings WHERE key='seller_pw_purge_v1'")
