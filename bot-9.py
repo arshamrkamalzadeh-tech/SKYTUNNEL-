@@ -261,6 +261,21 @@ def get_rate_limit_window():
     return max(1, _setting_int('rate_limit_window', 60))
 
 
+def get_auto_ban_enabled():
+    """بن دائم خودکار کاربرِ فشارآور وقتی ربات در آستانه‌ی کندی است (از پنل قابل‌تنظیم؛ پیش‌فرض خاموش)."""
+    return get_setting('auto_ban_enabled', '0') == '1'
+
+
+def get_auto_ban_queue():
+    """اگه تعداد آپدیت‌های منتظرِ پردازش (صف) به این عدد یا بیشتر برسه، یعنی ربات در آستانه‌ی کندیه."""
+    return max(1, _setting_int('auto_ban_queue', 8))
+
+
+def get_auto_ban_strikes():
+    """چند بار باید کاربر هم‌زمان با شلوغی ربات از سقف پیام رد شه تا برای همیشه بن بشه."""
+    return max(1, _setting_int('auto_ban_strikes', 5))
+
+
 def get_extend_min_gb():
     """حداقل حجم هر تمدید (گیگ). جلوی تمدید تقریباً رایگان با حجم خیلی کم (مثلاً 0.0001) رو می‌گیره."""
     return max(0.0, _setting_float('extend_min_gb', 1.0))
@@ -8555,6 +8570,83 @@ def _rate_limited(chat_id, limit=None, window=None):
     return False
 
 
+# ---------------------------------------------------------------------------
+# بن دائم خودکارِ کاربرِ فشارآور
+# شرط: (۱) قابلیت از پنل روشن باشه، (۲) کاربر از سقف پیام (rate_limit) رد بشه،
+# (۳) هم‌زمان صف پردازش ربات پر باشه (auto_ban_queue)، (۴) این اتفاق به تعداد auto_ban_strikes
+# بار تو ۵ دقیقه تکرار بشه. نتیجه: users.banned = 1 (دائم؛ فقط از پنل ادمین آزاد می‌شه).
+# ---------------------------------------------------------------------------
+_AB_STRIKES = {}          # chat_id -> [تعداد, زمان آخرین اخطار]
+_AB_LOCK = threading.Lock()
+AB_STRIKE_TTL = 300       # ثانیه؛ اخطارهای قدیمی‌تر از این صفر می‌شن
+
+
+def _update_queue_size():
+    try:
+        return UPDATE_EXECUTOR._work_queue.qsize()
+    except Exception:
+        return 0
+
+
+@with_db_retry
+def _ban_user_permanently_db(user_id):
+    conn = get_conn()
+    c = conn.cursor()
+    c.execute('''INSERT INTO users (user_id, wallet, joined_at, banned)
+        VALUES (?, 0, ?, 1)
+        ON CONFLICT(user_id) DO UPDATE SET banned=1''',
+        (user_id, datetime.now().isoformat()))
+    conn.commit()
+    conn.close()
+
+
+def _notify_admin_auto_ban(chat_id, qsize, strikes):
+    try:
+        send_message(ADMIN_ID,
+                     f'🚨 بن دائم خودکار\nکاربر <code>{chat_id}</code> هم‌زمان با شلوغی ربات '
+                     f'(صف: {qsize}) {strikes} بار از سقف پیام رد شد و برای همیشه مسدود شد.\n'
+                     f'برای آزاد کردن: پنل وب ← کاربران ← «مسدودها».')
+    except Exception as e:
+        print('⚠️ اطلاع به ادمین از بن خودکار ناموفق بود:', e)
+
+
+def _auto_ban_on_flood(chat_id):
+    """بعد از هر بار «رد شدن از سقف پیام» صدا زده می‌شه. اگه شرایط بن دائم جمع بود کاربر رو مسدود می‌کنه."""
+    try:
+        if chat_id is None or chat_id == ADMIN_ID or not get_auto_ban_enabled():
+            return False
+        qsize = _update_queue_size()
+        if qsize < get_auto_ban_queue():
+            return False                      # ربات شلوغ نیست؛ فقط همون نادیده‌گرفتن عادیِ پیام‌ها
+        now = time.time()
+        need = get_auto_ban_strikes()
+        with _AB_LOCK:
+            rec = _AB_STRIKES.get(chat_id)
+            if not rec or now - rec[1] > AB_STRIKE_TTL:
+                rec = [0, now]
+            rec[0] += 1
+            rec[1] = now
+            _AB_STRIKES[chat_id] = rec
+            count = rec[0]
+            if len(_AB_STRIKES) > 5000:
+                for k in [k for k, v in _AB_STRIKES.items() if now - v[1] > AB_STRIKE_TTL]:
+                    _AB_STRIKES.pop(k, None)
+            if count < need:
+                return False
+            _AB_STRIKES.pop(chat_id, None)
+        _ban_user_permanently_db(chat_id)
+        _ban_cache[chat_id] = (True, time.time())   # همین لحظه اعمال شه، منتظر TTL کش نمونه
+        print(f'🚨 [auto-ban] کاربر {chat_id} برای همیشه مسدود شد (queue={qsize}, strikes={count})')
+        try:
+            BG_EXECUTOR.submit(_notify_admin_auto_ban, chat_id, qsize, count)
+        except Exception:
+            pass
+        return True
+    except Exception as e:
+        print('⚠️ auto-ban:', e)
+        return False
+
+
 def safe_process_update(update):
     """آپدیت رو پردازش می‌کنه، ولی قبلش قفل مخصوص همون chat_id رو می‌گیره.
     این یعنی دو تا آپدیت از دو کاربر مختلف هنوز کاملاً موازی پردازش می‌شن
@@ -8597,6 +8689,7 @@ def safe_process_update(update):
             print(f'[slow] chat={chat_id} {str(what)[:30]!r} gate={t1 - t0:.1f}s handler={t2 - t1:.1f}s')
 
     if _rate_limited(chat_id):
+        _auto_ban_on_flood(chat_id)
         return
     lock = get_chat_lock(chat_id) if chat_id is not None else None
     try:
