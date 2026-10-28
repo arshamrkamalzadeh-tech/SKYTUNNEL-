@@ -13,7 +13,7 @@ from functools import wraps
 
 import requests
 import turso_serverless
-from flask import Flask, request, session, redirect, url_for, flash, get_flashed_messages, abort
+from flask import Flask, request, session, redirect, url_for, flash, get_flashed_messages, abort, Response
 
 try:
     from zoneinfo import ZoneInfo
@@ -1855,6 +1855,66 @@ BASE_HTML = """<!DOCTYPE html>
     .fl { font-size: 28px; }
   }
   @media (prefers-reduced-motion: reduce) { *, *::before, *::after { animation: none !important; transition: none !important; } html { scroll-behavior: auto; } }
+
+  /* ===== طراحی جدید: همه‌ی تیک‌ها به‌شکل کلید روشن/خاموش ===== */
+  input[type=checkbox] { -webkit-appearance: none; appearance: none; width: 46px; min-width: 46px; height: 26px; border-radius: 999px;
+    background: var(--danger-dim); border: 1px solid var(--border); position: relative; cursor: pointer; transition: .2s; flex: none; margin: 0; vertical-align: middle; padding: 0; }
+  input[type=checkbox]::after { content: ''; position: absolute; top: 2px; inset-inline-start: 2px; width: 20px; height: 20px; border-radius: 50%;
+    background: #fff; box-shadow: 0 1px 4px rgba(0,0,0,.35); transition: .2s; }
+  input[type=checkbox]:checked { background: var(--ok); border-color: var(--ok); }
+  input[type=checkbox]:checked::after { inset-inline-start: calc(100% - 22px); }
+  input[type=checkbox]:focus-visible { outline: 3px solid var(--brand-dim); }
+
+  /* ===== جستجوی منو ===== */
+  .side-search { width: 100%; margin: 4px 0 6px; padding: 9px 12px; border-radius: 12px; border: 1px solid transparent; background: rgba(255,255,255,.09); color: #fff; font: inherit; font-size: 13.5px; }
+  .side-search::placeholder { color: var(--side-ink); }
+  .side-search:focus { outline: none; border-color: var(--brand); }
+  .drawer .side-search { background: var(--surface-2); color: var(--ink); border: 1px solid var(--border); margin: 6px 0 10px; }
+  .drawer .side-search::placeholder { color: var(--muted); }
+
+  /* ===== صفحه‌ی تنظیمات ===== */
+  .bot-strip { padding: 12px 16px; }
+  .set-search input { width: 100%; padding: 13px 16px; border-radius: 16px; font-size: 15px; margin-bottom: 12px; }
+  .stabs { display: flex; gap: 8px; overflow-x: auto; padding: 2px 2px 10px; margin-bottom: 6px; -webkit-overflow-scrolling: touch; scrollbar-width: thin; }
+  .stabs .pill { flex: none; cursor: pointer; font-family: inherit; padding: 9px 16px; font-size: 14px; }
+  .stabs.dim { opacity: .35; pointer-events: none; }
+  .tabpanel { display: none; }
+  .tabpanel.active, .searching .tabpanel { display: block; }
+  .sec h3 { margin-top: 0; }
+  .set { display: flex; gap: 18px; align-items: flex-start; justify-content: space-between; padding: 16px 0; border-bottom: 1px solid var(--border); }
+  .set:last-child { border-bottom: none; padding-bottom: 4px; }
+  .set-main { flex: 1 1 55%; min-width: 0; }
+  .set-title { font-size: 15.5px; }
+  .set-desc { margin-top: 5px; font-size: 13.5px; line-height: 1.95; color: var(--muted); }
+  .set-desc span { color: var(--brand); font-weight: 700; }
+  .set-def { margin-top: 5px; font-size: 12px; color: var(--muted); opacity: .85; }
+  .set-ctl { flex: 0 1 300px; display: flex; flex-direction: column; gap: 8px; align-items: stretch; min-width: 0; }
+  .set-ctl input[type=text], .set-ctl input[type=number], .set-ctl select, .set-ctl textarea { width: 100%; }
+  .numbox { display: flex; align-items: center; gap: 8px; }
+  .numbox input { flex: 1; min-width: 0; }
+  .unit { font-size: 13px; color: var(--muted); white-space: nowrap; }
+  .zero-sw { display: flex; align-items: center; gap: 10px; font-weight: 600; cursor: pointer; }
+  .set.zero-on .numbox { display: none; }
+  .reset-btn { align-self: flex-end; background: none !important; border: none !important; box-shadow: none !important; color: var(--muted) !important; font-size: 12px; padding: 0 !important; cursor: pointer; font-family: inherit; }
+  .reset-btn:hover { color: var(--brand) !important; }
+  .sw-btn { display: inline-flex; align-items: center; gap: 10px; align-self: flex-start; padding: 5px 14px 5px 6px; border-radius: 999px; border: 1px solid var(--border);
+    font-family: inherit; font-size: 13.5px; font-weight: 700; cursor: pointer; min-width: 108px; transition: .2s; box-shadow: none; }
+  .sw-btn .knob { width: 26px; height: 26px; border-radius: 50%; background: #fff; box-shadow: 0 1px 4px rgba(0,0,0,.35); transition: .2s; flex: none; }
+  .sw-btn.on { background: var(--ok-dim); color: var(--ok); border-color: var(--ok); flex-direction: row-reverse; }
+  .sw-btn.off { background: var(--danger-dim); color: var(--danger); border-color: transparent; }
+  .sw-btn.danger.on { background: var(--danger-dim); color: var(--danger); border-color: var(--danger); }
+  .sw-btn.danger.off { background: var(--ok-dim); color: var(--ok); }
+  .sw-btn em { font-style: normal; flex: 1; text-align: center; }
+  .sw-btn[data-busy] { opacity: .55; pointer-events: none; }
+  .set.danger .set-title b { color: var(--danger); }
+  #savebtn.dirty { animation: pulseSave 1.6s ease-in-out infinite; }
+  @keyframes pulseSave { 50% { box-shadow: 0 0 0 6px var(--brand-dim); } }
+  @media (max-width: 760px) {
+    .set { flex-direction: column; gap: 10px; }
+    .set-ctl { flex: none; width: 100%; }
+    .sw-btn { align-self: stretch; justify-content: space-between; }
+    .reset-btn { align-self: flex-start; }
+  }
 </style>
 </head>
 <body>
@@ -1881,6 +1941,22 @@ __BODY__
     if (navigator.clipboard && window.isSecureContext) {
       navigator.clipboard.writeText(text).then(function () { toast('✅ کپی شد'); }, fallback);
     } else { fallback(); }
+  }
+
+  function navFilter(q) {
+    q = (q || '').trim().toLowerCase();
+    document.querySelectorAll('.sidebar, .drawer').forEach(function (root) {
+      var head = null, headHas = false;
+      function flush() { if (head) head.style.display = (!q || headHas) ? '' : 'none'; }
+      Array.prototype.forEach.call(root.children, function (el) {
+        if (el.classList.contains('nav-group') || el.tagName === 'H4') { flush(); head = el; headHas = false; return; }
+        if (el.classList.contains('side-link') || el.classList.contains('dl')) {
+          var hit = !q || el.textContent.toLowerCase().indexOf(q) > -1;
+          el.style.display = hit ? '' : 'none'; if (hit) headHas = true;
+        }
+      });
+      flush();
+    });
   }
   function copyFrom(btn) { copyText(btn.getAttribute('data-copy') || ''); }
   function revealSecret(btn) {
@@ -1969,7 +2045,8 @@ def render_sidebar(active):
     else:
         status = '<span class="dot off"></span>وضعیت ربات نامشخص'
     out = (f'<aside class="sidebar"><div class="brand"><div class="mark"></div><div><b>SkyTunnel</b>'
-           f'<span>{status}</span></div></div>')
+           f'<span>{status}</span></div></div>'
+           '<input type="search" class="side-search" placeholder="🔎 پیدا کردن بخش…" oninput="navFilter(this.value)" autocomplete="off">')
     for group, items in NAV:
         out += f'<div class="nav-group">{group}</div>'
         for key, label, endpoint in items:
@@ -1987,7 +2064,8 @@ def render_bottom(active):
         links += f'<a class="{cls}" href="{url_for(endpoint)}">{icon(key)}{label}</a>'
     more_active = "active" if active not in [b[0] for b in BOTTOM] else ""
     links += f'<a class="{more_active}" href="#more">{icon("more")}بیشتر</a>'
-    drawer = '<div id="more" class="drawer-overlay"><div class="drawer"><div class="handle"></div>'
+    drawer = ('<div id="more" class="drawer-overlay"><div class="drawer"><div class="handle"></div>'
+              '<input type="search" class="side-search" placeholder="🔎 پیدا کردن بخش…" oninput="navFilter(this.value)" autocomplete="off">')
     for group, items in NAV:
         drawer += f"<h4>{group}</h4>"
         for key, label, endpoint in items:
@@ -2973,6 +3051,350 @@ def crypto_test(coin_id):
 
 # ---------- تنظیمات ربات ----------
 
+# ===========================================================================
+# 🧭 طراحی جدید «تنظیمات ربات»: تب‌بندی بر اساس کار، جستجو، توضیح کامل هر گزینه
+# (کلیدها و مقدارهای پیش‌فرض همون CONFIG_GROUPS قبلیه؛ فقط نمایش عوض شده)
+# ===========================================================================
+
+# کلید -> (عنوان ساده, توضیح: این گزینه دقیقاً چه تغییری تو ربات می‌ده, واحد یا برچسب حالت صفر)
+# برای تنظیم‌هایی که «۰» تو ربات یعنی «بدون محدودیت/رایگان»، سومین مقدار یه دیکشنری است:
+#   {"unit": "...", "zero": "متن کلید روشن/خاموش"}  ← به‌جای تایپ ۰، یه دکمه‌ی روشن/خاموش نشون داده می‌شه.
+SETTING_HELP = {
+    # --- وضعیت کلی ---
+    "maintenance": ("🛠 حالت تعمیر ربات",
+                    "روشن باشه، ربات به همه‌ی کاربران (به‌جز ادمین) فقط «پیام تعمیر» رو نشون می‌ده و هیچ دکمه‌ای کار نمی‌کنه. برای وقتی که می‌خوای قیمت/سرور رو عوض کنی و کسی وسطش خرید نکنه.", ""),
+    "maintenance_text": ("متن پیام تعمیر",
+                         "متنی که کاربر وقتی «حالت تعمیر» روشنه می‌بینه.", ""),
+    "buy": ("🛍 دکمه‌ی «خرید کانفیگ»", "خاموش باشه این دکمه از منوی ربات حذف می‌شه و کاربر نمی‌تونه کانفیگ جدید بخره.", ""),
+    "trial": ("🧪 دکمه‌ی «تست رایگان»", "خاموش باشه کسی نمی‌تونه تست رایگان بگیره (دکمه از منو برداشته می‌شه). جزئیات تست از تب «تست رایگان و خرید».", ""),
+    "topup": ("💠 دکمه‌ی «شارژ کیف پول»", "خاموش باشه کاربر نمی‌تونه کیف پولش رو شارژ کنه (هیچ روش پرداختی نشون داده نمی‌شه).", ""),
+    "exchange": ("💱 دکمه‌ی «صرافی»", "خاموش باشه بخش محاسبه‌ی خرید ارز از منوی ربات حذف می‌شه.", ""),
+    "delete_config": ("🗑 دکمه‌ی «حذف کانفیگ»", "خاموش باشه کاربر نمی‌تونه کانفیگ خودش رو حذف کنه و بازگشت وجه هم انجام نمی‌شه.", ""),
+    "support": ("🎧 دکمه‌ی «پشتیبانی»", "خاموش باشه کاربر نمی‌تونه تیکت بسازه و دکمه‌ی پشتیبانی از منو حذف می‌شه.", ""),
+    "reseller": ("🏪 دکمه‌ی «دریافت پنل فروشندگی»", "خاموش باشه کاربر نمی‌تونه حساب فروشندگی بگیره یا رمزش رو ببینه.", ""),
+    "guide": ("📲 دکمه‌ی «اپ مخصوص کانفیگ‌ها»", "خاموش باشه راهنمای دانلود اپ از منوی ربات حذف می‌شه.", ""),
+    # --- قیمت و پرداخت ---
+    "price_wireguard": ("قیمت هر گیگ — وایرگارد", "قیمتی که ربات برای هر گیگ سرویس «فقط وایرگارد» به کاربر نشون می‌ده و از کیف پولش کم می‌کنه.", "تومان"),
+    "price_config": ("قیمت هر گیگ — کانفیگ", "قیمت هر گیگ سرویس «فقط کانفیگ» تو صفحه‌ی خرید و تمدید.", "تومان"),
+    "price_both": ("قیمت هر گیگ — هر دو", "قیمت هر گیگ وقتی کاربر سرویس «هر دو» (وایرگارد + کانفیگ) رو انتخاب می‌کنه.", "تومان"),
+    "price_openvpn": ("قیمت هر گیگ — OpenVPN", "قیمت هر گیگ سرویس «فقط OpenVPN».", "تومان"),
+    "price_dns": ("قیمت هر گیگ — DNS بازی", "قیمت هر گیگ سرویس «فقط DNS بازی».", "تومان"),
+    "card_number": ("شماره کارت", "شماره‌ای که ربات موقع «شارژ کارت‌به‌کارت» به کاربر نشون می‌ده تا واریز کنه.", ""),
+    "card_owner": ("نام صاحب کارت", "اسمی که کنار شماره کارت به کاربر نشون داده می‌شه.", ""),
+    "min_topup": ("حداقل شارژ کارت‌به‌کارت", "کاربر نمی‌تونه مبلغ کمتر از این رو برای شارژ کارت‌به‌کارت ثبت کنه.", "تومان"),
+    "min_topup_crypto": ("حداقل شارژ با رمزارز", "حداقل ارزش تومانیِ واریز رمزارزی؛ کمتر از این قبول نمی‌شه.", "تومان"),
+    "min_topup_donito": ("حداقل شارژ خودکار (دونیتو)", "حداقل مبلغ شارژ از مسیر دونیتو.", "تومان"),
+    "donito_page_url": ("آدرس صفحه‌ی دونیتو", "لینکی که ربات برای پرداخت دونیتو به کاربر می‌ده.", ""),
+    "donito_window_min": ("مهلت هر درخواست دونیتو", "بعد از این مدت، پرداخت دیگه با درخواست کاربر تطبیق داده نمی‌شه و درخواست منقضی می‌شه.", "دقیقه"),
+    "donito_poll_sec": ("هر چند ثانیه دونیت‌ها چک بشن", "هر چه کمتر باشه شارژ زودتر خودکار تأیید می‌شه ولی فشار بیشتری روی دونیتو میاد (حداقل ۱۰).", "ثانیه"),
+    "crypto_auto_confirm": ("✅ تأیید خودکار واریز رمزارز",
+                            "روشن: اگه مقدار یا هش واریز با تراکنش حساب نوبیتکس بخوره، شارژ خودکار تأیید می‌شه. خاموش: هر واریز رمزارزی باید دستی توسط ادمین تأیید بشه. ربات هیچ‌وقت خودش رد نمی‌کنه؛ رد کردن فقط با ادمینه.", ""),
+    "crypto_max_shortfall_toman": ("کسری مجاز واریز رمزارز", "اگه کاربر کمی کمتر از مقدار لازم بفرسته و کسری از این عدد کمتر باشه، باز هم خودکار تأیید می‌شه. مثلاً 6000 یعنی تا ۶ هزار تومان کمتر قبوله.", "تومان"),
+    "crypto_margin_percent": ("حاشیه‌ی اطمینان قیمت رمزارز", "این درصد از قیمت نوبیتکس کم می‌شه تا اگه قیمت تا لحظه‌ی واریز افت کرد ضرر نکنی (بین 0 تا 20).", {"unit": "درصد", "zero": "بدون حاشیه"}),
+    "crypto_match_tolerance_percent": ("اختلاف مجاز تطبیق واریز", "مقدار واریزیِ کاربر تا این درصد با مقدار اعلام‌شده فرق داشته باشه، هنوز با هم تطبیق داده می‌شن (بین 0 تا 50).", "درصد"),
+    "crypto_round_max_over_percent": ("سقف اضافه‌پرداخت بابت گرد کردن", "مقدار کوین به بالا گرد می‌شه. اگه گرد کردن کاربر رو بیشتر از این درصد اضافه‌پرداخت کنه (مثل بیت‌کوین)، اعشار بیشتری استفاده می‌شه (بین 0 تا 100).", "درصد"),
+    "topup_multiplier": ("ضریب شارژ", "مبلغی که کاربر واریز می‌کنه ضربدر این عدد به کیف پولش اضافه می‌شه. 1 = عادی، 2 = دو برابر (جشنواره)، 1.1 = ۱۰٪ هدیه.", "برابر"),
+    # --- تست رایگان و خرید ---
+    "trial_gb": ("حجم تست رایگان", "حجمی که کاربر تو تست رایگان می‌گیره. عدد اعشاری مجازه (مثلاً 0.1 = ۱۰۰ مگابایت).", "گیگ"),
+    "trial_days": ("مدت تست رایگان", "بعد از این تعداد روز کانفیگ تست منقضی می‌شه.", "روز"),
+    "trial_label": ("پیشوند اسم کانفیگ تست", "اسم کانفیگ‌های تست با این پیشوند و یه شماره‌ی ترتیبی ساخته می‌شه؛ مثلاً FREE-TEST-1 ، FREE-TEST-2 ...", ""),
+    "trial_max_per_user": ("سقف تعداد تست هر کاربر", "هر کاربر حداکثر چند بار می‌تونه تست رایگان بگیره. اگه «نامحدود» رو روشن کنی هر کاربر هر چند بار بخواد می‌تونه تست بگیره.", {"unit": "بار", "zero": "نامحدود"}),
+    "trial_cooldown_hours": ("فاصله‌ی بین دو تست", "بعد از هر تست، کاربر باید این مدت صبر کنه تا بتونه دوباره تست بگیره (اعشاری مجازه).", {"unit": "ساعت", "zero": "بدون فاصله"}),
+    "trial_new_users_only": ("🆕 تست فقط برای کاربر بدون خرید", "روشن: کسی که قبلاً حتی یک خرید داشته دیگه تست رایگان نمی‌گیره. مناسب برای جلوگیری از سوءاستفاده مشتری‌های فعلی.", ""),
+    "trial_proto": ("نوع سرویس تست رایگان", "تست رایگان از کدوم نوع سرویس ساخته بشه.", ""),
+    "default_gb": ("حجم پیش‌فرض صفحه‌ی خرید", "وقتی کاربر وارد صفحه‌ی خرید می‌شه، این مقدار حجم از قبل انتخاب شده.", "گیگ"),
+    "default_days": ("مدت پیش‌فرض صفحه‌ی خرید", "مدتی که تو صفحه‌ی خرید از قبل انتخاب شده.", "روز"),
+    "refund_ratio": ("نسبت بازگشت وجه هنگام حذف کانفیگ", "وقتی کاربر کانفیگش رو حذف می‌کنه، این نسبت از ارزش باقی‌مانده به کیف پولش برمی‌گرده. بین 0 تا 1؛ مثلاً 0.5 یعنی نصف، 0 یعنی بدون بازگشت.", ""),
+    "reseller_price": ("هزینه‌ی ساخت حساب فروشندگی", "از کیف پول کاربر کم می‌شه؛ اگه ساخت حساب شکست بخوره پول برمی‌گرده.", {"unit": "تومان", "zero": "رایگان"}),
+    "reseller_panel_url": ("آدرس پنل فروشندگی", "فقط وقتی سرویس آدرس نداد، به‌عنوان جایگزین به فروشنده نشون داده می‌شه. متن دکمه‌ها از «متن‌های ربات ← 🏪 فروشندگی».", ""),
+    # --- رفرال ---
+    "referral_enabled": ("🎁 سیستم دعوت دوستان", "روشن: هر کاربر لینک دعوت اختصاصی می‌گیره و با دعوت دوستان پاداش می‌گیره. خاموش: دکمه‌ی دعوت دوستان کار نمی‌کنه و پاداشی پرداخت نمی‌شه.", ""),
+    "referral_reward_inviter": ("پاداش دعوت‌کننده", "به کیف پول کسی که دوستش رو دعوت کرده اضافه می‌شه.", "تومان"),
+    "referral_reward_invitee": ("هدیه‌ی کاربر دعوت‌شده", "به کیف پول خودِ کاربر دعوت‌شده اضافه می‌شه.", {"unit": "تومان", "zero": "بدون هدیه"}),
+    "referral_require_channel": ("📢 پاداش فقط بعد از عضویت در کانال", "روشن: تا کاربر دعوت‌شده عضو همه‌ی کانال‌های اجباری نشده پاداشی به دعوت‌کننده داده نمی‌شه. اگه عضویت اجباری خاموش یا بدون کانال باشه، شرطی اعمال نمی‌شه.", ""),
+    "referral_allow_existing": ("کاربر قدیمی هم «دعوت‌شده» حساب بشه", "خاموش (پیشنهادی): کسی که قبلاً تو ربات بوده با لینک دعوت پاداش نمی‌سازه و جلوی ساخت چند اکانت گرفته می‌شه. روشن: کاربر قدیمی هم می‌تونه دعوت‌شده حساب بشه.", ""),
+    "referral_daily_limit": ("سقف پاداش هر دعوت‌کننده در ۲۴ ساعت", "جلوی ساخت پشت‌سرهم اکانت جعلی رو می‌گیره.", {"unit": "پاداش", "zero": "بدون سقف"}),
+    "referral_min_purchase": ("حداقل خرید برای پرداخت پاداش", "اگه کاربر دعوت‌شده کمتر از این مبلغ بخره، پاداش ساخته نمی‌شه؛ جلوی حساب‌های جعلی با خرید ناچیز رو می‌گیره.", {"unit": "تومان", "zero": "بدون حداقل"}),
+    "referral_on_join": ("⚡ پاداش به‌محض ورود کاربر دعوت‌شده", "خاموش: پاداش بعد از اولین خرید کاربر دعوت‌شده داده می‌شه. روشن: همون لحظه‌ای که وارد ربات شد (ریسک سوءاستفاده بیشتر).", ""),
+    # --- محدودیت‌ها ---
+    "rate_limit_count": ("سقف پیام هر کاربر (ضد اسپم)", "هر کاربر تو «بازه‌ی زمانی» پایین بیشتر از این تعداد پیام/دکمه بزنه، پیام‌های اضافه نادیده گرفته می‌شن. ادمین مستثناست.", {"unit": "پیام", "zero": "بدون محدودیت"}),
+    "rate_limit_window": ("بازه‌ی زمانی سقف پیام", "طول بازه‌ی بالا؛ مثلاً 30 پیام در 60 ثانیه (حداقل 1).", "ثانیه"),
+    "extend_min_gb": ("حداقل حجم هر تمدید", "جلوی تمدید تقریباً رایگان با حجم خیلی کم رو می‌گیره، چون قیمت فقط از حجم حساب می‌شه. اعشاری مجازه.", "گیگ"),
+    "buy_max_gb": ("سقف حجم هر خرید/تمدید", "کاربر نمی‌تونه تو یک خرید بیشتر از این حجم بخره.", "گیگ"),
+    "buy_max_days": ("سقف مدت هر خرید/تمدید", "کاربر نمی‌تونه تو یک خرید مدتی بیشتر از این انتخاب کنه.", "روز"),
+    "max_configs_per_user": ("سقف تعداد کانفیگ هر کاربر", "شامل تست رایگان هم می‌شه. وقتی پر شد خرید جدید بسته می‌شه تا کاربر یکی رو حذف کنه.", {"unit": "کانفیگ", "zero": "نامحدود"}),
+    "topup_max_amount": ("سقف مبلغ هر درخواست شارژ", "کاربر نمی‌تونه یه‌جا بیشتر از این مبلغ شارژ ثبت کنه.", {"unit": "تومان", "zero": "بدون سقف"}),
+    "ticket_max_open": ("سقف تیکت‌ باز هر کاربر", "تعداد تیکت‌های باز و بی‌پاسخی که هر کاربر می‌تونه همزمان داشته باشه.", {"unit": "تیکت", "zero": "نامحدود"}),
+    "ticket_max_chars": ("سقف طول پیام تیکت", "پیام تیکتِ طولانی‌تر از این قبول نمی‌شه.", {"unit": "کاراکتر", "zero": "بدون سقف"}),
+    # --- کانال و عمومی ---
+    "gate_enabled": ("📢 عضویت اجباری کانال", "روشن: کاربر قبل از استفاده از ربات باید تو کانال‌های اجباری عضو باشه. خاموش: هیچ‌کس مجبور نیست. لیست کانال‌ها از صفحه‌ی «کانال‌ها و پست».", ""),
+    "gate_fail_open": ("اگه چک عضویت جواب نداد، کاربر وارد بشه", "روشن: وقتی اکانت گیت وصل نیست یا چک عضویت خطا داد، کاربر وارد ربات می‌شه. خاموش: تا چک موفق نشه کاربر وارد نمی‌شه.", ""),
+    "gate_cache_ttl": ("مدت اعتبار عضویتِ تاییدشده", "بعد از تأیید عضویت، تا این مدت دوباره چک نمی‌شه (حداقل 5).", "ثانیه"),
+    "gate_sync_interval": ("فاصله‌ی تازه‌سازی لیست اعضا", "هر چند ثانیه لیست اعضای کانال از سروش دوباره گرفته بشه. عدد کمتر = دقیق‌تر ولی فشار بیشتر روی API (حداقل 5).", "ثانیه"),
+    "admin_id": ("آیدی عددی ادمین", "تیکت‌ها و رسیدهای شارژ برای این آیدی فرستاده می‌شه و این حساب از محدودیت‌ها مستثناست.", ""),
+    "bot_username": ("یوزرنیم ربات (بدون @)", "برای ساخت لینک دعوت دوستان استفاده می‌شه.", ""),
+    "divider": ("خط جداکننده‌ی پیام‌ها", "خطی که ربات بین بخش‌های پیام‌هاش می‌ذاره.", ""),
+    # --- لینک‌های اپ ---
+    "app_link_android": ("لینک اندروید", "لینکی که کاربر اندرویدی تو «اپ مخصوص کانفیگ‌ها» می‌بینه.", ""),
+    "app_link_ios": ("لینک iOS", "لینک اپ برای آیفون.", ""),
+    "app_link_windows": ("لینک ویندوز", "لینک دانلود برای ویندوز.", ""),
+    "app_link_mac": ("لینک مک", "لینک دانلود برای macOS.", ""),
+    "app_link_linux": ("لینک لینوکس", "لینک دانلود برای لینوکس.", ""),
+    # --- منوی «/» ---
+    "cmd_start": ("/start", "متنی که کنار این دستور تو منوی «/» تلگرام/سروش نوشته می‌شه.", ""),
+    "cmd_buy": ("/buy", "توضیح دستور خرید کانفیگ تو منوی «/».", ""),
+    "cmd_test": ("/test", "توضیح دستور تست رایگان تو منوی «/».", ""),
+    "cmd_wallet": ("/wallet", "توضیح دستور شارژ کیف پول تو منوی «/».", ""),
+    "cmd_myconfigs": ("/myconfigs", "توضیح دستور کانفیگ‌های من تو منوی «/».", ""),
+    "cmd_delconfig": ("/delconfig", "توضیح دستور حذف کانفیگ تو منوی «/».", ""),
+    "cmd_account": ("/account", "توضیح دستور حساب من تو منوی «/».", ""),
+    "cmd_support": ("/support", "توضیح دستور پشتیبانی تو منوی «/».", ""),
+    "cmd_guide": ("/guide", "توضیح دستور راهنمای اپ تو منوی «/».", ""),
+    "cmd_invite": ("/invite", "توضیح دستور دعوت دوستان تو منوی «/».", ""),
+}
+
+# گزینه‌های انتخابی (به‌جای تایپ متن)
+SETTING_CHOICES = {
+    "trial_proto": [("both", "🔀 هر دو (وایرگارد + کانفیگ)"), ("xray", "⚙️ فقط کانفیگ"), ("wireguard", "🔒 فقط وایرگارد"),
+                    ("openvpn", "📱 فقط OpenVPN"), ("dns", "🎮 فقط DNS بازی")],
+}
+
+# تب‌ها: (شناسه, عنوان, [(عنوان بخش, [کلیدها])]). کلید «feature:x» یعنی یکی از قابلیت‌های FEATURES؛ «maintenance» یعنی حالت تعمیر.
+SETTINGS_TABS = [
+    ("status", "🟢 وضعیت و منو", [
+        ("🚨 کلید اصلی", ["maintenance", "maintenance_text"]),
+        ("🔌 دکمه‌های منوی ربات (روشن = نمایش بده)", ["feature:buy", "feature:trial", "feature:topup", "feature:exchange",
+                                                    "feature:delete_config", "feature:support", "feature:reseller", "feature:guide"]),
+    ]),
+    ("price", "💰 قیمت و پرداخت", [
+        ("💵 قیمت هر گیگ", ["price_wireguard", "price_config", "price_both", "price_openvpn", "price_dns"]),
+        ("💳 کارت‌به‌کارت", ["card_number", "card_owner", "min_topup", "topup_max_amount", "topup_multiplier"]),
+        ("🪙 شارژ با رمزارز", ["min_topup_crypto", "crypto_auto_confirm", "crypto_max_shortfall_toman", "crypto_margin_percent",
+                              "crypto_match_tolerance_percent", "crypto_round_max_over_percent"]),
+        ("⚡ شارژ خودکار دونیتو", ["min_topup_donito", "donito_page_url", "donito_window_min", "donito_poll_sec"]),
+    ]),
+    ("trial", "🧪 تست و خرید", [
+        ("🧪 تست رایگان", ["trial_gb", "trial_days", "trial_proto", "trial_label", "trial_max_per_user",
+                           "trial_cooldown_hours", "trial_new_users_only"]),
+        ("🛍 صفحه‌ی خرید و حذف", ["default_gb", "default_days", "extend_min_gb", "buy_max_gb", "buy_max_days", "max_configs_per_user", "refund_ratio"]),
+        ("🏪 فروشندگی", ["reseller_price", "reseller_panel_url"]),
+    ]),
+    ("referral", "🎁 دعوت دوستان", [
+        ("🎁 پاداش‌ها", ["referral_enabled", "referral_reward_inviter", "referral_reward_invitee"]),
+        ("🛡 شرط‌ها و ضد تقلب", ["referral_require_channel", "referral_on_join", "referral_allow_existing", "referral_daily_limit", "referral_min_purchase"]),
+    ]),
+    ("limits", "🚦 محدودیت‌ها", [
+        ("🚦 ضد اسپم", ["rate_limit_count", "rate_limit_window"]),
+        ("🎫 پشتیبانی", ["ticket_max_open", "ticket_max_chars"]),
+    ]),
+    ("channel", "📢 کانال و عمومی", [
+        ("📢 عضویت اجباری", ["gate_enabled", "gate_fail_open", "gate_cache_ttl", "gate_sync_interval"]),
+        ("🤖 مشخصات ربات", ["admin_id", "bot_username", "divider"]),
+    ]),
+    ("links", "🔗 لینک‌ها و دستورات", [
+        ("📲 لینک دانلود اپ", ["app_link_android", "app_link_ios", "app_link_windows", "app_link_mac", "app_link_linux"]),
+        ("⌨️ توضیح دستورات منوی «/»", ["cmd_start", "cmd_buy", "cmd_test", "cmd_wallet", "cmd_myconfigs", "cmd_delconfig",
+                                       "cmd_account", "cmd_support", "cmd_guide", "cmd_invite"]),
+    ]),
+]
+
+
+def _ajax_json(ok, msg, on=None):
+    return Response(json.dumps({"ok": ok, "msg": msg, "on": on}, ensure_ascii=False), mimetype="application/json")
+
+
+def _cfg_lookup():
+    return {k: (label, default, kind) for k, label, default, kind in CONFIG_SETTINGS}
+
+
+def _help_for(key, label=""):
+    h = SETTING_HELP.get(key)
+    if h:
+        return h
+    t, _sep, d = (label or key).partition("||")
+    return (t, d, "")
+
+
+def _toggle_control(url, on, danger=False):
+    cls = "sw-btn on" if on else "sw-btn off"
+    if danger:
+        cls += " danger"
+    return (f'<button type="button" class="{cls}" role="switch" aria-checked="{"true" if on else "false"}" '
+            f'data-url="{esc(url)}" onclick="flipSwitch(this)"><span class="knob"></span>'
+            f'<em>{"روشن" if on else "خاموش"}</em></button>')
+
+
+def _render_setting(key, all_settings):
+    """یه ردیف تنظیم: عنوان + توضیح کامل + کنترل مناسب (دکمه‌ی روشن/خاموش، عدد با واحد، انتخاب از لیست یا متن)."""
+    cfg = _cfg_lookup()
+    danger = False
+    if key.startswith("feature:"):
+        fk = key.split(":", 1)[1]
+        title, desc, _u = _help_for(fk, FEATURES.get(fk, fk))
+        on = all_settings.get(fk, "1") == "1"
+        control = _toggle_control(url_for("toggle_setting", key=fk), on)
+        default_hint = "پیش‌فرض: روشن"
+        custom = fk in all_settings
+        search_key = fk
+    elif key == "maintenance":
+        title, desc, _u = _help_for("maintenance")
+        on = all_settings.get("maintenance", "0") == "1"
+        control = _toggle_control(url_for("toggle_maintenance"), on, danger=True)
+        default_hint = "پیش‌فرض: خاموش"
+        custom = "maintenance" in all_settings
+        search_key = key
+        danger = True
+    elif key in cfg:
+        label, default, kind = cfg[key]
+        title, desc, meta = _help_for(key, label)
+        value = all_settings.get(key, default)
+        custom = key in all_settings
+        search_key = key
+        if kind == "toggle":
+            on = str(value) == "1"
+            control = _toggle_control(url_for("toggle_config", key=key), on)
+            default_hint = "پیش‌فرض: " + ("روشن" if str(default) == "1" else "خاموش")
+        else:
+            unit = meta.get("unit", "") if isinstance(meta, dict) else (meta or "")
+            zero_label = meta.get("zero", "") if isinstance(meta, dict) else ""
+            unit_html = f'<span class="unit">{esc(unit)}</span>' if unit else ""
+            dflt = esc(default)
+            if key in SETTING_CHOICES:
+                opts = "".join(
+                    f'<option value="{esc(v)}"{" selected" if str(value).lower() == v else ""}>{esc(t)}</option>'
+                    for v, t in SETTING_CHOICES[key])
+                field = f'<select id="s_{key}" name="{key}" data-default="{dflt}">{opts}</select>'
+                default_hint = ""
+            elif kind in ("number", "float"):
+                mode = 'type="number" min="0" step="1" inputmode="numeric"' if kind == "number" else 'type="text" inputmode="decimal"'
+                field = (f'<div class="numbox"><input id="s_{key}" name="{key}" value="{esc(value)}" '
+                         f'placeholder="{dflt}" data-default="{dflt}" {mode}>{unit_html}</div>')
+                if zero_label:
+                    field = (f'<label class="zero-sw"><input type="checkbox" class="zsw" aria-label="{esc(zero_label)}"> '
+                             f'<span>{esc(zero_label)}</span></label>' + field)
+                default_hint = f"پیش‌فرض: {default}" + (f" {unit}" if unit else "")
+                if zero_label and str(default) == "0":
+                    default_hint = f"پیش‌فرض: {zero_label}"
+            elif key == "maintenance_text":
+                field = (f'<textarea id="s_{key}" name="{key}" rows="3" placeholder="{dflt}" data-default="{dflt}">'
+                         f'{esc(value)}</textarea>')
+                default_hint = ""
+            else:
+                ltr = ' dir="ltr" autocapitalize="off" spellcheck="false"' if kind in ("url", "tiers") or key.startswith("cmd_") \
+                    or key in ("card_number", "bot_username") else ""
+                field = (f'<input id="s_{key}" name="{key}" type="text" value="{esc(value)}" placeholder="{dflt}" '
+                         f'data-default="{dflt}"{ltr}>')
+                default_hint = ""
+            control = field + '<button type="button" class="reset-btn" onclick="resetDef(this)" title="برگشت به مقدار پیش‌فرض">↩ پیش‌فرض</button>'
+    else:
+        return ""
+    badge = ' <span class="badge on">تغییر داده‌شده</span>' if custom else ""
+    hint = f'<div class="set-def">{esc(default_hint)}</div>' if default_hint else ""
+    desc_html = f'<div class="set-desc"><span>📌 تأثیر در ربات:</span> {esc(desc)}</div>' if desc else ""
+    haystack = esc(f"{title} {desc} {search_key}".lower())
+    return (f'<div class="set{" danger" if danger else ""}" data-q="{haystack}" id="set-{esc(search_key)}">'
+            f'<div class="set-main"><div class="set-title"><b>{esc(title)}</b>{badge}</div>{desc_html}{hint}</div>'
+            f'<div class="set-ctl">{control}</div></div>')
+
+
+SETTINGS_PAGE_JS = """
+<script>
+(function () {
+  var CSRF = "__CSRF__";
+  window.flipSwitch = function (b) {
+    if (b.getAttribute('data-busy')) return;
+    b.setAttribute('data-busy', '1');
+    var fd = new FormData(); fd.append('csrf', CSRF); fd.append('ajax', '1');
+    fetch(b.getAttribute('data-url'), { method: 'POST', body: fd, credentials: 'same-origin' })
+      .then(function (r) { return r.json(); })
+      .then(function (j) {
+        if (j && j.ok) {
+          b.classList.toggle('on', !!j.on); b.classList.toggle('off', !j.on);
+          b.setAttribute('aria-checked', j.on ? 'true' : 'false');
+          b.querySelector('em').textContent = j.on ? 'روشن' : 'خاموش';
+          toast('✅ ' + (j.msg || 'ذخیره شد'));
+        } else { toast('⚠️ ' + ((j && j.msg) || 'ذخیره نشد')); }
+      })
+      .catch(function () { toast('⚠️ ارتباط با پنل قطع شد؛ صفحه رو رفرش کن'); })
+      .then(function () { b.removeAttribute('data-busy'); });
+  };
+
+  var form = document.getElementById('cfgform');
+  var saveBtn = document.getElementById('savebtn');
+  var fields = form.querySelectorAll('[name]:not([name=csrf])');
+  fields.forEach(function (el) { el.setAttribute('data-orig', el.value); });
+
+  function syncRow(el) {                    // کلید «بدون محدودیت/رایگان» ↔ عدد صفر
+    var set = el.closest('.set'); if (!set) return;
+    var z = set.querySelector('.zsw'); if (!z) return;
+    var inp = set.querySelector('.numbox input');
+    var isZero = inp.value.trim() === '0';
+    z.checked = isZero;
+    set.classList.toggle('zero-on', isZero);
+  }
+  function countDirty() {
+    var n = 0;
+    fields.forEach(function (el) { if (el.value !== el.getAttribute('data-orig')) n++; });
+    saveBtn.textContent = n ? ('💾 ذخیره‌ی ' + n.toLocaleString('fa') + ' تغییر') : '💾 ذخیره‌ی تغییرات';
+    saveBtn.classList.toggle('dirty', n > 0);
+  }
+  form.addEventListener('input', function (e) { syncRow(e.target); countDirty(); });
+  form.addEventListener('change', function (e) {
+    var t = e.target;
+    if (t.classList && t.classList.contains('zsw')) {
+      var set = t.closest('.set'), inp = set.querySelector('.numbox input');
+      if (t.checked) { inp.setAttribute('data-prev', inp.value); inp.value = '0'; }
+      else {
+        var p = inp.getAttribute('data-prev'), d = inp.getAttribute('data-default');
+        inp.value = (p && p !== '0') ? p : ((d && d !== '0') ? d : '1');
+      }
+      syncRow(inp); countDirty();
+    }
+  });
+  window.resetDef = function (btn) {
+    var set = btn.closest('.set'), el = set.querySelector('[name]');
+    el.value = el.getAttribute('data-default') || '';
+    syncRow(el); countDirty();
+  };
+  form.querySelectorAll('.numbox input').forEach(syncRow);
+
+  // ---- تب‌ها و جستجو ----
+  var tabs = document.querySelectorAll('#stabs [data-tab]'), panels = document.querySelectorAll('.tabpanel');
+  function showTab(id) {
+    var ok = false; panels.forEach(function (p) { if (p.id === 'tab-' + id) ok = true; });
+    if (!ok) id = tabs[0].getAttribute('data-tab');
+    panels.forEach(function (p) { p.classList.toggle('active', p.id === 'tab-' + id); });
+    tabs.forEach(function (t) { t.classList.toggle('active', t.getAttribute('data-tab') === id); });
+    try { localStorage.setItem('sky-stab', id); } catch (e) {}
+  }
+  tabs.forEach(function (t) {
+    t.addEventListener('click', function () { showTab(t.getAttribute('data-tab')); history.replaceState(null, '', '#' + t.getAttribute('data-tab')); });
+  });
+  var start = (location.hash || '').slice(1);
+  if (!start) { try { start = localStorage.getItem('sky-stab') || ''; } catch (e) {} }
+  showTab(start);
+
+  var sq = document.getElementById('sq'), box = document.getElementById('spanels'), none = document.getElementById('snone');
+  sq.addEventListener('input', function () {
+    var q = sq.value.trim().toLowerCase(), shown = 0;
+    box.classList.toggle('searching', !!q);
+    document.getElementById('stabs').classList.toggle('dim', !!q);
+    document.querySelectorAll('.set').forEach(function (s) {
+      var hit = !q || s.getAttribute('data-q').indexOf(q) > -1;
+      s.style.display = hit ? '' : 'none'; if (hit && q) shown++;
+    });
+    document.querySelectorAll('.sec').forEach(function (sec) {
+      var any = false;
+      sec.querySelectorAll('.set').forEach(function (s) { if (s.style.display !== 'none') any = true; });
+      sec.style.display = any ? '' : 'none';
+    });
+    none.style.display = (q && !shown) ? 'block' : 'none';
+  });
+})();
+</script>
+"""
+
+
 @app.route("/settings")
 @login_required
 def settings_page():
@@ -2982,71 +3404,51 @@ def settings_page():
 
     if bot:
         bot_card = f"""
-        <div class="card"><h3>اطلاعات ربات</h3><div class="kv">
-          <div><span>نام ربات</span><b>{esc(bot.get('first_name', '-'))}</b></div>
+        <div class="card bot-strip"><div class="kv">
+          <div><span>ربات</span><b>{esc(bot.get('first_name', '-'))}</b></div>
           <div><span>یوزرنیم</span><b dir="ltr">@{esc(bot.get('username', '-'))}</b></div>
           <div><span>آیدی ربات</span><b class="num">{esc(bot.get('id', '-'))}</b></div>
-          <div><span>آیدی عددی ادمین فعلی</span><b class="num">{esc(all_settings.get('admin_id', os.getenv('ADMIN_ID', '48985781')))}</b></div>
+          <div><span>ادمین</span><b class="num">{esc(all_settings.get('admin_id', os.getenv('ADMIN_ID', '48985781')))}</b></div>
         </div></div>"""
     else:
-        bot_card = ('<div class="card"><h3>اطلاعات ربات</h3><p class="empty-note">اتصال به API ربات برقرار نشد '
-                    '(توکن تنظیم نشده یا سرویس در دسترس نیست). تنظیمات پایین‌تر به هر حال کار می‌کنند.</p></div>')
+        bot_card = ('<div class="card"><p class="empty-note">اتصال به API ربات برقرار نشد (توکن تنظیم نشده یا سرویس در دسترس نیست). '
+                    'تنظیمات پایین‌تر به هر حال کار می‌کنند.</p></div>')
 
-    maint_on = all_settings.get("maintenance", "0") == "1"
-    maint_card = f"""
-    <div class="card">
-      <div class="switch-row" style="padding-top:0;">
-        <div><b>🛠 حالت تعمیر ربات</b><br><small class="muted">وقتی روشن باشه ربات به همه‌ی کاربران (جز ادمین) فقط پیام تعمیر نشون می‌ده. متن پیام رو پایین‌تر، بخش «مدیریت و نگهداری» عوض کنید.</small></div>
-        <form method="post" action="{url_for('toggle_maintenance')}">
-          {tgl_btn(maint_on)}
-        </form>
-      </div>
-      <div><span class="badge {'off' if maint_on else 'on'}">{'ربات در حالت تعمیر است' if maint_on else 'ربات عادی کار می‌کند'}</span></div>
-    </div>"""
+    # هر کلیدی که تو هیچ تبی نیومده باشه، تو تب «سایر» می‌ره تا هیچ تنظیمی گم نشه
+    placed = set()
+    for _id, _t, secs in SETTINGS_TABS:
+        for _st, keys in secs:
+            placed.update(keys)
+    tabs_def = [(i, t, list(s)) for i, t, s in SETTINGS_TABS]
+    leftovers = [k for k, _l, _d, _k in CONFIG_SETTINGS if k not in placed]
+    if leftovers:
+        tabs_def.append(("other", "📦 سایر", [("سایر تنظیمات", leftovers)]))
 
-    chips, groups_html = "", ""
-    for idx, (title, items) in enumerate(CONFIG_GROUPS):
-        rows = ""
-        for key, label, default, kind in items:
-            value = all_settings.get(key, default)
-            if kind == "toggle":
-                t_title, _sep, t_desc = label.partition("||")
-                t_desc_html = f'<br><small class="muted">{esc(t_desc)}</small>' if t_desc else ""
-                rows += (f'<div class="switch-row"><div><b>{esc(t_title)}</b>{t_desc_html}</div>'
-                         f'{tgl_btn(str(value) == "1", url_for("toggle_config", key=key))}</div>')
-                continue
-            attrs = ' type="text"'
-            if kind == "number":
-                attrs = ' type="number" min="0" step="1" inputmode="numeric"'
-            elif kind == "float":
-                attrs = ' type="text" inputmode="decimal"'
-            elif kind in ("url", "tiers"):
-                attrs = ' type="text" dir="ltr" autocapitalize="off" spellcheck="false"'
-            changed = ' <span class="badge on">سفارشی</span>' if key in all_settings else ""
-            rows += f"""
-            <label for="s_{key}">{esc(label)}{changed}</label>
-            <input id="s_{key}" name="{key}" value="{esc(value)}" placeholder="{esc(default)}"{attrs}>"""
-        chips += f'<a class="pill" href="#g{idx}">{title.split(" ", 1)[0]} {esc(title.split(" ", 1)[1][:22]) if " " in title else ""}</a>'
-        groups_html += f'<div class="card" id="g{idx}"><h3>{title}</h3>{rows}</div>'
+    tab_btns, panels = "", ""
+    for tid, ttitle, secs in tabs_def:
+        tab_btns += f'<button type="button" class="pill" data-tab="{tid}">{esc(ttitle)}</button>'
+        body = ""
+        for sec_title, keys in secs:
+            rows = "".join(_render_setting(k, all_settings) for k in keys)
+            body += f'<div class="card sec"><h3>{esc(sec_title)}</h3>{rows}</div>'
+        panels += f'<section class="tabpanel" id="tab-{tid}">{body}</section>'
 
-    rows_html = ""
-    for key, label in FEATURES.items():
-        enabled = all_settings.get(key, "1") == "1"
-        rows_html += f"""
-        <div class="switch-row"><div><b>{label}</b></div>
-          <form method="post" action="{url_for('toggle_setting', key=key)}">{tgl_btn(enabled)}</form></div>"""
-
+    js = SETTINGS_PAGE_JS.replace("__CSRF__", csrf_token())
     content = f"""
     {bot_card}
-    {maint_card}
-    <div class="card"><h3>🔌 روشن/خاموش کردن قابلیت‌ها</h3>{rows_html}</div>
-    <div class="chips-row">{chips}</div>
-    <form method="post" action="{url_for('save_config')}">
-      {groups_html}
-      <p class="muted" style="font-size:12.5px;">هر فیلد را خالی بگذارید یا برابر مقدار پیش‌فرض (داخل کادر کم‌رنگ) بنویسید تا به پیش‌فرض برگردد. تغییرات حداکثر ~۲۰ ثانیه بعد روی ربات اعمال می‌شود.</p>
-      <div class="savebar"><button type="submit" class="block">💾 ذخیره‌ی همه‌ی تغییرات</button></div>
+    <div class="set-search"><input type="search" id="sq" placeholder="🔎 دنبال چی می‌گردی؟ (مثلاً: قیمت، کارت، تست، دعوت، تعمیر…)" autocomplete="off"></div>
+    <div class="stabs" id="stabs">{tab_btns}</div>
+    <form method="post" action="{url_for('save_config')}" id="cfgform">
+      <div id="spanels">{panels}</div>
+      <div id="snone" class="card" style="display:none;"><p class="empty-note">چیزی پیدا نشد؛ یه کلمه‌ی دیگه امتحان کن.</p></div>
+      <p class="muted" style="font-size:12.5px;">
+        ⚡ دکمه‌های <b>روشن/خاموش</b> همون لحظه ذخیره می‌شن؛ بقیه‌ی فیلدها (عدد، متن، انتخاب) با دکمه‌ی «ذخیره» پایین صفحه.
+        تغییرات حداکثر ~۲۰ ثانیه بعد روی ربات اعمال می‌شه. دکمه‌ی «↩ پیش‌فرض» هر گزینه رو به مقدار اولش برمی‌گردونه.
+      </p>
+      <div class="savebar"><button type="submit" class="block" id="savebtn">💾 ذخیره‌ی تغییرات</button></div>
     </form>
-    <p><small class="muted">توکن ربات، کلید پنل اصلی (CONFIG_KEY) و اطلاعات دیتابیس عمداً از پنل قابل تغییر نیستند؛ اون‌ها فقط باید تو Environment سرور باشن.</small></p>
+    <p><small class="muted">توکن ربات، کلیدها و اطلاعات دیتابیس عمداً اینجا نیستن؛ از بخش «متغیرهای محیطی» یا Environment سرور تنظیم می‌شن.</small></p>
+    {js}
     """
     return render_page("تنظیمات ربات", "settings", content)
 
@@ -3056,11 +3458,48 @@ def settings_page():
 def toggle_maintenance():
     if get_setting("maintenance", "0") == "1":
         delete_setting("maintenance")
-        flash("حالت تعمیر خاموش شد؛ ربات به حالت عادی برگشت.")
+        on, msg = False, "حالت تعمیر خاموش شد؛ ربات به حالت عادی برگشت."
     else:
         set_setting("maintenance", "1")
-        flash("حالت تعمیر روشن شد؛ کاربران فقط پیام تعمیر می‌بینند (ادمین مجاز است).")
+        on, msg = True, "حالت تعمیر روشن شد؛ کاربران فقط پیام تعمیر می‌بینند (ادمین مجاز است)."
+    if request.form.get("ajax"):
+        return _ajax_json(True, msg, on)
+    flash(msg)
     return redirect(url_for("settings_page"))
+
+
+@app.route("/settings/toggle-config/<key>", methods=["POST"])
+@login_required
+def toggle_config(key):
+    if key not in TOGGLE_DEFAULTS:
+        if request.form.get("ajax"):
+            return _ajax_json(False, "گزینه‌ی نامعتبر")
+        return redirect(url_for("settings_page"))
+    now_on = get_setting(key, TOGGLE_DEFAULTS[key]) != "1"
+    set_setting(key, "1" if now_on else "0")
+    title = _help_for(key)[0]
+    msg = f"«{title}» " + ("روشن شد." if now_on else "خاموش شد.")
+    if request.form.get("ajax"):
+        return _ajax_json(True, msg, now_on)
+    flash(msg)
+    return redirect(url_for("settings_page"))
+
+
+@app.route("/settings/toggle/<key>", methods=["POST"])
+@login_required
+def toggle_setting(key):
+    if key not in FEATURES:
+        if request.form.get("ajax"):
+            return _ajax_json(False, "گزینه‌ی نامعتبر")
+        return redirect(url_for("settings_page"))
+    now_on = get_setting(key, "1") != "1"
+    set_setting(key, "1" if now_on else "0")
+    msg = f"«{FEATURES[key]}» " + ("روشن شد." if now_on else "خاموش شد.")
+    if request.form.get("ajax"):
+        return _ajax_json(True, msg, now_on)
+    flash(msg)
+    return redirect(url_for("settings_page"))
+
 
 
 # ---------- فروشنده‌ها (ورود با نام کاربری و رمز) ----------
@@ -3706,28 +4145,6 @@ def save_config():
 
     flash(f"تنظیمات ذخیره شد ({saved} تغییر، {reset} برگشت به پیش‌فرض).")
     return redirect(url_for("settings_page"))
-
-
-@app.route("/settings/toggle-config/<key>", methods=["POST"])
-@login_required
-def toggle_config(key):
-    if key in TOGGLE_DEFAULTS:
-        current = get_setting(key, TOGGLE_DEFAULTS[key])
-        set_setting(key, "0" if current == "1" else "1")
-        flash("وضعیت تغییر کرد: " + ("روشن شد." if current != "1" else "خاموش شد."))
-    return redirect(url_for("settings_page"))
-
-
-@app.route("/settings/toggle/<key>", methods=["POST"])
-@login_required
-def toggle_setting(key):
-    if key in FEATURES:
-        current = get_setting(key, "1")
-        set_setting(key, "0" if current == "1" else "1")
-        flash(f"وضعیت «{FEATURES[key]}» تغییر کرد.")
-    return redirect(url_for("settings_page"))
-
-
 
 
 @app.route("/appearance")
@@ -4899,6 +5316,23 @@ NAV[2][1].append(("donito", "مانیتور دونیتو", "donito_page"))
 NAV[2][1].append(("plans", "بسته‌های آماده", "plans_page"))
 NAV[2][1].append(("alerts", "هشدار انقضا و حجم", "alerts_page"))
 NAV[3][1].append(("envvars", "متغیرهای محیطی", "env_page"))
+
+# 🧭 منوی جدید: همه‌ی بخش‌ها بر اساس «کار» دسته‌بندی شدن (جایگزین NAV قبلی که بخش‌ها ته گروه‌ها چسبونده شده بودن)
+NAV = [
+    ("📊 نمای کلی", [("dashboard", "داشبورد", "dashboard")]),
+    ("👥 مشتریان", [("users", "کاربران", "users"), ("orders", "سفارش‌ها", "orders_page"),
+                   ("tickets", "تیکت‌ها", "tickets"), ("resellers", "فروشنده‌ها", "resellers_page")]),
+    ("💰 فروش و مالی", [("finance", "مرکز مالی", "finance_page"), ("topups", "شارژهای کیف پول", "topups_page"),
+                       ("crypto", "رمزارزها", "crypto_page"), ("donito", "مانیتور دونیتو", "donito_page"),
+                       ("plans", "بسته‌های آماده", "plans_page"), ("discounts", "کدهای تخفیف", "discount_codes")]),
+    ("📣 ارتباط با کاربران", [("broadcast", "پیام همگانی", "broadcast"), ("channels", "کانال‌ها و پست", "channels_page"),
+                            ("salenotify", "اعلان فروش", "sale_notify_page"), ("alerts", "هشدار انقضا و حجم", "alerts_page")]),
+    ("🤖 ظاهر و تنظیم ربات", [("settings", "تنظیمات ربات", "settings_page"), ("texts", "متن‌های ربات", "texts_page"),
+                             ("appearance", "دکمه‌ها و ظاهر", "appearance_page"), ("custombtn", "دکمه‌های سفارشی", "custom_buttons_page")]),
+    ("🛠 سیستم", [("backup", "بکاپ و خروجی", "backup_page"), ("envvars", "متغیرهای محیطی", "env_page")]),
+]
+BOTTOM = [("dashboard", "داشبورد", "dashboard"), ("users", "کاربران", "users"),
+          ("tickets", "تیکت‌ها", "tickets"), ("settings", "تنظیمات", "settings_page")]
 ICONS["plans"] = '<path d="M21 8l-9-5-9 5 9 5 9-5z"/><path d="M3 8v8l9 5 9-5V8"/>'
 ICONS["alerts"] = '<path d="M18 8a6 6 0 0 0-12 0c0 7-3 9-3 9h18s-3-2-3-9"/><path d="M13.7 21a2 2 0 0 1-3.4 0"/>'
 ICONS["envvars"] = '<path d="M4 6h16M4 12h16M4 18h10"/><circle cx="18" cy="18" r="2"/>'
@@ -5391,27 +5825,36 @@ def plans_act():
 @login_required
 def alerts_page():
     st = get_all_settings()
-    on = st.get("alerts_enabled", "1") == "1"
-    exp_notice = st.get("alert_expired_notice", "1") == "1"
+
+    def sw(name, default, title, desc):
+        on = st.get(name, default) == "1"
+        return (f'<div class="set"><div class="set-main"><div class="set-title"><b>{title}</b></div>'
+                f'<div class="set-desc"><span>📌 تأثیر در ربات:</span> {desc}</div></div>'
+                f'<div class="set-ctl"><label class="zero-sw"><input type="checkbox" name="{name}" value="1"{" checked" if on else ""}> '
+                f'<span>فعال باشه</span></label></div></div>')
+
+    def num(name, default, title, desc, lo, hi, unit):
+        return (f'<div class="set"><div class="set-main"><div class="set-title"><b>{title}</b></div>'
+                f'<div class="set-desc"><span>📌 تأثیر در ربات:</span> {desc}</div></div>'
+                f'<div class="set-ctl"><div class="numbox"><input type="number" name="{name}" min="{lo}" max="{hi}" '
+                f'value="{esc(st.get(name, default))}"><span class="unit">{unit}</span></div></div></div>')
+
     content = f"""
     <form method="post" action="{url_for('alerts_save')}">
-      <div class="card">
-        <label style="display:flex;gap:8px;align-items:center;"><input type="checkbox" name="alerts_enabled" value="1"{' checked' if on else ''}> <b>⏰ هشدارهای انقضا و حجم فعال باشه</b></label>
-        <label style="display:flex;gap:8px;align-items:center;margin-top:12px;"><input type="checkbox" name="alert_expired_notice" value="1"{' checked' if exp_notice else ''}> وقتی کانفیگ منقضی شد هم پیام بده (فقط برای منقضی‌های ۲ روز اخیر)</label>
-        <label style="margin-top:12px;">چند روز مونده به انقضا هشدار بره؟</label>
-        <input type="number" name="alert_expiry_days" min="1" max="60" value="{esc(st.get('alert_expiry_days', '3'))}">
-        <label style="margin-top:12px;">هشدار حجم وقتی چند درصد مصرف شد؟</label>
-        <input type="number" name="alert_volume_percent" min="1" max="99" value="{esc(st.get('alert_volume_percent', '90'))}">
-        <label style="margin-top:12px;">هر چند دقیقه یک‌بار بررسی بشه؟ (حداقل ۵)</label>
-        <input type="number" name="alert_interval_min" min="5" max="1440" value="{esc(st.get('alert_interval_min', '30'))}">
-        <hr style="margin:18px 0;border:0;border-top:1px solid var(--border,#ddd);">
-        <label style="display:flex;gap:8px;align-items:center;"><input type="checkbox" name="nudge_trial_enabled" value="1"{' checked' if st.get('nudge_trial_enabled', '1') == '1' else ''}> <b>👋 یادآوری به کسی که تست گرفته و نخریده (فقط یک‌بار)</b></label>
-        <label style="margin-top:12px;">چند ساعت بعد از گرفتن تست پیام بره؟</label>
-        <input type="number" name="nudge_trial_hours" min="1" max="168" value="{esc(st.get('nudge_trial_hours', '48'))}">
-        <div style="margin-top:14px;"><button type="submit">💾 ذخیره</button></div>
+      <div class="card sec"><h3>⏰ هشدار انقضا و حجم</h3>
+        {sw("alerts_enabled", "1", "هشدارهای انقضا و حجم", "روشن: ربات خودش به کاربر پیام می‌ده که کانفیگش داره تموم می‌شه (زمان یا حجم). خاموش: هیچ هشداری فرستاده نمی‌شه.")}
+        {num("alert_expiry_days", "3", "هشدار انقضا چند روز قبل؟", "وقتی از مدت کانفیگ فقط این تعداد روز مونده باشه، یه‌بار پیام «به‌زودی تموم می‌شه» برای کاربر می‌ره.", 1, 60, "روز مانده")}
+        {num("alert_volume_percent", "90", "هشدار حجم در چند درصد مصرف؟", "وقتی مصرف کاربر به این درصد از حجمش برسه یه‌بار پیام «حجمت داره تموم می‌شه» می‌ره.", 1, 99, "درصد مصرف")}
+        {sw("alert_expired_notice", "1", "پیام بعد از انقضا", "روشن: وقتی کانفیگ منقضی شد هم یه پیام می‌ره (فقط برای منقضی‌های ۲ روز اخیر، تا روی کانفیگ‌های قدیمی اسپم نشه).")}
+        {num("alert_interval_min", "30", "هر چند دقیقه یک‌بار بررسی بشه؟", "ربات هر چند دقیقه کانفیگ‌ها رو برای هشدار بررسی می‌کنه. عدد کمتر = دقیق‌تر ولی فشار بیشتر (حداقل ۵).", 5, 1440, "دقیقه")}
       </div>
+      <div class="card sec"><h3>👋 یادآوری به کسی که تست گرفته و نخریده</h3>
+        {sw("nudge_trial_enabled", "1", "یادآوری بعد از تست رایگان", "روشن: کسی که تست رایگان گرفته ولی هنوز نخریده، یه‌بار پیام تشویقی به خرید می‌گیره.")}
+        {num("nudge_trial_hours", "48", "چند ساعت بعد از گرفتن تست پیام بره؟", "فاصله‌ی بین گرفتن تست و فرستادن پیام یادآوری.", 1, 168, "ساعت")}
+      </div>
+      <div class="savebar"><button type="submit" class="block">💾 ذخیره</button></div>
     </form>
-    <div class="card"><small class="muted">هر هشدار برای هر کانفیگ فقط یک‌بار فرستاده می‌شه و بعد از تمدید دوباره مجازه. کانفیگ‌های تست رایگان و متوقف‌شده هشدار نمی‌گیرن. پیام «حجم تموم شد» هم جداست. متن هشدارها از صفحه‌ی «متن‌های ربات» قابل ویرایشه.</small></div>"""
+    <div class="card"><small class="muted">هر هشدار برای هر کانفیگ فقط یک‌بار فرستاده می‌شه و بعد از تمدید دوباره مجازه. کانفیگ‌های تست رایگان و متوقف‌شده هشدار نمی‌گیرن. پیام «حجم تموم شد» جداست. متن هشدارها از صفحه‌ی «متن‌های ربات» قابل ویرایشه.</small></div>"""
     return render_page("هشدارها و یادآوری‌ها", "alerts", content)
 
 
