@@ -72,6 +72,9 @@ CONFIG_GROUPS = [
         ("donito_poll_sec", "هر چند ثانیه یک‌بار دونیت‌ها چک بشن (حداقل ۱۰)", "20", "number"),
         ("crypto_auto_confirm", "تأیید خودکار واریز رمزارز||روشن باشه: کاربر مقدار واریزی (مثلاً 0.2 TON) رو تو بات می‌نویسه؛ اگه همون مقدار (با اختلاف خیلی کم) تو حساب نوبیتکس خودت پیدا بشه، یا هشی که کاربر می‌فرسته با یه واریز بخوره و کوین/مقدارش درست باشه، شارژ خودکار تأیید می‌شه. اگه چند کاربر مقدار هم‌اندازه اعلام کنن، فقط با هش یا تأیید دستی ادمین. بات هیچ‌وقت خودش رد نمی‌کنه؛ رد کردن فقط با ادمینه", "0", "toggle"),
         ("crypto_max_shortfall_toman", "حداکثر کسریِ مجاز واریز رمزارز نسبت به مقدار مورد انتظار (تومان). مثلاً 6000 یعنی تا ۶ هزار تومان کمتر هم خودکار تأیید می‌شه", "6000", "number"),
+        ("crypto_margin_percent", "حاشیه‌ی اطمینان قیمت رمزارز (درصد، 0 تا 20) — این درصد از قیمت نوبیتکس کم می‌شه تا اگه قیمت تا لحظه‌ی واریز افت کرد ضرر نکنی. 0 = بدون حاشیه", "1", "float"),
+        ("crypto_match_tolerance_percent", "اختلاف مجاز تطبیق خودکار واریز رمزارز (درصد، 0 تا 50) — مقدار واریزی کاربر تا این درصد با مقدار اعلام‌شده فرق داشته باشه، هنوز تطبیق داده می‌شه", "1", "float"),
+        ("crypto_round_max_over_percent", "حداکثر اضافه‌پرداخت بابت گرد کردن مقدار کوین (درصد، 0 تا 100) — مقدار کوین به بالا و با ۲ رقم اعشار گرد می‌شه؛ اگه این گرد کردن کاربر رو بیشتر از این درصد اضافه‌پرداخت کنه (مثل بیت‌کوین)، اعشار بیشتری (تا ۸ رقم) استفاده می‌شه", "5", "float"),
         ("topup_multiplier", "ضریب واریزی (مثلاً 2 یعنی دو برابر مبلغ واریزی به کیف پول اضافه شود)", "1", "float"),
     ]),
     ("🧪 تست رایگان و خرید", [
@@ -94,7 +97,20 @@ CONFIG_GROUPS = [
         ("referral_reward_inviter", "پاداش دعوت‌کننده — به کیف پولش اضافه می‌شه (تومان)", "10000", "number"),
         ("referral_reward_invitee", "هدیه‌ی کاربر دعوت‌شده — به کیف پول خودش اضافه می‌شه (تومان؛ 0 = بدون هدیه)", "0", "number"),
         ("referral_require_channel", "پاداش فقط بعد از عضویت کاربر دعوت‌شده در کانال(های) اجباری||روشن باشه: تا وقتی کاربر دعوت‌شده عضو همه‌ی کانال‌های عضویت اجباری نشده، به دعوت‌کننده پاداشی داده نمی‌شه؛ بعد از عضویت و اولین بار که شرط پاداش پیش بیاد پرداخت می‌شه. اگه عضویت اجباری خاموش یا بدون کانال باشه، شرطی اعمال نمی‌شه", "1", "toggle"),
+        ("referral_allow_existing", "کاربر قدیمی هم با لینک دعوت «دعوت‌شده» حساب بشه||خاموش (پیشنهادی) = کسی که قبلاً تو ربات بوده با لینک دعوت پاداشی نمی‌سازه (جلوی سوءاستفاده با چند اکانت). روشن = کاربر قدیمی هم می‌تونه دعوت‌شده حساب بشه", "0", "toggle"),
+        ("referral_min_purchase", "حداقل مبلغ خرید برای پرداخت پاداش دعوت (تومان) — خریدِ کمتر از این پاداش نمی‌سازه؛ جلوی حساب‌های جعلی با خرید ناچیز رو می‌گیره", "20000", "number"),
         ("referral_on_join", "پرداخت پاداش به‌محض ورود کاربر دعوت‌شده||خاموش = بعد از اولین خرید کاربر دعوت‌شده؛ روشن = به‌محض ورود به ربات", "0", "toggle"),
+    ]),
+    ("🚦 محدودیت‌ها و ضد اسپم (بدون نیاز به ری‌استارت)", [
+        ("rate_limit_count", "حداکثر تعداد پیام/دکمه‌ی هر کاربر در بازه‌ی زیر؛ بیشتر از این نادیده گرفته می‌شه (0 = بدون محدودیت). ادمین مستثناست", "30", "number"),
+        ("rate_limit_window", "طول بازه‌ی محدودیت بالا (ثانیه، حداقل 1) — مثلاً 30 پیام در 60 ثانیه", "60", "number"),
+        ("extend_min_gb", "حداقل حجم هر تمدید (گیگ — اعشاری مجاز). جلوی تمدید تقریباً رایگان با حجم خیلی کم رو می‌گیره، چون قیمت فقط از حجم حساب می‌شه", "1", "float"),
+        ("buy_max_gb", "سقف حجم هر خرید/تمدید (گیگ)", "100000", "number"),
+        ("buy_max_days", "سقف مدت هر خرید/تمدید (روز)", "3650", "number"),
+        ("max_configs_per_user", "حداکثر تعداد کانفیگ هر کاربر — شامل تست رایگان؛ وقتی پر شد خرید جدید بسته می‌شه تا یکی حذف کنه (0 = بدون محدودیت)", "0", "number"),
+        ("topup_max_amount", "حداکثر مبلغ هر درخواست شارژ (تومان؛ 0 = بدون محدودیت)", "0", "number"),
+        ("ticket_max_open", "حداکثر تعداد تیکتِ باز و بدون پاسخ برای هر کاربر (0 = بدون محدودیت)", "3", "number"),
+        ("ticket_max_chars", "حداکثر طول پیام تیکت پشتیبانی (کاراکتر؛ 0 = بدون محدودیت)", "1500", "number"),
     ]),
     ("📲 لینک‌های دانلود اپ", [
         ("app_link_android", "لینک اندروید", os.getenv("APP_LINK_ANDROID", "https://play.google.com/store/apps/details?id=com.v2pro.client"), "url"),
@@ -425,13 +441,63 @@ def get_dashboard_stats():
 
 
 @with_db_retry
-def update_wallet(user_id, amount):
+def update_wallet(user_id, amount, reason=""):
     conn = get_conn()
     c = conn.cursor()
     c.execute("INSERT OR IGNORE INTO users (user_id, wallet) VALUES (?, ?)", (user_id, 0))
     c.execute("UPDATE users SET wallet = wallet + ? WHERE user_id=?", (amount, user_id))
+    try:   # لاگ تغییر موجودی (جدول wallet_log مشترک با بات)؛ هیچ‌وقت نباید عملیات اصلی رو خراب کنه
+        c.execute("SELECT wallet FROM users WHERE user_id=?", (user_id,))
+        row = c.fetchone()
+        c.execute("INSERT INTO wallet_log (user_id, delta, balance_after, reason, created_at) VALUES (?, ?, ?, ?, ?)",
+                  (user_id, int(amount), int(row[0]) if row else None, reason or "", datetime.now().isoformat()))
+    except Exception as e:
+        print("⚠️ ثبت wallet_log انجام نشد:", e)
     conn.commit()
     conn.close()
+
+
+@with_db_retry
+def ensure_wallet_tables():
+    """جدول‌های لاگ کیف پول و استفاده‌ی کد تخفیف (هم‌نام و هم‌ساختار با init_db بات)."""
+    conn = get_conn()
+    c = conn.cursor()
+    c.execute("""CREATE TABLE IF NOT EXISTS wallet_log (
+        id INTEGER PRIMARY KEY AUTOINCREMENT, user_id INTEGER, delta INTEGER,
+        balance_after INTEGER, reason TEXT, created_at TEXT)""")
+    try:
+        c.execute("CREATE INDEX IF NOT EXISTS idx_wallet_log_user ON wallet_log (user_id, id)")
+    except Exception:
+        pass
+    c.execute("""CREATE TABLE IF NOT EXISTS discount_uses (
+        code TEXT, user_id INTEGER, used_at TEXT, PRIMARY KEY (code, user_id))""")
+    conn.commit()
+    conn.close()
+
+
+@with_db_retry
+def get_wallet_log(user_id, limit=20):
+    conn = get_conn()
+    c = conn.cursor()
+    c.execute("SELECT delta, balance_after, reason, created_at FROM wallet_log WHERE user_id=? ORDER BY id DESC LIMIT ?",
+              (user_id, limit))
+    rows = c.fetchall()
+    conn.close()
+    return rows
+
+
+def wallet_reason_label(reason):
+    r = str(reason or "")
+    if r.startswith("topup_approved_") or r.startswith("panel_topup_approved_"):
+        return "💠 شارژ تاییدشده (#" + r.rsplit("_", 1)[-1] + ")"
+    labels = {
+        "purchase": "🛍 خرید کانفیگ", "extend": "🔄 تمدید کانفیگ",
+        "refund_failed_purchase": "↩️ برگشت پول (خرید ناموفق)", "refund_extend_failed": "↩️ برگشت پول (تمدید ناموفق)",
+        "refund_delete_config": "🗑 بازگشت وجه حذف کانفیگ", "referral_inviter": "🎁 پاداش دعوت",
+        "referral_invitee": "🎁 هدیه‌ی دعوت‌شده", "admin_panel_adjust": "🛠 تغییر دستی از پنل",
+        "admin_panel_refund": "🛠 بازگشت وجه از پنل",
+    }
+    return labels.get(r, r or "—")
 
 
 @with_db_retry
@@ -510,6 +576,10 @@ def delete_discount_code(code):
     conn = get_conn()
     c = conn.cursor()
     c.execute("DELETE FROM discount_codes WHERE code=?", (code,))
+    try:
+        c.execute("DELETE FROM discount_uses WHERE code=?", (code,))
+    except Exception:
+        pass
     conn.commit()
     conn.close()
 
@@ -613,6 +683,7 @@ def ensure_schema():
         except Exception:
             pass
         ensure_discount_table()
+        ensure_wallet_tables()
         _schema_ready = ok
 
 
@@ -1046,7 +1117,7 @@ def panel_approve_topup(req_id):
     credited = int(round((amount or 0) * multiplier))
     if not claim_topup(req_id, "approved"):
         return False, "این درخواست همین الان جای دیگه (مثلاً تو بات) بررسی شد."
-    update_wallet(user_id, credited)
+    update_wallet(user_id, credited, f"panel_topup_approved_{req_id}")
     try:
         mark_deposit_used(matched_tx, req_id)
     except Exception as e:
@@ -2245,6 +2316,26 @@ def user_detail(user_id):
         <button type="submit" class="{'' if is_b else 'danger'}">{'✅ آزاد کردن کاربر' if is_b else '⛔ مسدود کردن کاربر'}</button>
       </form></div>"""
 
+    wl_rows = ""
+    try:
+        for _d, _bal, _reason, _ts in get_wallet_log(user_id, 20):
+            _d = int(_d or 0)
+            wl_rows += f"""
+        <tr>
+          <td data-label="زمان"><small class="muted">{fmt_dt(_ts)}</small></td>
+          <td data-label="دلیل">{esc(wallet_reason_label(_reason))}</td>
+          <td data-label="تغییر" class="num" style="color:{'#1a9e5c' if _d >= 0 else '#d64545'};">{'+' if _d >= 0 else '−'}{abs(_d):,}</td>
+          <td data-label="موجودی بعدش" class="num">{'' if _bal is None else format(int(_bal), ',')}</td>
+        </tr>"""
+    except Exception as e:
+        print("⚠️ خوندن wallet_log ناموفق:", e)
+    wallet_log_card = f"""
+    <h3>🧾 تاریخچه‌ی کیف پول (۲۰ تغییر آخر)</h3>
+    <table class="rt">
+      <thead><tr><th>زمان</th><th>دلیل</th><th>تغییر (تومان)</th><th>موجودی بعدش</th></tr></thead>
+      <tbody>{wl_rows if wl_rows else '<tr><td colspan="4">هنوز تغییری ثبت نشده (لاگ از نسخه‌ی جدید بات شروع شده).</td></tr>'}</tbody>
+    </table>"""
+
     trial_count, trial_last = get_trial_info(user_id)
     trial_card = f"""
     <div class="card"><h3>🧪 تست رایگان</h3>
@@ -2295,6 +2386,7 @@ def user_detail(user_id):
       <thead><tr><th>اسم</th><th>نوع</th><th>حجم</th><th>مدت</th><th>مبلغ</th><th>تاریخ ساخت</th><th>وضعیت</th></tr></thead>
       <tbody>{cfg_rows if cfg_rows else '<tr><td colspan="7">این کاربر هنوز کانفیگی نخریده.</td></tr>'}</tbody>
     </table>
+    {wallet_log_card}
     """
     return render_page(f"کاربر {user_id}", "users", content)
 
@@ -2313,7 +2405,7 @@ def adjust_wallet():
     if current is None:
         flash("⚠️ کاربر پیدا نشد.")
     else:
-        update_wallet(user_id, amount * sign)
+        update_wallet(user_id, amount * sign, "admin_panel_adjust")
         flash(f"موجودی کاربر {user_id} به مقدار {amount:,} تومان {'افزایش' if sign > 0 else 'کاهش'} یافت.")
     return redirect(back)
 
@@ -3592,6 +3684,10 @@ def save_config():
             value = value.lower()
         if key == "bot_username":
             value = value.lstrip("@")
+        _ranges = {"crypto_margin_percent": 20, "crypto_match_tolerance_percent": 50, "crypto_round_max_over_percent": 100}
+        if key in _ranges and float(value) > _ranges[key]:
+            flash(f"⚠️ «{label}»: باید بین 0 و {_ranges[key]} باشه — ذخیره نشد.")
+            continue
         if key == "trial_gb" and float(value) <= 0:
             flash(f"⚠️ «{label}»: باید بزرگ‌تر از صفر باشه — ذخیره نشد.")
             continue
@@ -4020,6 +4116,7 @@ def discount_codes():
         """
 
     content = f"""
+    <div class="panel"><small class="muted">🔒 هر کاربر هر کد تخفیف را فقط یک‌بار می‌تواند استفاده کند؛ «مصرف» تعداد کاربرانی است که کد را به‌کار برده‌اند. اگر خریدِ کسی ناموفق شود، استفاده‌اش برمی‌گردد.</small></div>
     <div class="panel">
       <form method="post" action="{url_for('create_discount')}" class="flex">
         <input type="text" name="code" placeholder="کد (مثل SUMMER20)" style="width:160px;" required>
@@ -4637,7 +4734,7 @@ def user_config_action(user_id, rid, action):
         db_run("DELETE FROM user_configs WHERE id=?", (rid,))
         refund = to_int(request.form.get("refund"), 0) or 0
         if refund > 0:
-            update_wallet(user_id, refund)
+            update_wallet(user_id, refund, "admin_panel_refund")
         flash("کانفیگ حذف شد" + (f" و {refund:,} تومان به کیف پول برگشت." if refund > 0 else "."))
         if not r["success"]:
             flash("⚠️ توجه: روی پنل اصلی حذف نشد: " + r["error"])

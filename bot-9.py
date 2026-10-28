@@ -13,6 +13,7 @@ import getpass
 import glob
 import inspect
 import queue
+from collections import deque
 import turso_serverless
 import secrets
 import hashlib
@@ -31,6 +32,32 @@ if not TOKEN:
 BASE_URL = "https://api.splus.ir/bot" + TOKEN
 CONFIG_API = os.getenv("CONFIG_API", "https://su.randomatic.ir/api/v1/configs")
 CONFIG_KEY = os.getenv("CONFIG_KEY", "").strip()
+
+
+# --- جلوگیری از لو رفتن توکن/کلیدها تو لاگ ---
+# متن خطای کتابخونه‌ی requests معمولاً کل URL درخواست رو داره و URL بات شامل توکنه
+# (https://api.splus.ir/bot<TOKEN>/getUpdates). هر print تو این فایل از این تابع رد می‌شه
+# و هر مقدار حساسی که تو متن باشه با *** عوض می‌شه.
+_orig_print = builtins.print
+_SECRET_GLOBALS = ('TOKEN', 'CONFIG_KEY', 'TURSO_AUTH_TOKEN', 'SELLER_API_KEY',
+                   'NOBITEX_API_KEY', 'NOBITEX_API_SECRET')
+
+
+def _mask_secrets(text):
+    g = globals()
+    for name in _SECRET_GLOBALS:
+        val = g.get(name)
+        if isinstance(val, str) and len(val) >= 8 and val in text:
+            text = text.replace(val, '***')
+    return text
+
+
+def print(*args, **kwargs):
+    try:
+        args = tuple(_mask_secrets(a if isinstance(a, str) else str(a)) for a in args)
+    except Exception:
+        pass
+    _orig_print(*args, **kwargs)
 
 # آدرس پنل فروشندگی (فقط وقتی سرویس خودش آدرس نداده، به‌عنوان جایگزین نشون داده می‌شه)
 RESELLER_PANEL_URL = os.getenv("RESELLER_PANEL_URL", "https://just-reseller-panel-six.vercel.app/")
@@ -219,6 +246,45 @@ def get_default_days():
     return max(1, _setting_int('default_days', 30))
 
 
+# --- محدودیت‌های قابل‌تنظیم از پنل (بدون ری‌استارت). عدد 0 یعنی «بدون محدودیت» (مگر جایی که ذکر شده) ---
+def get_rate_limit_count():
+    """حداکثر تعداد آپدیت (پیام/دکمه) یک کاربر غیرادمین تو هر بازه؛ 0 = خاموش."""
+    return max(0, _setting_int('rate_limit_count', 30))
+
+
+def get_rate_limit_window():
+    return max(1, _setting_int('rate_limit_window', 60))
+
+
+def get_extend_min_gb():
+    """حداقل حجم هر تمدید (گیگ). جلوی تمدید تقریباً رایگان با حجم خیلی کم (مثلاً 0.0001) رو می‌گیره."""
+    return max(0.0, _setting_float('extend_min_gb', 1.0))
+
+
+def get_buy_max_gb():
+    return max(1, _setting_int('buy_max_gb', 100000))
+
+
+def get_buy_max_days():
+    return max(1, _setting_int('buy_max_days', 3650))
+
+
+def get_max_configs_per_user():
+    return max(0, _setting_int('max_configs_per_user', 0))
+
+
+def get_topup_max_amount():
+    return max(0, _setting_int('topup_max_amount', 0))
+
+
+def get_ticket_max_open():
+    return max(0, _setting_int('ticket_max_open', 3))
+
+
+def get_ticket_max_chars():
+    return max(0, _setting_int('ticket_max_chars', 1500))
+
+
 def get_app_links():
     return [(k, get_setting('app_link_' + k, d) or d) for k, d in APP_LINK_DEFAULTS]
 
@@ -277,6 +343,7 @@ UI_TEXT = {
         'discount_invalid': '❌ کد تخفیف نامعتبر است.',
         'discount_inactive': '⛔ این کد تخفیف غیرفعال شده است.',
         'discount_capacity': '⚠️ ظرفیت استفاده از این کد تخفیف تمام شده است.',
+        'discount_already_used': '⚠️ شما قبلاً از این کد تخفیف استفاده کرده‌اید؛ هر کد فقط یک‌بار برای هر کاربر قابل استفاده است.',
         'building_config': '⏳ در حال ساخت کانفیگ، لطفاً شکیبا باشید...',
         'insufficient_balance': (
             '⚠️ <b>موجودی کیف پول شما کافی نیست.</b>\n{divider}\n'
@@ -341,6 +408,11 @@ UI_TEXT = {
         'ext_ask_gb': '➕ چند گیگابایت به این کانفیگ اضافه شود؟ (فقط عدد ارسال کنید)',
         'ext_ask_days': '⏳ چند روز به مدت اعتبار اضافه شود؟ (فقط عدد ارسال کنید)',
         'ext_number_error': '⚠️ عددی بزرگ‌تر از صفر وارد کنید.',
+        'ext_min_gb_error': '⚠️ حداقل حجم هر تمدید {min_gb} گیگ است.',
+        'topup_max_error': '⚠️ حداکثر مبلغ هر شارژ {max_topup} تومان است.',
+        'support_ticket_too_long': '⚠️ پیام شما خیلی طولانی است؛ حداکثر {max_chars} کاراکتر مجاز است. لطفاً کوتاه‌تر بنویسید.',
+        'support_ticket_limit_open': '⚠️ شما همین الان {max_open} تیکت بازِ بدون پاسخ دارید؛ لطفاً تا پاسخ پشتیبانی صبر کنید.',
+        'svc_limit_reached': '⚠️ حداکثر تعداد کانفیگ مجاز برای هر کاربر ({max_configs}) تکمیل شده است. برای خرید جدید، یکی از کانفیگ‌ها را حذف کنید.',
         'ext_confirm_title': (
             '🧾 <b>تایید تمدید کانفیگ</b>\n{divider}\n'
             '🏷 نام: <b>{label}</b>\n'
@@ -558,6 +630,7 @@ UI_TEXT = {
         'discount_invalid': '❌ Invalid discount code.',
         'discount_inactive': '⛔ This discount code has been deactivated.',
         'discount_capacity': '⚠️ This discount code has reached its usage limit.',
+        'discount_already_used': '⚠️ You have already used this discount code; each code can be used once per user.',
         'building_config': '⏳ Building your config, please wait...',
         'insufficient_balance': (
             '⚠️ <b>Your wallet balance is insufficient.</b>\n{divider}\n'
@@ -622,6 +695,11 @@ UI_TEXT = {
         'ext_ask_gb': '➕ How many GB should be added to this config? (send a number only)',
         'ext_ask_days': '⏳ How many days should be added to the validity period? (send a number only)',
         'ext_number_error': '⚠️ Please enter a number greater than zero.',
+        'ext_min_gb_error': '⚠️ The minimum extension size is {min_gb} GB.',
+        'topup_max_error': '⚠️ The maximum amount per top-up is {max_topup} Toman.',
+        'support_ticket_too_long': '⚠️ Your message is too long; the maximum is {max_chars} characters. Please shorten it.',
+        'support_ticket_limit_open': '⚠️ You already have {max_open} unanswered open tickets; please wait for support to reply.',
+        'svc_limit_reached': '⚠️ You have reached the maximum number of configs per user ({max_configs}). Delete one to buy a new one.',
         'ext_confirm_title': (
             '🧾 <b>Confirm Config Extension</b>\n{divider}\n'
             '🏷 Name: <b>{label}</b>\n'
@@ -1467,6 +1545,26 @@ def init_db():
         active INTEGER DEFAULT 1,
         created_at TEXT
     )''')
+    # لاگ هر تغییر موجودی کیف پول (برای ردیابی سوءاستفاده/اختلاف حساب)
+    c.execute('''CREATE TABLE IF NOT EXISTS wallet_log (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        user_id INTEGER,
+        delta INTEGER,
+        balance_after INTEGER,
+        reason TEXT,
+        created_at TEXT
+    )''')
+    try:
+        c.execute('CREATE INDEX IF NOT EXISTS idx_wallet_log_user ON wallet_log (user_id, id)')
+    except Exception:
+        pass
+    # هر کاربر هر کد تخفیف رو فقط یک‌بار می‌تونه استفاده کنه (کلید ترکیبی code+user_id)
+    c.execute('''CREATE TABLE IF NOT EXISTS discount_uses (
+        code TEXT,
+        user_id INTEGER,
+        used_at TEXT,
+        PRIMARY KEY (code, user_id)
+    )''')
     for statement in (
         'ALTER TABLE users ADD COLUMN username TEXT',
         'ALTER TABLE users ADD COLUMN first_name TEXT',
@@ -1643,6 +1741,11 @@ def get_referral_reward_invitee():
     return _referral_int('referral_reward_invitee', 0)
 
 
+def get_referral_min_purchase():
+    """حداقل مبلغ خرید (تومان) که پاداش رفرال بعدش داده بشه؛ جلوی خریدهای چند‌صدتومانیِ الکیِ حساب‌های جعلی رو می‌گیره."""
+    return _referral_int('referral_min_purchase', 20000)
+
+
 def referral_require_channel():
     """روشن (پیش‌فرض): پاداش فقط وقتی داده می‌شه که کاربر دعوت‌شده عضو کانال(های) اجباری باشه."""
     return get_setting('referral_require_channel', '1') == '1'
@@ -1730,10 +1833,20 @@ def referral_reward_given(invitee_id):
 def save_referral_reward(invitee_id, inviter_id, inviter_amount, invitee_amount):
     conn = get_conn()
     c = conn.cursor()
-    c.execute('INSERT OR IGNORE INTO referral_rewards (invitee_id, inviter_id, inviter_amount, invitee_amount, created_at) '
-              'VALUES (?, ?, ?, ?, ?)', (invitee_id, inviter_id, inviter_amount, invitee_amount, datetime.now().isoformat()))
+    try:
+        c.execute('INSERT OR IGNORE INTO referral_rewards (invitee_id, inviter_id, inviter_amount, invitee_amount, created_at) '
+                  'VALUES (?, ?, ?, ?, ?) RETURNING invitee_id',
+                  (invitee_id, inviter_id, inviter_amount, invitee_amount, datetime.now().isoformat()))
+        won = c.fetchone() is not None
+    except Exception as e:
+        if 'stream' in str(e).lower():
+            raise
+        c.execute('INSERT OR IGNORE INTO referral_rewards (invitee_id, inviter_id, inviter_amount, invitee_amount, created_at) '
+                  'VALUES (?, ?, ?, ?, ?)', (invitee_id, inviter_id, inviter_amount, invitee_amount, datetime.now().isoformat()))
+        won = (c.rowcount or 0) > 0
     conn.commit()
     conn.close()
+    return won     # فقط تماسی که واقعاً ردیف جدید ساخته True می‌گیره → پاداش دوبار پرداخت نمی‌شه
 
 
 @with_db_retry
@@ -1766,12 +1879,14 @@ def capture_referral(update):
             return
         if get_referrer(inviter) == invitee:   # دعوت دوطرفه (A→B و B→A) حساب نمی‌شه
             return
+        if referral_user_exists(invitee) and get_setting('referral_allow_existing', '0') != '1':
+            return   # کاربرِ قدیمی نمی‌تونه با لینک دعوت «دعوت‌شده» حساب بشه (راه سوءاستفاده با چند اکانت)
         register_referred_user(invitee, inviter)
     except Exception as e:
         print('⚠️ ثبت رفرال ناموفق بود:', e)
 
 
-def process_referral_reward(invitee_id, event):
+def process_referral_reward(invitee_id, event, amount=None):
     """event: 'join' یا 'purchase'. فقط یک‌بار برای هر کاربر دعوت‌شده پاداش می‌ده."""
     try:
         if not referral_enabled():
@@ -1781,16 +1896,19 @@ def process_referral_reward(invitee_id, event):
         inviter = get_referrer(invitee_id)
         if not inviter or referral_reward_given(invitee_id):
             return
+        if event == 'purchase' and (amount is None or int(amount) < get_referral_min_purchase()):
+            return   # خرید خیلی کوچیک پاداش نمی‌سازه؛ خریدِ بزرگ‌تر بعدی هنوز می‌تونه
         if not referral_invitee_is_member(invitee_id):
             return   # هنوز عضو کانال نشده؛ بعداً که عضو شد و شرط پاداش پیش اومد پرداخت می‌شه
         a_inviter, a_invitee = get_referral_reward_inviter(), get_referral_reward_invitee()
-        save_referral_reward(invitee_id, inviter, a_inviter, a_invitee)   # اول ثبت، تا دوبار پاداش نره
+        if not save_referral_reward(invitee_id, inviter, a_inviter, a_invitee):   # اول ثبت (اتمیک)، تا دوبار پاداش نره
+            return
         if a_inviter > 0:
-            update_wallet_db(inviter, a_inviter)
+            update_wallet_db(inviter, a_inviter, 'referral_inviter')
             send_message(inviter, u(inviter, 'referral_reward_inviter_join' if event == 'join' else 'referral_reward_inviter',
                                     amount=f'{a_inviter:,}'))
         if a_invitee > 0:
-            update_wallet_db(invitee_id, a_invitee)
+            update_wallet_db(invitee_id, a_invitee, 'referral_invitee')
             send_message(invitee_id, u(invitee_id, 'referral_bonus_invitee', amount=f'{a_invitee:,}'))
     except Exception as e:
         print('⚠️ پاداش رفرال داده نشد:', e)
@@ -2182,8 +2300,13 @@ def evaluate_crypto_request(req_id):
         d = hash_hits[0]
         # هش خوردن به‌تنهایی کافی نیست (هش هر تراکنش روی بلاک‌چین عمومیه): کوین و مقدار هم باید بخونه
         fresh = d['ts'] is None or d['ts'] >= req_ts - 600     # واریز باید بعد از درخواست باشه، نه یه واریز قدیمی
-        if d['currency'] == symbol and fresh and crypto_amount_ok(d['amount'], expected, price):
+        if (d['currency'] == symbol and fresh and crypto_amount_ok(d['amount'], expected, price)
+                and d['amount'] <= expected * (1 + tol)):
             if d['confirmed']:
+                # هش هر تراکنش روی بلاک‌چین عمومیه؛ اگه درخواست معلق کاربر دیگه‌ای با همین کوین/مقدار هست، خودکار تایید نکن
+                if count_competing_crypto_requests(req_id, row[1], symbol, expected, tol) > 0:
+                    return {'state': 'ambiguous', 'deposit': d, 'expected': expected,
+                            'note': u('fa', 'admin_ce_note_competing')}
                 return {'state': 'hash_ok', 'deposit': d, 'expected': expected}
             return {'state': 'unconfirmed', 'deposit': d, 'expected': expected, 'by_hash': True}
         return {'state': 'mismatch', 'deposit': d, 'expected': expected, 'by_hash': True}
@@ -2278,7 +2401,7 @@ def approve_topup_request(req_id, auto=False, reason='hash_ok'):
         credited = int(round(req[2] * multiplier))
         if not claim_topup_pending(req_id, 'approved'):
             return False           # همزمان از پنل وب تایید/رد شد
-        update_wallet_db(req[1], credited)
+        update_wallet_db(req[1], credited, f'topup_approved_{req_id}')
         try:
             _st = user_steps.get(str(req[1])) or {}
             if _st.get('step') == 'crypto_send_hash' and _st.get('req_id') == req_id:
@@ -2517,6 +2640,8 @@ def create_donito_request(user_id, base_amount):
         for rid, uid, amt, ts in pending:
             if uid == user_id and base_amount < amt <= base_amount + 999 and time.time() - (ts or 0) < 600:
                 return rid, amt
+        if sum(1 for _, _uid, _a, _t in pending if _uid == user_id) >= 3:
+            return None, None      # جلوگیری از اشغال‌کردن همه‌ی مبلغ‌های یکتا توسط یک نفر
         taken = {amt for _, _, amt, _ in pending}
         offsets = list(range(1, 100))
         secrets.SystemRandom().shuffle(offsets)
@@ -2915,14 +3040,52 @@ def get_username_db(user_id):
     return res[0] if res else None
 
 
+def _log_wallet_change(c, user_id, delta, reason):
+    """ثبت تغییر موجودی تو wallet_log؛ هیچ‌وقت نباید عملیات اصلی رو خراب کنه."""
+    try:
+        c.execute('SELECT wallet FROM users WHERE user_id=?', (user_id,))
+        row = c.fetchone()
+        c.execute('INSERT INTO wallet_log (user_id, delta, balance_after, reason, created_at) VALUES (?, ?, ?, ?, ?)',
+                  (user_id, int(delta), int(row[0]) if row else None, reason or '', datetime.now().isoformat()))
+    except Exception as e:
+        print('⚠️ ثبت wallet_log انجام نشد:', e)
+
+
 @with_db_retry
-def update_wallet_db(user_id, amount):
+def update_wallet_db(user_id, amount, reason=''):
     conn = get_conn()
     c = conn.cursor()
     c.execute('INSERT OR IGNORE INTO users (user_id, wallet) VALUES (?, ?)', (user_id, 0))
     c.execute('UPDATE users SET wallet = wallet + ? WHERE user_id=?', (amount, user_id))
+    _log_wallet_change(c, user_id, amount, reason)
     conn.commit()
     conn.close()
+
+
+@with_db_retry
+def try_deduct_wallet_db(user_id, amount, reason=''):
+    """کسر اتمیک: فقط وقتی موجودی کافی باشه (تو خودِ UPDATE چک می‌شه، نه جدا) کم می‌کنه.
+    True = کم شد، False = موجودی کافی نبود. چک و کسر تو یک دستور SQL انجام می‌شن، پس
+    حتی اگه دو درخواست همزمان بیان، موجودی هیچ‌وقت منفی نمی‌شه و دوبار خرج نمی‌شه."""
+    amount = int(amount)
+    if amount <= 0:
+        return True
+    conn = get_conn()
+    c = conn.cursor()
+    try:
+        c.execute('UPDATE users SET wallet = wallet - ? WHERE user_id=? AND wallet >= ? RETURNING wallet',
+                  (amount, user_id, amount))
+        ok = c.fetchone() is not None
+    except Exception as e:
+        if 'returning' not in str(e).lower() and 'syntax' not in str(e).lower():
+            raise
+        c.execute('UPDATE users SET wallet = wallet - ? WHERE user_id=? AND wallet >= ?', (amount, user_id, amount))
+        ok = (getattr(c, 'rowcount', 0) or 0) > 0
+    if ok:
+        _log_wallet_change(c, user_id, -amount, reason)
+    conn.commit()
+    conn.close()
+    return ok
 
 
 @with_db_retry
@@ -3028,13 +3191,13 @@ def update_config_suburl_db(row_id, sub_url):
 
 
 @with_db_retry
-def extend_config_db(row_id, extra_gb, extra_days):
+def extend_config_db(row_id, extra_gb, extra_days, extra_price=0):
     conn = get_conn()
     c = conn.cursor()
-    c.execute('SELECT gb, days, expires_at FROM user_configs WHERE id=?', (row_id,))
+    c.execute('SELECT gb, days, expires_at, price FROM user_configs WHERE id=?', (row_id,))
     row = c.fetchone()
     if row:
-        gb, days, expires_at = row
+        gb, days, expires_at, _old_price = row
         new_gb = (gb or 0) + extra_gb
         new_days = (days or 0) + extra_days
         try:
@@ -3045,8 +3208,9 @@ def extend_config_db(row_id, extra_gb, extra_days):
         new_expires = (base + timedelta(days=extra_days)).isoformat()
         # base_gb/base_days = بسته‌ی اولیه‌ی خرید (برای «تمدید سریع با همون بسته»)؛ فقط بار اول پر می‌شه
         c.execute('UPDATE user_configs SET base_gb=COALESCE(base_gb, ?), base_days=COALESCE(base_days, ?), '
-                  'gb=?, days=?, expires_at=? WHERE id=?',
-                  (gb or 0, days or 0, new_gb, new_days, new_expires, row_id))
+                  'gb=?, days=?, expires_at=?, price=? WHERE id=?',
+                  (gb or 0, days or 0, new_gb, new_days, new_expires,
+                   (_old_price or 0) + max(0, int(extra_price or 0)), row_id))
         conn.commit()
     conn.close()
 
@@ -3054,7 +3218,10 @@ def extend_config_db(row_id, extra_gb, extra_days):
 def clean_label(text):
     """اسم کانفیگ تایپ‌شده توسط کاربر: کاراکترهای < > & حذف می‌شن تا تو پیام‌های HTML
     (فاکتور، تایید خرید، تغییر نام) مشکل پارس ایجاد نکنن. بقیه‌ی متن دست‌نخورده می‌مونه."""
-    return re.sub(r'[<>&]', '', (text or '')).strip()
+    t = re.sub(r'[<>&]', '', (text or ''))
+    t = re.sub(r'[\x00-\x1f\x7f\u2028\u2029\u200e\u200f\u202a-\u202e#?]', ' ', t)   # کنترلی/خط جدید و کاراکترهای ساب‌لینک
+    t = re.sub(r'\s+', ' ', t).strip()
+    return t[:40].strip()
 
 
 def delete_config_from_panel(config_id):
@@ -3166,6 +3333,77 @@ def get_config_usage_gb(config_id):
         return None
 
 
+def delete_config_from_panel_strict(config_id):
+    """'ok' | 'gone' (روی پنل وجود نداره) | 'fail'. فقط با ok/gone اجازه‌ی حذف از دیتابیس و بازپرداخت داریم."""
+    if not config_id:
+        return 'ok'
+    try:
+        res = SESSION.delete(CONFIG_API + '/' + str(config_id),
+                             headers={'Authorization': 'Bearer ' + CONFIG_KEY}, timeout=15)
+        if res.status_code in (200, 201, 204):
+            return 'ok'
+        if res.status_code == 404:
+            return 'gone'
+        return 'fail'
+    except Exception:
+        return 'fail'
+
+
+@with_db_retry
+def _claim_delete_config_row(user_id, row_id):
+    """اتمیک: فقط تماسی که واقعاً ردیف رو پاک کرده True می‌گیره (جلوگیری از بازپرداخت دوباره)."""
+    conn = get_conn()
+    c = conn.cursor()
+    try:
+        c.execute('DELETE FROM user_configs WHERE id=? AND user_id=? RETURNING id', (row_id, user_id))
+        won = c.fetchone() is not None
+    except Exception as e:
+        if 'stream' in str(e).lower():
+            raise
+        c.execute('DELETE FROM user_configs WHERE id=? AND user_id=?', (row_id, user_id))
+        won = (c.rowcount or 0) > 0
+    conn.commit()
+    conn.close()
+    return won
+
+
+def delete_config_with_refund(chat_id, row_id):
+    """حذف کانفیگ + بازپرداخت. مصرف همین لحظه از پنل خونده می‌شه (نه عدد قدیمیِ موقع نمایش تایید).
+    خروجی: ('ok', refund) | ('not_found', 0) | ('panel_error', 0)"""
+    cfg = get_config_row(chat_id, row_id)          # فقط کانفیگ‌های خودِ همین کاربر
+    if not cfg:
+        return 'not_found', 0
+    config_id, gb, price = cfg[2], cfg[3], (cfg[6] or 0)
+    was_paused = len(cfg) > 10 and cfg[10] == 'paused'
+    paused_now = False
+    if config_id and not was_paused:
+        try:      # اول قطعش می‌کنیم تا بین خوندن مصرف و حذف، ترافیک مصرف نشه
+            paused_now = bool(pause_config_on_panel(config_id).get('success'))
+        except Exception:
+            paused_now = False
+    refund = 0
+    used_gb = get_config_usage_gb(config_id) if config_id else None
+    if used_gb is not None and gb and price:
+        used_gb = min(max(float(used_gb), 0.0), float(gb))
+        refund = int((price - used_gb * (price / gb)) * get_refund_ratio())
+        refund = max(0, min(refund, int(price)))
+    st = delete_config_from_panel_strict(config_id)
+    if st == 'fail':
+        if paused_now:
+            try:
+                resume_config_on_panel(config_id)
+            except Exception:
+                pass
+        return 'panel_error', 0
+    if st == 'gone':
+        refund = 0            # قبلاً از پنل حذف شده؛ مصرفش قابل بررسی نیست
+    if not _claim_delete_config_row(chat_id, row_id):
+        return 'not_found', 0
+    if refund > 0:
+        update_wallet_db(chat_id, refund, 'refund_delete_config')
+    return 'ok', refund
+
+
 @with_db_retry
 def delete_config_from_db_by_index(user_id, index):
     configs = get_user_configs(user_id)
@@ -3244,6 +3482,16 @@ def user_has_purchased(user_id):
 
 
 @with_db_retry
+def count_pending_topups(user_id):
+    conn = get_conn()
+    c = conn.cursor()
+    c.execute("SELECT COUNT(*) FROM topup_requests WHERE user_id=? AND status='pending'", (user_id,))
+    row = c.fetchone()
+    conn.close()
+    return (row[0] if row else 0) or 0
+
+
+@with_db_retry
 def create_topup_request(user_id, amount, method='card', crypto_amount=None, crypto_price=None,
                          coin_symbol=None, coin_qty=None, tx_hash=None, req_ts=None):
     conn = get_conn()
@@ -3313,6 +3561,16 @@ def update_topup_status(req_id, status):
 
 
 @with_db_retry
+def count_open_tickets(user_id):
+    conn = get_conn()
+    c = conn.cursor()
+    c.execute("SELECT COUNT(*) FROM tickets WHERE user_id=? AND status='open'", (user_id,))
+    row = c.fetchone()
+    conn.close()
+    return int(row[0]) if row else 0
+
+
+@with_db_retry
 def create_ticket(user_id, message):
     conn = get_conn()
     c = conn.cursor()
@@ -3366,9 +3624,58 @@ def increment_discount_usage(code):
     conn.close()
 
 
-def validate_discount_code(code):
+@with_db_retry
+def has_user_used_discount(code, user_id):
+    conn = get_conn()
+    c = conn.cursor()
+    c.execute('SELECT 1 FROM discount_uses WHERE code=? AND user_id=?', (code.strip().upper(), user_id))
+    res = c.fetchone()
+    conn.close()
+    return res is not None
+
+
+@with_db_retry
+def claim_discount_use(code, user_id):
+    """موقع خرید، استفاده از کد رو برای این کاربر «رزرو» می‌کنه (اتمیک).
+    برمی‌گرداند: (True, None) یا (False, کلید پیام خطا). اگه خرید بعدش ناموفق شد
+    release_discount_use صدا زده می‌شه تا کد بسوزه."""
+    code = code.strip().upper()
+    conn = get_conn()
+    c = conn.cursor()
+    c.execute('INSERT OR IGNORE INTO discount_uses (code, user_id, used_at) VALUES (?, ?, ?) RETURNING code',
+              (code, user_id, datetime.now().isoformat()))
+    if c.fetchone() is None:
+        conn.commit()
+        conn.close()
+        return False, 'discount_already_used'
+    c.execute('UPDATE discount_codes SET used_count = used_count + 1 '
+              'WHERE code=? AND active=1 AND used_count < max_uses RETURNING code', (code,))
+    if c.fetchone() is None:
+        c.execute('DELETE FROM discount_uses WHERE code=? AND user_id=?', (code, user_id))
+        conn.commit()
+        conn.close()
+        return False, 'discount_capacity'
+    conn.commit()
+    conn.close()
+    return True, None
+
+
+@with_db_retry
+def release_discount_use(code, user_id):
+    code = code.strip().upper()
+    conn = get_conn()
+    c = conn.cursor()
+    c.execute('DELETE FROM discount_uses WHERE code=? AND user_id=? RETURNING code', (code, user_id))
+    if c.fetchone() is not None:
+        c.execute('UPDATE discount_codes SET used_count = MAX(0, used_count - 1) WHERE code=?', (code,))
+    conn.commit()
+    conn.close()
+
+
+def validate_discount_code(code, user_id=None):
     """برمی‌گرداند: (ok: bool, percent یا کلید ترجمه‌ی پیام خطا). کلید خطا با
-    u(chat_id, key) به متن فارسی/انگلیسی مناسب تبدیل می‌شه."""
+    u(chat_id, key) به متن فارسی/انگلیسی مناسب تبدیل می‌شه. اگه user_id داده بشه،
+    استفاده‌ی قبلی همون کاربر هم چک می‌شه (هر کاربر فقط یک‌بار)."""
     row = get_discount_code(code)
     if not row:
         return False, 'discount_invalid'
@@ -3377,6 +3684,12 @@ def validate_discount_code(code):
         return False, 'discount_inactive'
     if used_count >= max_uses:
         return False, 'discount_capacity'
+    if user_id is not None and has_user_used_discount(code, user_id):
+        return False, 'discount_already_used'
+    try:
+        percent = max(0, min(100, int(percent or 0)))
+    except (TypeError, ValueError):
+        percent = 0
     return True, percent
 
 
@@ -4685,6 +4998,7 @@ def get_seller_account(user_id):
 def save_seller_account(user_id, sub_user_id, username, panel_url, password):
     conn = get_conn()
     c = conn.cursor()
+    password = None   # رمز دیگه تو دیتابیس ذخیره نمی‌شه (فقط موقع ساخت/تغییر یک‌بار به خود کاربر نشون داده می‌شه)
     c.execute('INSERT INTO seller_accounts (user_id, sub_user_id, username, panel_url, created_at, password) '
               'VALUES (?, ?, ?, ?, ?, ?) '
               'ON CONFLICT(user_id) DO UPDATE SET sub_user_id=excluded.sub_user_id, username=excluded.username, '
@@ -4707,7 +5021,7 @@ def delete_seller_account_db(user_id):
 def set_seller_password_db(user_id, password):
     conn = get_conn()
     c = conn.cursor()
-    c.execute('UPDATE seller_accounts SET password=? WHERE user_id=?', (password, user_id))
+    c.execute('UPDATE seller_accounts SET password=NULL WHERE user_id=?', (user_id,))
     conn.commit()
     conn.close()
 
@@ -4880,7 +5194,7 @@ def _action_reseller_menu(chat_id):
         chat_id,
         u(chat_id, 'reseller_dashboard', divider=DIVIDER,
           creds_line=u(chat_id, 'reseller_creds_line', username=uname) + '\n' + (
-              u(chat_id, 'seller_pass_line', password=_html.escape(pw)) if pw else u(chat_id, 'seller_pass_missing')),
+              u(chat_id, 'seller_pass_missing')),
           panel_url=panel_url or get_reseller_panel_url()),
         reply_markup={'inline_keyboard': [
             [{'text': u(chat_id, 'btn_change_password'), 'callback_data': 'reseller_cred_pass'}],
@@ -5613,7 +5927,31 @@ def reset_seller_text_overrides_once():
     print(f'♻️ {len(keys)} متن/دکمه‌ی قدیمیِ فروشندگی به متن جدید برگشت.')
 
 
+def purge_seller_plain_passwords_once():
+    """فقط یک‌بار: رمزهای فروشنده که قبلاً به‌صورت متن ساده تو دیتابیس ذخیره شده بودن پاک می‌شن.
+    از این به بعد رمز ذخیره نمی‌شه؛ کاربر اگه یادش رفت با «تغییر رمز عبور» یکی جدید می‌ذاره."""
+    conn = get_conn()
+    c = conn.cursor()
+    c.execute("SELECT 1 FROM settings WHERE key='seller_pw_purge_v1'")
+    if c.fetchone():
+        conn.close()
+        return
+    c.execute('UPDATE seller_accounts SET password=NULL')
+    try:
+        c.execute('UPDATE resellers SET password_plain=NULL')
+    except Exception as e:
+        print('⚠️ پاک‌کردن رمز فروشنده‌ی قدیمی:', e)
+    c.execute("INSERT INTO settings (key, value) VALUES ('seller_pw_purge_v1', '1') "
+              "ON CONFLICT(key) DO UPDATE SET value=excluded.value")
+    conn.commit()
+    conn.close()
+
+
 init_db()
+try:
+    purge_seller_plain_passwords_once()
+except Exception as _pe:
+    print('⚠️ purge_seller_plain_passwords_once:', _pe)
 try:
     reset_seller_text_overrides_once()
     _refresh_settings_cache()
@@ -5982,10 +6320,24 @@ def process_update(update):
         elif data == 'confirm_purchase':
             s = user_steps.get(str(chat_id), {})
             if s.get('step') == 'confirm_buy':
-                gb, label, days, price = s['gb'], s['label'], s['days'], s['price']
+                if s.get('discount_code'):      # کد ممکنه بین نمایش فاکتور و تایید غیرفعال/پر شده باشه
+                    _dok, _derr = validate_discount_code(s['discount_code'], chat_id)
+                    if not _dok:
+                        s['price'] = s.get('base_price', s['price'])
+                        s.pop('discount_code', None)
+                        s.pop('discount_percent', None)
+                        send_message(chat_id, u(chat_id, _derr if isinstance(_derr, str) else 'discount_capacity'))
+                        send_message(chat_id, build_purchase_invoice(chat_id, s), reply_markup=build_purchase_kb(chat_id))
+                        return
+                gb, label, days, price = s['gb'], s['label'], s['days'], max(0, s['price'])
                 ctype = s.get('type', 'both')
                 cfg_type = get_config_types().get(ctype, get_config_types()['both'])
                 ctype_label = get_ctype_label(chat_id, ctype)
+                _max_cfg = get_max_configs_per_user()
+                if _max_cfg > 0 and len(get_user_configs(chat_id)) >= _max_cfg:
+                    user_steps[str(chat_id)] = {}
+                    send_message(chat_id, u(chat_id, 'svc_limit_reached', max_configs=_max_cfg))
+                    return
                 wallet = get_wallet_db(chat_id)
                 if wallet < price:
                     shortfall = price - wallet
@@ -5995,11 +6347,49 @@ def process_update(update):
                         reply_markup={'inline_keyboard': [[{'text': u(chat_id, 'btn_topup'), 'callback_data': 'menu_topup'}]]}
                     )
                 else:
+                    # ترتیب امن: ۱) رزرو کد تخفیف ۲) کسر اتمیک پول ۳) ساخت کانفیگ.
+                    # اگه ساخت کانفیگ شکست بخوره پول برمی‌گرده و کد تخفیف آزاد می‌شه؛
+                    # پس نه کاربر کانفیگ رایگان می‌گیره، نه پولش بی‌دلیل کم می‌شه.
+                    _claimed_code = None
+                    if s.get('discount_code'):
+                        _cok, _cerr = claim_discount_use(s['discount_code'], chat_id)
+                        if not _cok:
+                            s['price'] = s.get('base_price', s['price'])
+                            s.pop('discount_code', None)
+                            s.pop('discount_percent', None)
+                            send_message(chat_id, u(chat_id, _cerr))
+                            send_message(chat_id, build_purchase_invoice(chat_id, s), reply_markup=build_purchase_kb(chat_id))
+                            return
+                        _claimed_code = s['discount_code']
+                    if not try_deduct_wallet_db(chat_id, price, 'purchase'):
+                        if _claimed_code:
+                            release_discount_use(_claimed_code, chat_id)
+                        user_steps[str(chat_id)] = {}
+                        _w = get_wallet_db(chat_id)
+                        send_message(
+                            chat_id,
+                            u(chat_id, 'insufficient_balance', divider=DIVIDER, wallet=_w, price=price, shortfall=max(0, price - _w)),
+                            reply_markup={'inline_keyboard': [[{'text': u(chat_id, 'btn_topup'), 'callback_data': 'menu_topup'}]]}
+                        )
+                        return
                     send_message(chat_id, u(chat_id, 'building_config'))
-                    res = make_config(gb, label, days, proto=cfg_type['proto'])
+                    try:
+                        res = make_config(gb, label, days, proto=cfg_type['proto'])
+                    except Exception as _mc_err:
+                        print('⚠️ استثنا هنگام ساخت کانفیگ:', _mc_err)
+                        res = {'success': False, 'error': str(_mc_err), 'error_code': None}
                     if res['success'] and res['sub_url']:
-                        update_wallet_db(chat_id, -price)
-                        save_user_config(chat_id, res['sub_url'], res['config_id'], gb, label, days, price, ctype)
+                        try:
+                            save_user_config(chat_id, res['sub_url'], res['config_id'], gb, label, days, price, ctype)
+                        except Exception as _sv_err:
+                            # کانفیگ ساخته شده و پول کم شده؛ کاربر باید لینکش رو بگیره و ادمین خبردار بشه
+                            print('🚨 ذخیره‌ی کانفیگ تو دیتابیس ناموفق بود:', _sv_err)
+                            try:
+                                send_message(ADMIN_ID, f'🚨 ذخیره‌ی کانفیگ کاربر {chat_id} تو دیتابیس شکست خورد '
+                                                       f'(کانفیگ ساخته و پول کم شده).\nconfig_id: {res.get("config_id")}\n'
+                                                       f'sub_url: {res.get("sub_url")}', parse_mode=None)
+                            except Exception:
+                                pass
                         try:
                             save_order(chat_id, label, gb, days, price, ctype, res['config_id'])
                         except Exception as order_err:
@@ -6008,8 +6398,6 @@ def process_update(update):
                             res['config_id'],
                             build_config_note(chat_id, query.get('from', {}).get('username'), price)
                         )
-                        if s.get('discount_code'):
-                            increment_discount_usage(s['discount_code'])
                         if ctype == 'wireguard':
                             output_label = u(chat_id, 'output_label_wireguard')
                         elif ctype == 'openvpn':
@@ -6023,15 +6411,28 @@ def process_update(update):
                         )
                         send_message(chat_id, success_text)
                         if price and price > 0:
-                            process_referral_reward(chat_id, 'purchase')   # بعد از پیام موفقیت، تا خریدار معطل نشه
-                    elif res.get('error_code') and 'proto_unavailable' in str(res.get('error_code')).lower():
-                        send_message(chat_id, u(chat_id, 'proto_unavailable', ctype_label=ctype_label))
-                    elif res.get('error_code') and any(
-                        c in str(res.get('error_code')).lower() for c in ('dns_unavailable', 'dns_off_for_seller')
-                    ):
-                        send_message(chat_id, u(chat_id, 'dns_unavailable', ctype_label=ctype_label))
+                            process_referral_reward(chat_id, 'purchase', price)   # بعد از پیام موفقیت، تا خریدار معطل نشه
                     else:
-                        send_message(chat_id, u(chat_id, 'server_error'))
+                        # ساخت کانفیگ نشد → پول برگردونده می‌شه و کد تخفیف آزاد می‌شه
+                        try:
+                            update_wallet_db(chat_id, price, 'refund_failed_purchase')
+                            if _claimed_code:
+                                release_discount_use(_claimed_code, chat_id)
+                        except Exception as _rf_err:
+                            print('🚨 برگشت پول خرید ناموفق انجام نشد:', chat_id, price, _rf_err)
+                            try:
+                                send_message(ADMIN_ID, f'🚨 برگشت پول خرید ناموفق کاربر {chat_id} ({price} تومان) انجام نشد؛ دستی برگردون.',
+                                             parse_mode=None)
+                            except Exception:
+                                pass
+                        if res.get('error_code') and 'proto_unavailable' in str(res.get('error_code')).lower():
+                            send_message(chat_id, u(chat_id, 'proto_unavailable', ctype_label=ctype_label))
+                        elif res.get('error_code') and any(
+                            c in str(res.get('error_code')).lower() for c in ('dns_unavailable', 'dns_off_for_seller')
+                        ):
+                            send_message(chat_id, u(chat_id, 'dns_unavailable', ctype_label=ctype_label))
+                        else:
+                            send_message(chat_id, u(chat_id, 'server_error'))
                 user_steps[str(chat_id)] = {}
                 # توجه: قبلاً اینجا main_menu(chat_id) هم صدا زده می‌شد که باعث
                 # می‌شد بلافاصله بعد از پیام «کانفیگ ساخته شد»، کل پیام منوی
@@ -6067,18 +6468,18 @@ def process_update(update):
 
         elif data == 'confdel_yes':
             s = user_steps.get(str(chat_id), {})
-            if s.get('step') == 'confirm_delete':
-                idx = s['index']
-                refund = s['refund']
-                if delete_config_from_db_by_index(chat_id, idx):
+            user_steps[str(chat_id)] = {}      # وضعیت همین‌جا مصرف می‌شه؛ دکمه‌ی قدیمی دوباره قابل استفاده نیست
+            if s.get('step') == 'confirm_delete' and s.get('row_id') is not None:
+                _st, refund = delete_config_with_refund(chat_id, s['row_id'])
+                if _st == 'ok':
                     if refund > 0:
-                        update_wallet_db(chat_id, refund)
                         send_message(chat_id, u(chat_id, 'delete_success', refund=refund))
                     else:
                         send_message(chat_id, u(chat_id, 'delete_success_no_refund'))
+                elif _st == 'not_found':
+                    send_message(chat_id, u(chat_id, 'config_not_found'))
                 else:
                     send_message(chat_id, u(chat_id, 'delete_panel_error'))
-            user_steps[str(chat_id)] = {}
             # نتیجه (موفق یا ناموفق) همین بالا با یه پیام مشخص گفته شده؛
             # دیگه نیازی به نمایش دوباره‌ی کل منوی اصلی نیست.
 
@@ -6107,6 +6508,9 @@ def process_update(update):
                 send_message(chat_id, u(chat_id, 'config_not_found'))
             else:
                 _cfg, _gb, _days, _price = _pack
+                if _gb < get_extend_min_gb():
+                    send_message(chat_id, u(chat_id, 'ext_min_gb_error', min_gb=f'{get_extend_min_gb():g}'))
+                    return
                 _wallet = get_wallet_db(chat_id)
                 if _wallet < _price:
                     send_message(chat_id, u(chat_id, 'qrenew_low_balance', divider=DIVIDER, label=_cfg[4],
@@ -6217,13 +6621,24 @@ def process_update(update):
                     send_message(chat_id, u(chat_id, 'config_not_found'))
                 elif get_wallet_db(chat_id) < price:
                     send_message(chat_id, u(chat_id, 'ext_insufficient'))
+                elif extra_gb < get_extend_min_gb():
+                    send_message(chat_id, u(chat_id, 'ext_min_gb_error', min_gb=f'{get_extend_min_gb():g}'))
+                elif not try_deduct_wallet_db(chat_id, price, 'extend'):
+                    send_message(chat_id, u(chat_id, 'ext_insufficient'))
                 else:
-                    res = extend_config_on_panel(cfg[2], extra_gb, extra_days)
+                    try:
+                        res = extend_config_on_panel(cfg[2], extra_gb, extra_days)
+                    except Exception as _ex_err:
+                        print('⚠️ استثنا هنگام تمدید روی پنل:', _ex_err)
+                        res = {'success': False}
                     if res['success']:
-                        extend_config_db(row_id, extra_gb, extra_days)
-                        update_wallet_db(chat_id, -price)
+                        try:
+                            extend_config_db(row_id, extra_gb, extra_days, price)
+                        except Exception as _ed_err:
+                            print('🚨 تمدید روی پنل انجام شد ولی دیتابیس آپدیت نشد:', chat_id, row_id, _ed_err)
                         send_message(chat_id, u(chat_id, 'ext_success', label=cfg[4], extra_gb=extra_gb, extra_days=extra_days, price=price))
                     else:
+                        update_wallet_db(chat_id, price, 'refund_extend_failed')
                         send_message(chat_id, u(chat_id, 'ext_panel_error'))
             user_steps[str(chat_id)] = {}
             # مثل بالا: پیام نتیجه‌ی تمدید همین بالا ارسال شده، نیازی به
@@ -6266,11 +6681,11 @@ def process_update(update):
                 main_menu(chat_id)
             else:
                 if data == 'qty_gb_inc':
-                    s['gb'] = min(s['gb'] + 1, 100000)
+                    s['gb'] = min(s['gb'] + 1, get_buy_max_gb())
                 elif data == 'qty_gb_dec':
                     s['gb'] = max(s['gb'] - 1, 1)
                 elif data == 'qty_days_inc':
-                    s['days'] = min(s['days'] + 1, 3650)
+                    s['days'] = min(s['days'] + 1, get_buy_max_days())
                 elif data == 'qty_days_dec':
                     s['days'] = max(s['days'] - 1, 1)
                 text, kb = build_quantity_screen(chat_id, s)
@@ -6312,7 +6727,7 @@ def process_update(update):
 
 
 
-        elif data.startswith('reply_ticket_'):
+        elif data.startswith('reply_ticket_') and chat_id == ADMIN_ID:
             tid = int(data.split('_')[2])
             user_steps[str(chat_id)] = {'step': 'admin_reply', 'ticket_id': tid}
             send_message(
@@ -6321,7 +6736,7 @@ def process_update(update):
                 reply_markup=cancel_kb(chat_id)
             )
 
-        elif data.startswith('close_ticket_'):
+        elif data.startswith('close_ticket_') and chat_id == ADMIN_ID:
             tid = int(data.split('_')[2])
             update_ticket_status(tid, 'closed')
             send_message(chat_id, u('fa', 'admin_ticket_closed', tid=str(tid)))
@@ -6474,7 +6889,7 @@ def process_update(update):
             )
 
         elif step.get('step') == 'buy_enter_discount':
-            ok, result = validate_discount_code(text)
+            ok, result = validate_discount_code(text, chat_id)
             if not ok:
                 send_message(chat_id, u(chat_id, result))
             else:
@@ -6551,8 +6966,10 @@ def process_update(update):
         elif step.get('step') == 'ext_ask_gb':
             try:
                 extra_gb = float(text)
-                if extra_gb <= 0 or not math.isfinite(extra_gb) or extra_gb > 100000:
+                if extra_gb <= 0 or not math.isfinite(extra_gb) or extra_gb > get_buy_max_gb():
                     send_message(chat_id, u(chat_id, 'ext_number_error'))
+                elif extra_gb < get_extend_min_gb():
+                    send_message(chat_id, u(chat_id, 'ext_min_gb_error', min_gb=f'{get_extend_min_gb():g}'))
                 else:
                     user_steps[str(chat_id)]['step'] = 'ext_ask_days'
                     user_steps[str(chat_id)]['extra_gb'] = extra_gb
@@ -6563,7 +6980,7 @@ def process_update(update):
         elif step.get('step') == 'ext_ask_days':
             try:
                 extra_days = int(text)
-                if extra_days <= 0 or extra_days > 3650:
+                if extra_days <= 0 or extra_days > get_buy_max_days():
                     send_message(chat_id, u(chat_id, 'ext_number_error'))
                 else:
                     row_id = step['row_id']
@@ -6665,7 +7082,7 @@ def process_update(update):
                             {'text': u(chat_id, 'btn_cancel'), 'callback_data': 'confdel_no'}
                         ]]
                     }
-                    user_steps[str(chat_id)] = {'step': 'confirm_delete', 'index': idx, 'refund': refund}
+                    user_steps[str(chat_id)] = {'step': 'confirm_delete', 'row_id': cfg[0], 'index': idx, 'refund': refund}
                     send_message(chat_id, confirm_text, reply_markup=confirm_kb)
             except ValueError:
                 send_message(chat_id, u(chat_id, 'delete_row_number_error'))
@@ -6677,6 +7094,10 @@ def process_update(update):
                 method = step.get('method', 'card')
                 if amount < get_min_topup_for(method):
                     send_message(chat_id, u(chat_id, 'topup_min_error', min_topup=get_min_topup_for(method)))
+                elif amount > 2_000_000_000:
+                    send_message(chat_id, u(chat_id, 'topup_amount_error'))
+                elif get_topup_max_amount() > 0 and amount > get_topup_max_amount():
+                    send_message(chat_id, u(chat_id, 'topup_max_error', max_topup=f'{get_topup_max_amount():,}'))
                 else:
                     proceed_after_topup_amount(chat_id, amount, method)
             except ValueError:
@@ -6687,6 +7108,10 @@ def process_update(update):
                 or (step.get('method') == 'crypto' and _looks_like_tx_hash(text))):
             # رمزارز: فقط هش تراکنش (متن) قبول می‌شه و عکس لازم نیست؛ کارت‌به‌کارت: فقط عکس رسید
             # رسید کارت‌به‌کارت فقط عکسه؛ رمزارز هم عکس رسید و هم هش تراکنش (متن) رو قبول می‌کنه
+            if count_pending_topups(chat_id) >= 5:
+                user_steps[str(chat_id)] = {}
+                send_message(chat_id, 'شما چند درخواست شارژ در حال بررسی دارید؛ لطفاً تا مشخص شدن نتیجه‌ی اون‌ها صبر کنید.')
+                return
             photo_id = message['photo'][-1]['file_id'] if 'photo' in message else None
             tx_hash = None if photo_id else text.strip()
             amount = step.get('amount')
@@ -6769,6 +7194,14 @@ def process_update(update):
         elif step.get('step') == 'waiting_receipt' and 'photo' not in message:
             send_message(chat_id, u(chat_id, 'topup_need_photo') if get_user_lang(chat_id) == 'en'
                           else get_bot_text('topup_need_photo', DEFAULT_TOPUP_NEED_PHOTO))
+
+        elif step.get('step') == 'support_message' and get_ticket_max_chars() > 0 and len(text or '') > get_ticket_max_chars():
+            send_message(chat_id, u(chat_id, 'support_ticket_too_long', max_chars=get_ticket_max_chars()))
+
+        elif step.get('step') == 'support_message' and get_ticket_max_open() > 0 \
+                and count_open_tickets(chat_id) >= get_ticket_max_open():
+            user_steps[str(chat_id)] = {}
+            send_message(chat_id, u(chat_id, 'support_ticket_limit_open', max_open=get_ticket_max_open()))
 
         elif step.get('step') == 'support_message':
             tid = create_ticket(chat_id, text)
@@ -7956,6 +8389,37 @@ threading.Thread(target=runtime_settings_watcher, daemon=True).start()
 g_boot_restore()
 
 
+_RATE = {}
+_RATE_LOCK = threading.Lock()
+
+
+def _rate_limited(chat_id, limit=None, window=None):
+    """بیشتر از «rate_limit_count» آپدیت در «rate_limit_window» ثانیه از یه کاربر (غیرادمین) نادیده گرفته می‌شه
+    (پیش‌فرض ۳۰ در ۶۰ ثانیه؛ از پنل قابل تغییره، 0 = خاموش)؛ صف پردازش برای بقیه پر نشه."""
+    if chat_id is None or chat_id == ADMIN_ID:
+        return False
+    if limit is None:
+        limit = get_rate_limit_count()
+    if window is None:
+        window = float(get_rate_limit_window())
+    if limit <= 0:
+        return False
+    now = time.time()
+    with _RATE_LOCK:
+        dq = _RATE.get(chat_id)
+        if dq is None:
+            dq = _RATE[chat_id] = deque()
+        while dq and now - dq[0] > window:
+            dq.popleft()
+        if len(dq) >= limit:
+            return True
+        dq.append(now)
+        if len(_RATE) > 5000:
+            for k in [k for k, v in _RATE.items() if not v or now - v[-1] > window]:
+                _RATE.pop(k, None)
+    return False
+
+
 def safe_process_update(update):
     """آپدیت رو پردازش می‌کنه، ولی قبلش قفل مخصوص همون chat_id رو می‌گیره.
     این یعنی دو تا آپدیت از دو کاربر مختلف هنوز کاملاً موازی پردازش می‌شن
@@ -7968,6 +8432,17 @@ def safe_process_update(update):
         chat_id = update['callback_query'].get('message', {}).get('chat', {}).get('id')
     elif 'message' in update:
         chat_id = update['message'].get('chat', {}).get('id')
+
+    # فقط چت خصوصی: هر گروه/کانال یه chat_id جدا داره و بدون این چک می‌شد با ساخت گروه، تست رایگان/رفرال/کیف پول
+    # جدا و مشترک ساخت. اگه نوع چت group/supergroup/channel بود یا آیدی منفی بود، آپدیت نادیده گرفته می‌شه.
+    _chat = {}
+    if 'callback_query' in update:
+        _chat = (update['callback_query'].get('message') or {}).get('chat') or {}
+    elif 'message' in update:
+        _chat = update['message'].get('chat') or {}
+    _ctype = _chat.get('type')
+    if str(_ctype or '').lower() in ('group', 'supergroup', 'channel') or (isinstance(chat_id, int) and chat_id < 0):
+        return     # فقط گروه/کانال رد می‌شه؛ اگه سروش نوع چت خصوصی رو با اسم دیگه‌ای بفرسته، کاربرها آسیب نمی‌بینن
 
     def _run():
         t0 = time.time()
@@ -7986,6 +8461,8 @@ def safe_process_update(update):
                     or (update.get('callback_query') or {}).get('data') or '?')
             print(f'[slow] chat={chat_id} {str(what)[:30]!r} gate={t1 - t0:.1f}s handler={t2 - t1:.1f}s')
 
+    if _rate_limited(chat_id):
+        return
     lock = get_chat_lock(chat_id) if chat_id is not None else None
     try:
         if lock:
