@@ -111,22 +111,36 @@ CONFIG_TYPE_DEFAULT_LABELS = {
 # CONFIG_TYPES دیگه یه dict ثابت نیست — get_config_types() هر بار قیمت‌ها *و*
 # لیبل‌ها رو فعلی رو از جدول settings می‌خونه تا هم تغییر قیمت و هم تغییر نام
 # دکمه از پنل وب فوراً روی ربات هم اعمال بشه (بدون نیاز به ری‌استارت).
+def _safe_price(key, default):
+    """قیمت هر گیگ از settings؛ اگه خراب/صفر/منفی/خیلی بزرگ بود به مقدار پیش‌فرض برمی‌گرده (نه قیمت رایگان)."""
+    try:
+        v = int(float(str(get_setting(key, default)).replace(',', '')))
+    except Exception:
+        v = 0
+    if not (1 <= v <= 1000000):
+        try:
+            v = int(float(default))
+        except Exception:
+            v = 1000000
+    return v
+
+
 def get_config_types():
     return {
         'wireguard': {'label': get_setting('ctype_label_wireguard', CONFIG_TYPE_DEFAULT_LABELS['wireguard']), 'proto': 'wireguard',
-                      'price_per_gb': int(get_setting('price_wireguard', DEFAULT_PRICE_PER_GB_WIREGUARD))},
+                      'price_per_gb': _safe_price('price_wireguard', DEFAULT_PRICE_PER_GB_WIREGUARD)},
         'config':    {'label': get_setting('ctype_label_config', CONFIG_TYPE_DEFAULT_LABELS['config']), 'proto': 'xray',
-                      'price_per_gb': int(get_setting('price_config', DEFAULT_PRICE_PER_GB_CONFIG))},
+                      'price_per_gb': _safe_price('price_config', DEFAULT_PRICE_PER_GB_CONFIG)},
         'both':      {'label': get_setting('ctype_label_both', CONFIG_TYPE_DEFAULT_LABELS['both']), 'proto': 'both',
-                      'price_per_gb': int(get_setting('price_both', DEFAULT_PRICE_PER_GB_BOTH))},
+                      'price_per_gb': _safe_price('price_both', DEFAULT_PRICE_PER_GB_BOTH)},
         'openvpn':   {'label': get_setting('ctype_label_openvpn', CONFIG_TYPE_DEFAULT_LABELS['openvpn']), 'proto': 'openvpn',
-                      'price_per_gb': int(get_setting('price_openvpn', DEFAULT_PRICE_PER_GB_OPENVPN))},
+                      'price_per_gb': _safe_price('price_openvpn', DEFAULT_PRICE_PER_GB_OPENVPN)},
         # طبق مستندات پنل: با proto='dns' فقط پروفایل DNS بازی ساخته می‌شه (مصرفش
         # از حجم همین کانفیگ کم می‌شه). اگه DNS رو سرور/پلتفرم خاموش باشه، پنل
         # با خطای dns_unavailable / dns_off_for_seller رد می‌کنه و make_config
         # همون رفتار استاندارد proto_unavailable رو نشون می‌ده (چیزی کم نمی‌شه).
         'dns':       {'label': get_setting('ctype_label_dns', CONFIG_TYPE_DEFAULT_LABELS['dns']), 'proto': 'dns',
-                      'price_per_gb': int(get_setting('price_dns', DEFAULT_PRICE_PER_GB_DNS))},
+                      'price_per_gb': _safe_price('price_dns', DEFAULT_PRICE_PER_GB_DNS)},
     }
 
 
@@ -166,9 +180,10 @@ def get_topup_multiplier():
     واریز ۱۰,۰۰۰ تومانی = ۲۰,۰۰۰ تومان شارژ کیف پول). پیش‌فرض ۱ یعنی بدون
     تغییر."""
     try:
-        return float(get_setting('topup_multiplier', '1'))
+        m = float(get_setting('topup_multiplier', '1'))
     except (TypeError, ValueError):
         return 1.0
+    return m if (math.isfinite(m) and 0 < m <= 10) else 1.0
 
 
 # ---------------------------------------------------------------------------
@@ -234,6 +249,20 @@ def trial_new_users_only():
     return get_setting('trial_new_users_only', '0') == '1'
 
 
+def trial_paid_enabled():
+    """تست پولی: خاموش (پیش‌فرض) = تست رایگان مثل قبل."""
+    return get_setting('trial_paid', '0') == '1'
+
+
+def get_trial_price():
+    """قیمت تست پولی (تومان)؛ مقدار خراب/منفی = 0 (رایگان)، سقف ۱٬۰۰۰٬۰۰۰."""
+    try:
+        v = int(float(str(get_setting('trial_price', '0')).replace(',', '')))
+    except Exception:
+        v = 0
+    return max(0, min(v, 1000000))
+
+
 def get_trial_proto():
     v = (get_setting('trial_proto', 'both') or 'both').strip().lower()
     return v if v in TRIAL_PROTOS else 'both'
@@ -264,6 +293,41 @@ def get_rate_limit_window():
 def get_auto_ban_enabled():
     """بن دائم خودکار کاربرِ فشارآور وقتی ربات در آستانه‌ی کندی است (از پنل قابل‌تنظیم؛ پیش‌فرض خاموش)."""
     return get_setting('auto_ban_enabled', '0') == '1'
+
+
+def get_auto_ban_permanent():
+    """روشن = بن دائم، خاموش = بن موقت به‌مدت auto_ban_minutes (از پنل قابل‌تنظیم؛ پیش‌فرض دائم)."""
+    return get_setting('auto_ban_permanent', '1') == '1'
+
+
+def get_auto_ban_minutes():
+    return max(1, _setting_int('auto_ban_minutes', 60))
+
+
+def get_auto_ban_always():
+    """بن حتی وقتی ربات شلوغ نیست: اگه کاربری تو ۱۰ دقیقه این‌قدر بار از سقف پیام رد بشه (0 = خاموش)."""
+    return max(0, _setting_int('auto_ban_always', 40))
+
+
+def get_max_inflight():
+    """حداکثر آپدیتِ هم‌زمانِ در حال پردازش/منتظرِ هر کاربر (۱ در حال اجرا + بقیه منتظر). 0 = خاموش."""
+    return max(0, _setting_int('max_inflight_per_user', 2))
+
+
+def get_busy_rate_limit():
+    """وقتی ربات در آستانه‌ی کندیه، سقف پیامِ هر کاربر (تو همون بازه‌ی rate_limit_window) به این عدد کم می‌شه. 0 = خاموش."""
+    return max(0, _setting_int('busy_rate_limit', 10))
+
+
+def get_busy_global_per_sec():
+    """وقتی ربات شلوغه، کل ربات (همه‌ی کاربرها روی هم) حداکثر این‌قدر آپدیت در ثانیه وارد صف می‌کنه. 0 = خاموش."""
+    return max(0, _setting_int('busy_global_per_sec', 30))
+
+
+def get_user_write_backlog():
+    """سقف نوشتن‌های معوقِ «آخرین فعالیت کاربر». بیشتر از این بشه، ثبت فعالیتِ کاربرهای قدیمی موقتاً رد می‌شه (کم‌اهمیته) تا
+    دیتابیس زیر بار نره. 0 = خاموش."""
+    return max(0, _setting_int('user_write_backlog', 300))
 
 
 def get_auto_ban_queue():
@@ -497,6 +561,16 @@ UI_TEXT = {
             '🔗 لینک سابسکریپشن:\n<code>{sub_url}</code>'
         ),
         'trial_error': '❌ خطا در ساخت کانفیگ تست. لطفاً بعداً دوباره تلاش کنید.',
+        'trial_paid_confirm': (
+            '🧪 <b>تست پولی</b>\n{divider}\n'
+            '📶 حجم: <b>{trial_gb}</b> گیگابایت\n'
+            '⏳ مدت اعتبار: <b>{trial_days}</b> روز\n'
+            '💰 هزینه: <b>{price:,}</b> تومان (از کیف پول کم می‌شود)\n'
+            '💳 موجودی شما: <b>{wallet:,}</b> تومان\n{divider}\n'
+            'تایید می‌کنید؟'
+        ),
+        'trial_paid_refunded': '↩️ ساخت تست ناموفق بود؛ <b>{price:,}</b> تومان به کیف پول شما برگشت.',
+        'btn_trial_pay': '✅ تایید و دریافت تست',
         'topup_prompt': '💠 مبلغ مورد نظر برای شارژ کیف پول را به تومان وارد کنید.\nحداقل مبلغ شارژ: <b>{min_topup}</b> تومان',
         'topup_card_info': (
             '💳 <b>اطلاعات پرداخت</b>\n{divider}\n'
@@ -786,6 +860,16 @@ UI_TEXT = {
             '🔗 Subscription link:\n<code>{sub_url}</code>'
         ),
         'trial_error': '❌ Error creating the trial config. Please try again later.',
+        'trial_paid_confirm': (
+            '🧪 <b>Paid trial</b>\n{divider}\n'
+            '📶 Volume: <b>{trial_gb}</b> GB\n'
+            '⏳ Validity: <b>{trial_days}</b> day(s)\n'
+            '💰 Price: <b>{price:,}</b> Toman (deducted from your wallet)\n'
+            '💳 Your balance: <b>{wallet:,}</b> Toman\n{divider}\n'
+            'Do you confirm?'
+        ),
+        'trial_paid_refunded': '↩️ The trial could not be created; <b>{price:,}</b> Toman was returned to your wallet.',
+        'btn_trial_pay': '✅ Confirm & get trial',
         'topup_prompt': '💠 Enter the amount (in Toman) you want to top up your wallet with.\nMinimum top-up amount: <b>{min_topup}</b> Toman',
         'topup_card_info': (
             '💳 <b>Payment Info</b>\n{divider}\n'
@@ -1437,8 +1521,16 @@ _chat_locks = {}
 _chat_locks_guard = threading.Lock()
 
 
+def _prune_locks(d):
+    """قفل‌های آزاد (که کسی نگهشون نداشته) رو پاک می‌کنه تا دیکشنری بی‌نهایت بزرگ نشه."""
+    for k in [k for k, lk in d.items() if not lk.locked()]:
+        d.pop(k, None)
+
+
 def get_chat_lock(chat_id):
     with _chat_locks_guard:
+        if len(_chat_locks) > 5000:
+            _prune_locks(_chat_locks)
         lock = _chat_locks.get(chat_id)
         if lock is None:
             lock = threading.Lock()
@@ -1446,6 +1538,15 @@ def get_chat_lock(chat_id):
         return lock
 
 user_steps = {}
+
+def _cb_int(data, idx, maxsplit=-1):
+    """عدد داخل callback_data رو امن می‌خونه؛ اگه دکمه دستکاری/خراب بود 0 برمی‌گردونه
+    (که تو همه‌ی هندلرها یعنی «پیدا نشد» و بی‌خطر رد می‌شه) به‌جای ValueError/IndexError."""
+    try:
+        return int(str(data).split('_', maxsplit)[idx]) if maxsplit >= 0 else int(str(data).split('_')[idx])
+    except (ValueError, IndexError, TypeError):
+        return 0
+
 
 
 # ---------------------------------------------------------------------------
@@ -1615,6 +1716,7 @@ def init_db():
         'ALTER TABLE users ADD COLUMN lang TEXT',
         'ALTER TABLE users ADD COLUMN referred_by INTEGER',
         'ALTER TABLE users ADD COLUMN banned INTEGER DEFAULT 0',
+        'ALTER TABLE users ADD COLUMN banned_until REAL DEFAULT 0',
         'ALTER TABLE resellers ADD COLUMN username TEXT',
         'ALTER TABLE resellers ADD COLUMN password_hash TEXT',
         'ALTER TABLE resellers ADD COLUMN password_plain TEXT',
@@ -1665,6 +1767,7 @@ def get_user_kb_style(user_id):
     if user_id in _user_kb_cache:
         return _user_kb_cache[user_id]
     val = _get_user_kb_style_db(user_id)
+    _bound_cache(_user_kb_cache)
     _user_kb_cache[user_id] = val
     return val
 
@@ -1733,6 +1836,7 @@ def get_user_lang(user_id):
         lang = 'fa'
     if lang not in ('fa', 'en'):
         lang = 'fa'
+    _bound_cache(_user_lang_cache)
     _user_lang_cache[key] = lang
     return lang
 
@@ -1744,8 +1848,29 @@ def set_user_lang(user_id, lang):
     _user_lang_cache[str(user_id)] = lang
 
 
-@with_db_retry
+_KNOWN_USERS = set()      # کاربرهایی که تو همین اجرا مطمئنیم ردیفشون تو دیتابیس هست؛ برای اینا نوشتنِ ساخت-ردیف لازم نیست
+
+
+def _bound_cache(d, limit=100000):
+    if len(d) > limit:
+        d.clear()
+
+
+def _mark_known(user_id):
+    if len(_KNOWN_USERS) > 200000:
+        _KNOWN_USERS.clear()
+    _KNOWN_USERS.add(user_id)
+
+
 def add_user(user_id):
+    if user_id in _KNOWN_USERS:
+        return
+    _add_user_db(user_id)
+    _mark_known(user_id)
+
+
+@with_db_retry
+def _add_user_db(user_id):
     conn = get_conn()
     c = conn.cursor()
     c.execute('INSERT OR IGNORE INTO users (user_id, wallet, joined_at) VALUES (?, ?, ?)',
@@ -1857,9 +1982,9 @@ def register_referred_user(invitee_id, inviter_id):
     کسی که قبلاً با لینک دعوت ثبت شده، با لینک بعدی عوض نمی‌شه."""
     conn = get_conn()
     c = conn.cursor()
-    c.execute('INSERT OR IGNORE INTO users (user_id, wallet, joined_at, referred_by) VALUES (?, 0, ?, ?)',
+    c.execute('''INSERT INTO users (user_id, wallet, joined_at, referred_by) VALUES (?, 0, ?, ?)
+        ON CONFLICT(user_id) DO UPDATE SET referred_by = COALESCE(users.referred_by, excluded.referred_by)''',
               (invitee_id, datetime.now().isoformat(), inviter_id))
-    c.execute('UPDATE users SET referred_by=? WHERE user_id=? AND referred_by IS NULL', (inviter_id, invitee_id))
     conn.commit()
     conn.close()
 
@@ -2720,7 +2845,7 @@ def donito_match_and_approve():
     done = 0
     for rid, uid, amount, req_ts in pending:
         for d in donations:
-            if d['amount'] != amount or d['ts'] < (req_ts or 0) - 300:
+            if d['amount'] != amount or d['ts'] < (req_ts or 0) - 60:
                 continue
             key = 'donito:' + d['id']
             if is_deposit_used(key):
@@ -3005,7 +3130,9 @@ def upsert_user_info(user_id, username, first_name):
     if _user_info_cache.get(user_id) == key:
         return
     _upsert_user_info_db(user_id, username, first_name)
+    _bound_cache(_user_info_cache)
     _user_info_cache[user_id] = key
+    _mark_known(user_id)
 
 
 @with_db_retry
@@ -3035,6 +3162,51 @@ def _touch_user_db(user_id, action, ts):
         (user_id, datetime.now().isoformat(), ts, action))
     conn.commit()
     conn.close()
+
+
+@with_db_retry
+def _register_user_full_db(user_id, username, first_name, action, ts):
+    """ورود اولِ کاربر: فقط اطلاعات اکانت (آیدی، یوزرنیم، اسم، زمان ورود، آخرین فعالیت) تو *یک* دستور و *یک* commit.
+    موجودی (wallet) ستونِ همین ردیفه با مقدار 0 و رفرال/لاگ موجودی/تریال فقط وقتی لازم شد ساخته می‌شن."""
+    conn = get_conn()
+    c = conn.cursor()
+    c.execute('''INSERT INTO users (user_id, wallet, joined_at, username, first_name, last_active, last_action)
+        VALUES (?, 0, ?, ?, ?, ?, ?)
+        ON CONFLICT(user_id) DO UPDATE SET username=excluded.username, first_name=excluded.first_name,
+                                           last_active=excluded.last_active, last_action=excluded.last_action''',
+        (user_id, datetime.now().isoformat(), username, first_name, ts, action))
+    conn.commit()
+    conn.close()
+
+
+# نوشتنِ «آخرین فعالیت» کاربرهای قدیمی کم‌اهمیته؛ صف جداگانه (نه BG_EXECUTOR که جواب دکمه‌ها هم توشه) و با سقف معوقه
+USER_WRITE_EXECUTOR = ThreadPoolExecutor(max_workers=2)
+_UW_PENDING = 0
+_UW_LOCK = threading.Lock()
+
+
+def _submit_user_write(fn, *args):
+    global _UW_PENDING
+    cap = get_user_write_backlog()
+    with _UW_LOCK:
+        if cap > 0 and _UW_PENDING >= cap:
+            return False          # دیتابیس عقبه؛ این ثبتِ کم‌اهمیت رد می‌شه
+        _UW_PENDING += 1
+
+    def _job():
+        global _UW_PENDING
+        try:
+            fn(*args)
+        finally:
+            with _UW_LOCK:
+                _UW_PENDING -= 1
+    try:
+        USER_WRITE_EXECUTOR.submit(_job)
+    except Exception:
+        with _UW_LOCK:
+            _UW_PENDING -= 1
+        return False
+    return True
 
 
 def _describe_update(update, step_name):
@@ -3067,6 +3239,7 @@ def _record_activity(user_id, update, step_name):
         prev = _activity_cache.get(user_id)
         if prev and prev[0] == action and now - prev[1] < ACTIVITY_THROTTLE_SEC:
             return
+        _bound_cache(_activity_cache)
         _activity_cache[user_id] = (action, now)
         ts = datetime.now(timezone.utc).isoformat(timespec='seconds')
         _touch_user_db(user_id, action, ts)
@@ -3085,7 +3258,20 @@ def track_activity(update):
     if chat_id is None:
         return
     step_name = (user_steps.get(str(chat_id)) or {}).get('step')   # قبل از اینکه هندلر step رو عوض کنه
-    BG_EXECUTOR.submit(_record_activity, chat_id, update, step_name)
+    if isinstance(chat_id, int) and chat_id > 0 and chat_id not in _KNOWN_USERS:
+        # کاربرِ جدید (برای این اجرا): همه‌ی اطلاعات اکانت تو یک نوشتن؛ add_user/upsert_user_info/ثبت فعالیتِ بعدی دیگه تکراری نمی‌نویسن
+        try:
+            sender = ((update.get('callback_query') or update.get('message') or {}).get('from')) or {}
+            action = _describe_update(update, step_name)
+            ts = datetime.now(timezone.utc).isoformat(timespec='seconds')
+            _register_user_full_db(chat_id, sender.get('username'), sender.get('first_name'), action, ts)
+            _mark_known(chat_id)
+            _user_info_cache[chat_id] = (sender.get('username'), sender.get('first_name'))
+            _activity_cache[chat_id] = (action, time.time())
+            return
+        except Exception as e:
+            print('⚠️ ثبت کاربر جدید ناموفق بود (بعداً با add_user ساخته می‌شه):', e)
+    _submit_user_write(_record_activity, chat_id, update, step_name)
 
 
 @with_db_retry
@@ -4954,20 +5140,22 @@ _trial_locks = {}
 _trial_locks_guard = threading.Lock()
 
 
-def action_trial(chat_id):
+def action_trial(chat_id, confirmed=False, expected_price=None):
     """هر کاربر هم‌زمان فقط یک درخواست تست رایگان داره؛ کلیک دوباره‌ی همزمان نادیده گرفته می‌شه
     (جلوگیری از گرفتن چند تست با دو بار زدن سریع، چون چک تعداد و ثبت تست از هم جدان)."""
     with _trial_locks_guard:
+        if len(_trial_locks) > 5000:
+            _prune_locks(_trial_locks)
         _lk = _trial_locks.setdefault(str(chat_id), threading.Lock())
     if not _lk.acquire(blocking=False):
         return
     try:
-        _action_trial_impl(chat_id)
+        _action_trial_impl(chat_id, confirmed, expected_price)
     finally:
         _lk.release()
 
 
-def _action_trial_impl(chat_id):
+def _action_trial_impl(chat_id, confirmed=False, expected_price=None):
     if not is_feature_enabled('trial'):
         send_message(chat_id, u(chat_id, 'disabled_feature'))
         return
@@ -4990,43 +5178,88 @@ def _action_trial_impl(chat_id):
     if trial_new_users_only() and user_has_purchased(chat_id):
         send_message(chat_id, u(chat_id, 'trial_not_new'))
         return
-    send_message(chat_id, u(chat_id, 'trial_building') if lang == 'en' else get_bot_text('trial_building', DEFAULT_TRIAL_BUILDING))
     trial_gb, trial_days = get_trial_gb(), get_trial_days()
-    proto = get_trial_proto()
-    res, trial_label = None, None
-    for attempt in range(5):
-        trial_label, number = get_next_trial_label()
-        res = make_config(trial_gb, trial_label, trial_days, proto)
-        if res['success'] and res['sub_url']:
+    paid_price = get_trial_price() if trial_paid_enabled() else 0
+    if paid_price > 0:
+        wallet = get_wallet_db(chat_id)
+        if confirmed and expected_price != paid_price:
+            confirmed = False      # قیمت بین نمایش و تایید عوض شده؛ دوباره با قیمت جدید نشون بده
+        if wallet < paid_price:
+            user_steps[str(chat_id)] = {}
+            send_message(chat_id, u(chat_id, 'insufficient_balance', divider=DIVIDER, wallet=wallet,
+                                    price=paid_price, shortfall=paid_price - wallet),
+                         reply_markup={'inline_keyboard': [[{'text': u(chat_id, 'btn_topup'), 'callback_data': 'menu_topup'}]]})
+            return
+        if not confirmed:
+            user_steps[str(chat_id)] = {'step': 'trial_pay_confirm', 'price': paid_price}
+            send_message(chat_id, u(chat_id, 'trial_paid_confirm', divider=DIVIDER, trial_gb='%g' % trial_gb,
+                                    trial_days=str(trial_days), price=paid_price, wallet=wallet),
+                         reply_markup={'inline_keyboard': [[
+                             {'text': u(chat_id, 'btn_trial_pay'), 'callback_data': 'trial_pay_yes'},
+                             {'text': u(chat_id, 'btn_cancel'), 'callback_data': 'menu'}]]})
+            return
+    charged = 0
+    try:
+        if paid_price > 0:
+            # ترتیب امن: اول کسر اتمیک پول، بعد ساخت تست؛ اگه ساخت شکست بخوره پول برمی‌گرده (پایین، تو finally)
+            if not try_deduct_wallet_db(chat_id, paid_price, 'trial_purchase'):
+                _w = get_wallet_db(chat_id)
+                send_message(chat_id, u(chat_id, 'insufficient_balance', divider=DIVIDER, wallet=_w,
+                                        price=paid_price, shortfall=max(0, paid_price - _w)),
+                             reply_markup={'inline_keyboard': [[{'text': u(chat_id, 'btn_topup'), 'callback_data': 'menu_topup'}]]})
+                return
+            charged = paid_price
+        send_message(chat_id, u(chat_id, 'trial_building') if lang == 'en' else get_bot_text('trial_building', DEFAULT_TRIAL_BUILDING))
+        proto = get_trial_proto()
+        res, trial_label = None, None
+        for attempt in range(5):
+            trial_label, number = get_next_trial_label()
+            res = make_config(trial_gb, trial_label, trial_days, proto)
+            if res['success'] and res['sub_url']:
+                break
+            if 'label_duplicate' in str(res.get('error_code') or '').lower():
+                continue   # این اسم قبلاً تو پنل اصلی بوده؛ شماره‌ی بعدی
+            release_trial_number(number)   # خطای دیگه: شماره سوخت نشه
             break
-        if 'label_duplicate' in str(res.get('error_code') or '').lower():
-            continue   # این اسم قبلاً تو پنل اصلی بوده؛ شماره‌ی بعدی
-        release_trial_number(number)   # خطای دیگه: شماره سوخت نشه
-        break
-    if res['success'] and res['sub_url']:
-        set_free_trial(chat_id)
-        save_user_config(chat_id, res['sub_url'], res['config_id'], trial_gb, trial_label, trial_days, 0)
-        set_config_note(res['config_id'], build_config_note(chat_id, get_username_db(chat_id), 0))
-        if lang == 'en':
-            trial_text = u(chat_id, 'trial_ready', sub_url=str(res['sub_url']), divider=DIVIDER,
-                           trial_gb='%g' % trial_gb, trial_days=str(trial_days))
+        if res['success'] and res['sub_url']:
+            charged = 0        # تست ساخته شد؛ پول نگه داشته می‌شه
+            set_free_trial(chat_id)
+            try:
+                save_user_config(chat_id, res['sub_url'], res['config_id'], trial_gb, trial_label, trial_days, 0)
+                set_config_note(res['config_id'], build_config_note(chat_id, get_username_db(chat_id), 0))
+            except Exception as _sv_err:
+                print('⚠️ ثبت کانفیگ تست ناموفق (کانفیگ ساخته شده، لینک برای کاربر فرستاده می‌شه):', _sv_err)
+            if lang == 'en':
+                trial_text = u(chat_id, 'trial_ready', sub_url=str(res['sub_url']), divider=DIVIDER,
+                               trial_gb='%g' % trial_gb, trial_days=str(trial_days))
+            else:
+                trial_text = get_bot_text_fmt(
+                    'trial_ready', DEFAULT_TRIAL_READY,
+                    sub_url=str(res['sub_url']), divider=DIVIDER,
+                    trial_gb='%g' % trial_gb, trial_days=str(trial_days),
+                )
+            send_message(chat_id, trial_text)
         else:
-            trial_text = get_bot_text_fmt(
-                'trial_ready', DEFAULT_TRIAL_READY,
-                sub_url=str(res['sub_url']), divider=DIVIDER,
-                trial_gb='%g' % trial_gb, trial_days=str(trial_days),
-            )
-        send_message(chat_id, trial_text)
-    else:
-        # فقط وقتی پنل صراحتاً بگه «این تست قبلاً گرفته شده» کاربر رو ثبت می‌کنیم.
-        # استثناهای شبکه و خطاهای عمومی (مثل label_duplicate) کاربر رو «تست‌گرفته» نمی‌کنن.
-        err_code = str(res.get('error_code') or '').lower()
-        if err_code and any(k in err_code for k in TRIAL_USED_PANEL_CODES):
-            mark_trial_exhausted(chat_id)
-            send_message(chat_id, u(chat_id, 'trial_used_on_panel'))
-        else:
-            print('⚠️ تست رایگان ناموفق برای', chat_id, ':', res)
-            send_message(chat_id, u(chat_id, 'trial_error') if lang == 'en' else get_bot_text('trial_error', DEFAULT_TRIAL_ERROR))
+            # فقط وقتی پنل صراحتاً بگه «این تست قبلاً گرفته شده» کاربر رو ثبت می‌کنیم.
+            # استثناهای شبکه و خطاهای عمومی (مثل label_duplicate) کاربر رو «تست‌گرفته» نمی‌کنن.
+            err_code = str(res.get('error_code') or '').lower()
+            if err_code and any(k in err_code for k in TRIAL_USED_PANEL_CODES):
+                mark_trial_exhausted(chat_id)
+                send_message(chat_id, u(chat_id, 'trial_used_on_panel'))
+            else:
+                print('⚠️ تست ناموفق برای', chat_id, ':', res)
+                send_message(chat_id, u(chat_id, 'trial_error') if lang == 'en' else get_bot_text('trial_error', DEFAULT_TRIAL_ERROR))
+    finally:
+        if charged > 0:
+            try:
+                update_wallet_db(chat_id, charged, 'refund_trial_failed')
+                send_message(chat_id, u(chat_id, 'trial_paid_refunded', price=charged))
+            except Exception as _rf_err:
+                print('⚠️ برگشت پول تست پولی ناموفق بود — دستی بررسی شود:', chat_id, charged, _rf_err)
+                try:
+                    send_message(ADMIN_ID, f'⚠️ برگشت پول تست پولی کاربر {chat_id} به مبلغ {charged:,} تومان ناموفق بود؛ دستی از پنل جبران کنید.', parse_mode=None)
+                except Exception:
+                    pass
 
 
 # لینک‌های دانلود برنامه‌ی V2Pro (با متغیر محیطی هم قابل تغییرن)
@@ -6295,6 +6528,107 @@ def config_alerts_watcher():
         time.sleep(max(5, _setting_int('alert_interval_min', 30)) * 60)
 
 
+
+# ---------------------------------------------------------------------------
+# ماندگاری مرحله‌ی هر کاربر (user_steps) تو دیتابیس: با ری‌استارت/ریدیپلوی کاربری که وسط شارژ، پشتیبانی،
+# تغییر نام و... بوده دوباره از اول شروع نمی‌کنه. هر چند ثانیه فقط ورودی‌های تغییرکرده نوشته می‌شن.
+# مرحله‌های «تایید پول‌دار» (تایید خرید/تمدید/حذف/تست پولی) عمداً بازیابی نمی‌شن تا قیمتِ قدیمی تایید نشه.
+# هیچ رمز/کلیدی تو user_steps نیست (رمز فروشنده فقط ارسال می‌شه و ذخیره نمی‌شه).
+# ---------------------------------------------------------------------------
+_STEPS_TTL = 6 * 3600
+_STEPS_NO_RESTORE = {'confirm_buy', 'ext_confirm', 'trial_pay_confirm', 'confirm_delete', 'buy_enter_discount', 'pick_quantity'}
+_steps_saved = {}
+
+
+@with_db_retry
+def _steps_db_init_and_load():
+    conn = get_conn()
+    c = conn.cursor()
+    c.execute('CREATE TABLE IF NOT EXISTS user_steps_store (user_id TEXT PRIMARY KEY, value TEXT, updated_at REAL)')
+    c.execute('DELETE FROM user_steps_store WHERE updated_at < ?', (time.time() - _STEPS_TTL,))
+    c.execute('SELECT user_id, value FROM user_steps_store')
+    rows = c.fetchall()
+    conn.commit()
+    conn.close()
+    return rows
+
+
+@with_db_retry
+def _steps_db_write(upserts, deletes):
+    conn = get_conn()
+    c = conn.cursor()
+    now = time.time()
+    for k, v in upserts:
+        c.execute('INSERT INTO user_steps_store (user_id, value, updated_at) VALUES (?, ?, ?) '
+                  'ON CONFLICT(user_id) DO UPDATE SET value=excluded.value, updated_at=excluded.updated_at', (k, v, now))
+    for k in deletes:
+        c.execute('DELETE FROM user_steps_store WHERE user_id=?', (k,))
+    conn.commit()
+    conn.close()
+
+
+def restore_user_steps():
+    try:
+        n = 0
+        for k, v in _steps_db_load_safe():
+            try:
+                d = json.loads(v)
+            except Exception:
+                continue
+            if isinstance(d, dict) and d and d.get('step') not in _STEPS_NO_RESTORE and str(k) not in user_steps:
+                user_steps[str(k)] = d
+                _steps_saved[str(k)] = v
+                n += 1
+        if n:
+            print(f'♻️ مرحله‌ی {n} کاربر از دیتابیس بازیابی شد.')
+    except Exception as e:
+        print('⚠️ بازیابی user_steps ناموفق بود:', e)
+
+
+def _steps_db_load_safe():
+    return _steps_db_init_and_load()
+
+
+def flush_user_steps():
+    ups, dels = [], []
+    live = set()
+    for k, v in list(user_steps.items()):
+        k = str(k)
+        live.add(k)
+        if not v:
+            if k in _steps_saved:
+                dels.append(k)
+            continue
+        try:
+            j = json.dumps(v, sort_keys=True, ensure_ascii=False)
+        except Exception:
+            continue
+        if _steps_saved.get(k) != j:
+            ups.append((k, j))
+    dels.extend(k for k in list(_steps_saved) if k not in live and k not in dels)
+    if not ups and not dels:
+        return
+    _steps_db_write(ups, dels)
+    for k, j in ups:
+        _steps_saved[k] = j
+    for k in dels:
+        _steps_saved.pop(k, None)
+
+
+def user_steps_flusher(interval=4):
+    while True:
+        time.sleep(interval)
+        try:
+            flush_user_steps()
+        except Exception as e:
+            print('⚠️ ذخیره‌ی user_steps ناموفق بود:', e)
+
+
+import atexit
+atexit.register(lambda: (flush_user_steps() if True else None))
+restore_user_steps()
+threading.Thread(target=user_steps_flusher, daemon=True).start()
+
 _HEALTH_PORT = int(os.getenv("PORT", "8080"))
 # وقتی بات و پنل تو یه سرویس با start.py اجرا می‌شن، پورت مال پنله و start.py این رو ۱ می‌ذاره
 if os.getenv("DISABLE_HEALTH_SERVER") != "1" and start_health_server(_HEALTH_PORT):
@@ -6366,7 +6700,7 @@ def process_update(update):
 
         elif data.startswith('reord_'):
             try:
-                order_id = int(data.split('_', 1)[1])
+                order_id = _cb_int(data, 1, 1)
             except ValueError:
                 order_id = 0
             order = get_order_row(chat_id, order_id)
@@ -6396,7 +6730,7 @@ def process_update(update):
                 )
 
         elif data.startswith('reorder_'):
-            row_id = int(data.split('_', 1)[1])
+            row_id = _cb_int(data, 1, 1)
             cfg = get_config_row(chat_id, row_id)
             if not cfg:
                 send_message(chat_id, u(chat_id, 'reorder_not_found'))
@@ -6595,7 +6929,7 @@ def process_update(update):
         # ---------------- مدیریت کانفیگ (تمدید/تغییر نام/توقف/ازسرگیری/تغییر لینک) ----------------
 
         elif data.startswith('managecfg_'):
-            row_id = int(data.split('_', 1)[1])
+            row_id = _cb_int(data, 1, 1)
             cfg = get_config_row(chat_id, row_id)
             if not cfg:
                 send_message(chat_id, u(chat_id, 'config_not_found'))
@@ -6604,7 +6938,7 @@ def process_update(update):
 
         elif data.startswith('qrenew_'):
             try:
-                _rid = int(data.split('_', 1)[1])
+                _rid = _cb_int(data, 1, 1)
             except ValueError:
                 _rid = 0
             _pack = quick_renew_pack(chat_id, _rid)
@@ -6631,7 +6965,7 @@ def process_update(update):
                                      {'text': u(chat_id, 'btn_cancel'), 'callback_data': 'extconfirm_no'}]]})
 
         elif data.startswith('cfgext_'):
-            row_id = int(data.split('_', 1)[1])
+            row_id = _cb_int(data, 1, 1)
             cfg = get_config_row(chat_id, row_id)
             if not cfg:
                 send_message(chat_id, u(chat_id, 'config_not_found'))
@@ -6640,7 +6974,7 @@ def process_update(update):
                 send_message(chat_id, u(chat_id, 'ext_ask_gb'), reply_markup=cancel_kb(chat_id))
 
         elif data.startswith('cfgrename_'):
-            row_id = int(data.split('_', 1)[1])
+            row_id = _cb_int(data, 1, 1)
             cfg = get_config_row(chat_id, row_id)
             if not cfg:
                 send_message(chat_id, u(chat_id, 'config_not_found'))
@@ -6649,7 +6983,7 @@ def process_update(update):
                 send_message(chat_id, u(chat_id, 'rename_ask'), reply_markup=cancel_kb(chat_id))
 
         elif data.startswith('cfgqr_'):
-            row_id = int(data.split('_', 1)[1])
+            row_id = _cb_int(data, 1, 1)
             cfg = get_config_row(chat_id, row_id)
             if not cfg:
                 send_message(chat_id, u(chat_id, 'config_not_found'))
@@ -6666,7 +7000,7 @@ def process_update(update):
                     send_message(chat_id, u(chat_id, 'qr_error'))
 
         elif data.startswith('cfgpause_'):
-            row_id = int(data.split('_', 1)[1])
+            row_id = _cb_int(data, 1, 1)
             cfg = get_config_row(chat_id, row_id)
             if not cfg:
                 send_message(chat_id, u(chat_id, 'config_not_found'))
@@ -6680,7 +7014,7 @@ def process_update(update):
                     send_message(chat_id, u(chat_id, 'pause_error'))
 
         elif data.startswith('cfgresume_'):
-            row_id = int(data.split('_', 1)[1])
+            row_id = _cb_int(data, 1, 1)
             cfg = get_config_row(chat_id, row_id)
             if not cfg:
                 send_message(chat_id, u(chat_id, 'config_not_found'))
@@ -6694,7 +7028,7 @@ def process_update(update):
                     send_message(chat_id, u(chat_id, 'resume_error'))
 
         elif data.startswith('cfgrotate_'):
-            row_id = int(data.split('_', 1)[1])
+            row_id = _cb_int(data, 1, 1)
             cfg = get_config_row(chat_id, row_id)
             if not cfg:
                 send_message(chat_id, u(chat_id, 'config_not_found'))
@@ -6712,6 +7046,14 @@ def process_update(update):
                         send_message(chat_id, u(chat_id, 'rotate_success_no_url'))
                 else:
                     send_message(chat_id, u(chat_id, 'rotate_error'))
+
+        elif data == 'trial_pay_yes':
+            _ts = user_steps.get(str(chat_id), {})
+            if _ts.get('step') == 'trial_pay_confirm':
+                user_steps[str(chat_id)] = {}      # یک‌بار مصرف؛ دوبار زدن دکمه دوبار پول کم نمی‌کنه
+                action_trial(chat_id, confirmed=True, expected_price=_ts.get('price'))
+            else:
+                main_menu(chat_id)
 
         elif data == 'extconfirm_yes':
             s = user_steps.get(str(chat_id), {})
@@ -6856,7 +7198,7 @@ def process_update(update):
 
 
         elif data.startswith('reply_ticket_') and chat_id == ADMIN_ID:
-            tid = int(data.split('_')[2])
+            tid = _cb_int(data, 2)
             user_steps[str(chat_id)] = {'step': 'admin_reply', 'ticket_id': tid}
             send_message(
                 chat_id,
@@ -6865,7 +7207,7 @@ def process_update(update):
             )
 
         elif data.startswith('close_ticket_') and chat_id == ADMIN_ID:
-            tid = int(data.split('_')[2])
+            tid = _cb_int(data, 2)
             update_ticket_status(tid, 'closed')
             send_message(chat_id, u('fa', 'admin_ticket_closed', tid=str(tid)))
 
@@ -6891,14 +7233,14 @@ def process_update(update):
 
         elif data.startswith('donito_manual_'):
             try:
-                _rid = int(data.split('_')[2])
+                _rid = _cb_int(data, 2)
             except (IndexError, ValueError):
                 _rid = 0
             donito_manual_start(chat_id, _rid)
 
         elif data.startswith('donito_check_'):
             try:
-                _rid = int(data.split('_')[2])
+                _rid = _cb_int(data, 2)
             except (IndexError, ValueError):
                 _rid = 0
             _req = get_topup_request(_rid) if _rid else None
@@ -6935,12 +7277,12 @@ def process_update(update):
             admin_remove_channel(chat_id, data[len('admin_ch_del_'):])
 
         elif data.startswith('topup_acc_') and chat_id == ADMIN_ID:
-            req_id = int(data.split('_')[2])
+            req_id = _cb_int(data, 2)
             if not approve_topup_request(req_id):
                 send_message(ADMIN_ID, u('fa', 'admin_already_reviewed'))
 
         elif data.startswith('topup_rej_') and chat_id == ADMIN_ID:     # رد کردن فقط با خود ادمینه، بات هیچ‌وقت خودش رد نمی‌کنه
-            req_id = int(data.split('_')[2])
+            req_id = _cb_int(data, 2)
             req = get_topup_request(req_id)
             if req and req[3] == 'pending' and claim_topup_pending(req_id, 'rejected'):
                 send_message(req[1], u(req[1], 'topup_rejected'))
@@ -7390,7 +7732,7 @@ def process_update(update):
 # env ها (همه اختیاری):
 #   GATE_ENABLED   : 0 = کل قابلیت خاموش (پیش‌فرض 1)
 #   CHANNEL_LINK   : لینک/یوزرنیم کانال (پیش‌فرض https://splus.ir/skytunnel)
-#   GATE_FAIL_OPEN : اگه اکانت هنوز وصل نیست/چک جواب نداد: 1 = کاربر رد شه، 0 = بسته بشه
+#   GATE_FAIL_OPEN : اگه اکانت هنوز وصل نیست/چک جواب نداد: 1 = کاربر رد شه، 0 = بسته بشه (پیش‌فرض 0)
 # دستورهای ادمین: /start (لاگین)، /gatestatus، /gatedisconnect، /cancel
 #
 # نکته: سشن لاگین فقط روی دیسک سرور نگه داشته می‌شه و تو دیتابیس ذخیره نمی‌شه. با ریدیپلوی
@@ -7398,7 +7740,7 @@ def process_update(update):
 # با /start لاگین کنه.
 GATE_ENABLED = os.getenv("GATE_ENABLED", "1").strip() != "0"
 CHANNEL_LINK = os.getenv("CHANNEL_LINK", "https://splus.ir/skytunnel").strip()
-GATE_FAIL_OPEN = os.getenv("GATE_FAIL_OPEN", "1").strip() != "0"
+GATE_FAIL_OPEN = os.getenv("GATE_FAIL_OPEN", "0").strip() == "1"   # پیش‌فرض: بسته (fail-closed)
 GATE_SESSION_NAME = "gate_session"
 GATE_CONFIG_PATH = "gate_config.json"
 GATE_CODE_TIMEOUT = 300       # چند ثانیه منتظر کد/رمز از ادمین بمونه
@@ -8251,12 +8593,22 @@ BAN_NOTICE_EVERY = 600
 
 @with_db_retry
 def _fetch_banned(user_id):
+    """banned_until = 0 یعنی بن دائم؛ عدد مثبت یعنی بن موقت تا اون زمان (epoch). بعد از انقضا خودکار آزاد می‌شه."""
     conn = get_conn()
     c = conn.cursor()
-    c.execute('SELECT banned FROM users WHERE user_id=?', (user_id,))
+    c.execute('SELECT banned, banned_until FROM users WHERE user_id=?', (user_id,))
     row = c.fetchone()
+    if not row or not row[0]:
+        conn.close()
+        return False
+    until = float(row[1] or 0)
+    if until > 0 and time.time() >= until:
+        c.execute('UPDATE users SET banned=0, banned_until=0 WHERE user_id=?', (user_id,))
+        conn.commit()
+        conn.close()
+        return False
     conn.close()
-    return bool(row and row[0])
+    return True
 
 
 def is_user_banned(user_id):
@@ -8302,6 +8654,98 @@ def ban_gate(update):
     return True
 
 
+# کاربرهایی که قبلاً عضویتشون تأیید شده تا GATE_VERIFIED_DAYS روز تو دیتابیس می‌مونن؛ اگه اکانت یوزربات موقتاً
+# قطع بود، فقط همین‌ها (نه کاربر ناشناس/جدید) بدون چک رد می‌شن. بقیه همچنان بسته‌ان (fail-closed).
+GATE_VERIFIED_DAYS = max(1, int(os.getenv("GATE_VERIFIED_DAYS", "7") or 7))
+_gate_verified_mem = {}      # user_id -> زمان آخرین نوشتن/خوندن مثبت
+_GATE_VERIFIED_WRITE_EVERY = 3600
+
+
+@with_db_retry
+def _gate_verified_write(user_id):
+    conn = get_conn()
+    c = conn.cursor()
+    c.execute('CREATE TABLE IF NOT EXISTS gate_verified (user_id INTEGER PRIMARY KEY, verified_at REAL)')
+    c.execute('INSERT INTO gate_verified (user_id, verified_at) VALUES (?, ?) '
+              'ON CONFLICT(user_id) DO UPDATE SET verified_at=excluded.verified_at', (user_id, time.time()))
+    conn.commit()
+    conn.close()
+
+
+@with_db_retry
+def _gate_verified_read(user_id):
+    conn = get_conn()
+    c = conn.cursor()
+    c.execute('CREATE TABLE IF NOT EXISTS gate_verified (user_id INTEGER PRIMARY KEY, verified_at REAL)')
+    c.execute('SELECT verified_at FROM gate_verified WHERE user_id=?', (user_id,))
+    row = c.fetchone()
+    conn.close()
+    return float(row[0]) if row and row[0] else 0.0
+
+
+def gate_mark_verified(user_id):
+    now = time.time()
+    if now - _gate_verified_mem.get(user_id, 0) < _GATE_VERIFIED_WRITE_EVERY:
+        return
+    if len(_gate_verified_mem) > 100000:
+        _gate_verified_mem.clear()
+    _gate_verified_mem[user_id] = now
+    _submit_user_write(_gate_verified_write, user_id)
+
+
+def gate_recently_verified(user_id):
+    """True اگه این کاربر تو GATE_VERIFIED_DAYS روز اخیر عضو بودنش تأیید شده."""
+    if time.time() - _gate_verified_mem.get(user_id, 0) < GATE_VERIFIED_DAYS * 86400 and user_id in _gate_verified_mem:
+        return True
+    try:
+        ts = _gate_verified_read(user_id)
+    except Exception as e:
+        print('⚠️ خوندن gate_verified ناموفق:', e)
+        return False
+    if ts and time.time() - ts < GATE_VERIFIED_DAYS * 86400:
+        _gate_verified_mem[user_id] = ts
+        return True
+    return False
+
+
+def gate_reconnect_watcher():
+    """اگه اکانت یوزربات قطع شد (و سشنش روی دیسک هست و ادمین دستی قطعش نکرده)، خودکار با backoff دوباره وصلش می‌کنه."""
+    time.sleep(60)
+    fails = 0
+    while True:
+        try:
+            if GATE_ENABLED and G_AVAILABLE and not (_G['running'] or _G['starting'] or _G['waiting']):
+                phone = _g_cfg_load().get('phone')
+                if phone and _g_session_files():
+                    print('[gate] اکانت قطع بود؛ تلاش برای وصل شدن دوباره ...')
+                    g_start_userbot(phone)
+                    fails += 1
+                else:
+                    fails = 0
+            else:
+                fails = 0
+        except Exception as e:
+            print('[gate] reconnect watcher error:', repr(e))
+        time.sleep(min(60 * (2 ** min(fails, 5)), 1800))
+
+
+_GATE_ALERT = {'t': 0.0}
+
+
+def _gate_alert_admin_throttled(every=1800):
+    """وقتی چک عضویت جواب نمی‌ده (اکانت قطعه) و گیت بسته‌ست، حداکثر هر ۳۰ دقیقه یک‌بار به ادمین خبر می‌ده."""
+    now = time.time()
+    if now - _GATE_ALERT['t'] < every:
+        return
+    _GATE_ALERT['t'] = now
+    try:
+        send_message(ADMIN_ID, '⚠️ چک عضویت اجباری جواب نمی‌ده (اکانت یوزربات وصل نیست یا خطا داره). '
+                               + ('کاربرها فعلاً بدون چک رد می‌شن.' if GATE_FAIL_OPEN else 'کاربرهای تأییدشده‌ی قبلی رد می‌شن ولی کاربر جدید تا وصل شدن اکانت وارد نمی‌شه. ربات خودش دوباره وصل شدن رو امتحان می‌کنه.')
+                               + '\nوضعیت: /gatestatus — لاگین دوباره: /start', parse_mode=None)
+    except Exception as e:
+        print('⚠️ اطلاع قطع‌بودن گیت به ادمین نرفت:', e)
+
+
 def join_gate(update):
     """True یعنی این آپدیت همین‌جا مدیریت شد (کاربر عضو همه‌ی کانال‌ها نیست) و نباید به
     process_update بره؛ False یعنی ادامه بده."""
@@ -8335,6 +8779,7 @@ def join_gate(update):
             time.sleep(2)
             status, missing = check_channels_status(user_id, use_cache=False)
         if status is True:
+            gate_mark_verified(user_id)
             add_user(chat_id)
             user_steps[str(chat_id)] = {}
             send_message(chat_id, u(chat_id, 'join_ok'))
@@ -8349,9 +8794,12 @@ def join_gate(update):
     # لیست اعضا هر ~۱۰ ثانیه تو پس‌زمینه تازه می‌شه؛ پس /start نیازی به چک اجباری (کند) نداره
     status, missing = check_channels_status(user_id)
     if status is True:
+        gate_mark_verified(user_id)
         return False
-    if status is None and GATE_FAIL_OPEN:
-        return False
+    if status is None:
+        _gate_alert_admin_throttled()
+        if GATE_FAIL_OPEN or gate_recently_verified(user_id):
+            return False
 
     if cb_id:
         answer_callback(cb_id)
@@ -8524,6 +8972,12 @@ def runtime_settings_watcher(interval=15):
     while True:
         time.sleep(interval)
         apply_runtime_settings()
+        try:   # مرحله‌های خالی/رهاشده‌ی کاربرها از حافظه پاک بشن
+            if len(user_steps) > 5000:
+                for k in [k for k, v in list(user_steps.items()) if not v]:
+                    user_steps.pop(k, None)
+        except Exception:
+            pass
         try:   # اگه صف پردازش پیام‌ها انباشته بشه، یعنی تردها منتظر کار کندی گیر کردن
             q_upd = UPDATE_EXECUTOR._work_queue.qsize()
             q_bg = BG_EXECUTOR._work_queue.qsize()
@@ -8537,6 +8991,7 @@ apply_runtime_settings()
 threading.Thread(target=runtime_settings_watcher, daemon=True).start()
 
 g_boot_restore()
+threading.Thread(target=gate_reconnect_watcher, daemon=True).start()
 
 
 _RATE = {}
@@ -8574,7 +9029,7 @@ def _rate_limited(chat_id, limit=None, window=None):
 # بن دائم خودکارِ کاربرِ فشارآور
 # شرط: (۱) قابلیت از پنل روشن باشه، (۲) کاربر از سقف پیام (rate_limit) رد بشه،
 # (۳) هم‌زمان صف پردازش ربات پر باشه (auto_ban_queue)، (۴) این اتفاق به تعداد auto_ban_strikes
-# بار تو ۵ دقیقه تکرار بشه. نتیجه: users.banned = 1 (دائم؛ فقط از پنل ادمین آزاد می‌شه).
+# بار تو ۵ دقیقه تکرار بشه. نتیجه: users.banned = 1؛ دائم (banned_until=0) یا موقت (banned_until=زمان آزادی) طبق تنظیم پنل.
 # ---------------------------------------------------------------------------
 _AB_STRIKES = {}          # chat_id -> [تعداد, زمان آخرین اخطار]
 _AB_LOCK = threading.Lock()
@@ -8589,62 +9044,174 @@ def _update_queue_size():
 
 
 @with_db_retry
-def _ban_user_permanently_db(user_id):
+def _auto_ban_db(user_id, until):
+    """until=0 → دائم. اگه کاربر از قبل دائم مسدود بوده، به موقت تنزل پیدا نمی‌کنه."""
     conn = get_conn()
     c = conn.cursor()
-    c.execute('''INSERT INTO users (user_id, wallet, joined_at, banned)
-        VALUES (?, 0, ?, 1)
-        ON CONFLICT(user_id) DO UPDATE SET banned=1''',
-        (user_id, datetime.now().isoformat()))
+    c.execute('''INSERT INTO users (user_id, wallet, joined_at, banned, banned_until)
+        VALUES (?, 0, ?, 1, ?)
+        ON CONFLICT(user_id) DO UPDATE SET banned=1,
+        banned_until = CASE WHEN COALESCE(users.banned,0)=1 AND COALESCE(users.banned_until,0)=0
+                            THEN 0 ELSE excluded.banned_until END''',
+        (user_id, datetime.now().isoformat(), until))
     conn.commit()
     conn.close()
 
 
-def _notify_admin_auto_ban(chat_id, qsize, strikes):
+def _auto_ban_apply(chat_id, until, qsize, strikes):
+    """تو BG_EXECUTOR اجرا می‌شه تا حلقه‌ی دریافت پیام‌ها به خاطر نوشتن دیتابیس معطل نشه."""
     try:
+        _auto_ban_db(chat_id, until)
+        _ban_cache[chat_id] = (True, time.time())
+    except Exception as e:
+        print('⚠️ ثبت بن خودکار تو دیتابیس ناموفق بود:', e)
+        return
+    try:
+        if until > 0:
+            how = f'به‌مدت {get_auto_ban_minutes()} دقیقه (موقت)'
+            tail = 'بعد از اتمام مدت خودکار آزاد می‌شه؛ برای آزاد کردن زودتر: پنل وب ← کاربران ← «مسدودها».'
+        else:
+            how = 'برای همیشه'
+            tail = 'برای آزاد کردن: پنل وب ← کاربران ← «مسدودها».'
         send_message(ADMIN_ID,
-                     f'🚨 بن دائم خودکار\nکاربر <code>{chat_id}</code> هم‌زمان با شلوغی ربات '
-                     f'(صف: {qsize}) {strikes} بار از سقف پیام رد شد و برای همیشه مسدود شد.\n'
-                     f'برای آزاد کردن: پنل وب ← کاربران ← «مسدودها».')
+                     f'🚨 بن خودکار\nکاربر <code>{chat_id}</code> هم‌زمان با شلوغی ربات '
+                     f'(صف: {qsize}) {strikes} بار از سقف پیام رد شد و {how} مسدود شد.\n{tail}')
     except Exception as e:
         print('⚠️ اطلاع به ادمین از بن خودکار ناموفق بود:', e)
 
 
+_AB_ALWAYS = {}           # chat_id -> [تعداد, زمان شروع]  (بن مستقل از شلوغی)
+AB_ALWAYS_TTL = 600
+
+
 def _auto_ban_on_flood(chat_id):
-    """بعد از هر بار «رد شدن از سقف پیام» صدا زده می‌شه. اگه شرایط بن دائم جمع بود کاربر رو مسدود می‌کنه."""
+    """بعد از هر بار «رد شدن از سقف پیام / سقف هم‌زمانی» صدا زده می‌شه. دو راه بن:
+    (۱) هم‌زمان با شلوغی ربات به تعداد auto_ban_strikes بار تو ۵ دقیقه؛
+    (۲) مستقل از شلوغی، auto_ban_always بار تو ۱۰ دقیقه (0 = خاموش).
+    بن دائم یا موقت طبق تنظیم پنل؛ نوشتن دیتابیس تو BG_EXECUTOR انجام می‌شه."""
     try:
         if chat_id is None or chat_id == ADMIN_ID or not get_auto_ban_enabled():
             return False
         qsize = _update_queue_size()
-        if qsize < get_auto_ban_queue():
+        busy = qsize >= get_auto_ban_queue()
+        always = get_auto_ban_always()
+        if not busy and not always:
             return False                      # ربات شلوغ نیست؛ فقط همون نادیده‌گرفتن عادیِ پیام‌ها
         now = time.time()
         need = get_auto_ban_strikes()
+        ban_count = 0
         with _AB_LOCK:
-            rec = _AB_STRIKES.get(chat_id)
-            if not rec or now - rec[1] > AB_STRIKE_TTL:
-                rec = [0, now]
-            rec[0] += 1
-            rec[1] = now
-            _AB_STRIKES[chat_id] = rec
-            count = rec[0]
-            if len(_AB_STRIKES) > 5000:
-                for k in [k for k, v in _AB_STRIKES.items() if now - v[1] > AB_STRIKE_TTL]:
-                    _AB_STRIKES.pop(k, None)
-            if count < need:
+            if busy:
+                rec = _AB_STRIKES.get(chat_id)
+                if not rec or now - rec[1] > AB_STRIKE_TTL:
+                    rec = [0, now]
+                rec[0] += 1
+                rec[1] = now
+                _AB_STRIKES[chat_id] = rec
+                if rec[0] >= need:
+                    ban_count = rec[0]
+            if always:
+                rec2 = _AB_ALWAYS.get(chat_id)
+                if not rec2 or now - rec2[1] > AB_ALWAYS_TTL:
+                    rec2 = [0, now]
+                rec2[0] += 1
+                _AB_ALWAYS[chat_id] = rec2
+                if rec2[0] >= always and not ban_count:
+                    ban_count = rec2[0]
+            for d, ttl, idx in ((_AB_STRIKES, AB_STRIKE_TTL, 1), (_AB_ALWAYS, AB_ALWAYS_TTL, 1)):
+                if len(d) > 5000:
+                    for k in [k for k, v in d.items() if now - v[idx] > ttl]:
+                        d.pop(k, None)
+            if not ban_count:
                 return False
             _AB_STRIKES.pop(chat_id, None)
-        _ban_user_permanently_db(chat_id)
-        _ban_cache[chat_id] = (True, time.time())   # همین لحظه اعمال شه، منتظر TTL کش نمونه
-        print(f'🚨 [auto-ban] کاربر {chat_id} برای همیشه مسدود شد (queue={qsize}, strikes={count})')
+            _AB_ALWAYS.pop(chat_id, None)
+        until = 0 if get_auto_ban_permanent() else now + get_auto_ban_minutes() * 60
+        _ban_cache[chat_id] = (True, now)     # همین لحظه اعمال شه، منتظر دیتابیس نمونه
+        print(f'🚨 [auto-ban] کاربر {chat_id} مسدود شد ({"دائم" if until == 0 else "موقت"}, queue={qsize}, hits={ban_count})')
         try:
-            BG_EXECUTOR.submit(_notify_admin_auto_ban, chat_id, qsize, count)
+            BG_EXECUTOR.submit(_auto_ban_apply, chat_id, until, qsize, ban_count)
         except Exception:
-            pass
+            _auto_ban_apply(chat_id, until, qsize, ban_count)
         return True
     except Exception as e:
         print('⚠️ auto-ban:', e)
         return False
+
+
+_INFLIGHT = {}            # chat_id -> تعداد آپدیتِ تو صف/در حال پردازش
+_INFLIGHT_LOCK = threading.Lock()
+_GLOBAL_ADMIT = deque()   # زمان آپدیت‌های واردشده به صف (فقط تو حلقه‌ی دریافت پیام استفاده می‌شه)
+
+
+def _inflight_release(chat_id):
+    with _INFLIGHT_LOCK:
+        n = _INFLIGHT.get(chat_id, 0) - 1
+        if n <= 0:
+            _INFLIGHT.pop(chat_id, None)
+        else:
+            _INFLIGHT[chat_id] = n
+
+
+def _tracked_process(update, tracked_id):
+    try:
+        safe_process_update(update)
+    finally:
+        if tracked_id is not None:
+            _inflight_release(tracked_id)
+
+
+def _prefilter_update(update):
+    """فیلتر سبک تو خودِ حلقه‌ی دریافت پیام، قبل از رفتن آپدیت به صف (UPDATE_EXECUTOR).
+    خروجی: (drop, tracked_id). drop=True یعنی آپدیت همین‌جا دور ریخته شد. ترتیب چک‌ها:
+      ۱) کاربر مسدوده (و به‌تازگی پیام «مسدودی» گرفته)
+      ۲) سقف هم‌زمانی هر کاربر (max_inflight_per_user) — جلوی پر شدن ترددها با دکمه‌های پشت‌سرهم
+      ۳) سقف پیام هر کاربر؛ وقتی ربات شلوغه سقف کمتر (busy_rate_limit)
+      ۴) وقتی ربات شلوغه: سقف کلِ آپدیت/ثانیه برای همه روی هم (busy_global_per_sec) — برای حمله با چند اکانت
+    هیچ کوئری دیتابیسی نمی‌زنه (فقط کش حافظه)، پس حلقه‌ی دریافت رو کند نمی‌کنه."""
+    try:
+        if 'callback_query' in update:
+            chat_id = ((update['callback_query'].get('message') or {}).get('chat') or {}).get('id')
+        elif 'message' in update:
+            chat_id = (update['message'].get('chat') or {}).get('id')
+        else:
+            return False, None
+        if not isinstance(chat_id, int) or chat_id <= 0 or chat_id == ADMIN_ID:
+            return False, None
+        now = time.time()
+        hit = _ban_cache.get(chat_id)
+        if hit and hit[0] and now - hit[1] < BAN_CACHE_TTL and now - _ban_notice_at.get(chat_id, 0) < BAN_NOTICE_EVERY:
+            return True, None
+
+        cap = get_max_inflight()
+        if cap > 0 and _INFLIGHT.get(chat_id, 0) >= cap:
+            _auto_ban_on_flood(chat_id)
+            return True, None
+
+        busy = _update_queue_size() >= get_auto_ban_queue()
+        limit = get_rate_limit_count()
+        bl = get_busy_rate_limit()
+        if busy and bl > 0:
+            limit = bl if limit <= 0 else min(limit, bl)
+        if _rate_limited(chat_id, limit=limit):
+            _auto_ban_on_flood(chat_id)
+            return True, None
+
+        if busy:
+            gcap = get_busy_global_per_sec()
+            if gcap > 0:
+                while _GLOBAL_ADMIT and now - _GLOBAL_ADMIT[0] > 1.0:
+                    _GLOBAL_ADMIT.popleft()
+                if len(_GLOBAL_ADMIT) >= gcap:
+                    return True, None
+                _GLOBAL_ADMIT.append(now)
+
+        with _INFLIGHT_LOCK:
+            _INFLIGHT[chat_id] = _INFLIGHT.get(chat_id, 0) + 1
+        return False, chat_id
+    except Exception as e:
+        print('⚠️ prefilter:', e)
+    return False, None
 
 
 def safe_process_update(update):
@@ -8688,9 +9255,6 @@ def safe_process_update(update):
                     or (update.get('callback_query') or {}).get('data') or '?')
             print(f'[slow] chat={chat_id} {str(what)[:30]!r} gate={t1 - t0:.1f}s handler={t2 - t1:.1f}s')
 
-    if _rate_limited(chat_id):
-        _auto_ban_on_flood(chat_id)
-        return
     lock = get_chat_lock(chat_id) if chat_id is not None else None
     try:
         if lock:
@@ -8715,7 +9279,15 @@ while True:
                 # process_update/UPDATE_EXECUTOR بالای فایل) تا اگه یه کاربر منتظر
                 # یه عملیات کند (مثلاً ساخت کانفیگ) بود، جواب‌دادن به بقیه‌ی
                 # کاربرها معطل اون نمونه.
-                UPDATE_EXECUTOR.submit(safe_process_update, update)
+                _drop, _tid = _prefilter_update(update)
+                if _drop:
+                    continue      # اسپم/مسدود/بار اضافه؛ اصلاً وارد صف نمی‌شه
+                try:
+                    UPDATE_EXECUTOR.submit(_tracked_process, update, _tid)
+                except Exception:
+                    if _tid is not None:
+                        _inflight_release(_tid)
+                    raise
 
         else:
             # اگه سرور long-polling رو رعایت کرده (۲۵ ثانیه صبر کرده)، لازم نیست

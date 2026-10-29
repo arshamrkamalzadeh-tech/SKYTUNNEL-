@@ -1,5 +1,6 @@
 import os
 import re
+import math
 import json
 import hmac
 import string
@@ -8,6 +9,7 @@ import secrets
 import html as html_lib
 import time
 import threading
+from collections import deque
 from datetime import datetime, timedelta, timezone
 from functools import wraps
 
@@ -85,6 +87,8 @@ CONFIG_GROUPS = [
         ("trial_cooldown_hours", "حداقل فاصله‌ی بین دو تست رایگان یک کاربر (ساعت — اعشاری مجاز؛ 0 = بدون فاصله)", "0", "float"),
         ("trial_new_users_only", "تست رایگان فقط برای کاربرانی که هنوز خرید نکرده‌اند||روشن باشه: کسی که قبلاً حتی یک خرید داشته، دیگه تست نمی‌گیره", "0", "toggle"),
         ("trial_proto", "نوع سرویس تست رایگان — یکی از: both (هر دو) / xray (فقط کانفیگ) / wireguard / openvpn / dns", "both", "text"),
+        ("trial_paid", "تست پولی (به‌جای رایگان)||روشن باشه: کاربر قبل از گرفتن تست، «قیمت تست» رو از کیف پولش می‌پردازه. خاموش (پیش‌فرض) = تست رایگان", "0", "toggle"),
+        ("trial_price", "قیمت تست پولی (تومان) — فقط وقتی «تست پولی» روشنه؛ اگه ساخت تست شکست بخوره پول برمی‌گرده. 0 = رایگان", "0", "number"),
         ("default_gb", "حجم پیش‌فرض صفحه‌ی خرید (گیگ)", "1", "number"),
         ("default_days", "مدت پیش‌فرض صفحه‌ی خرید (روز)", "30", "number"),
         ("refund_ratio", "نسبت بازگشت وجه هنگام حذف کانفیگ (بین 0 تا 1؛ مثلاً 0.5 یعنی نصف ارزش باقی‌مانده)", "0.5", "float"),
@@ -107,8 +111,15 @@ CONFIG_GROUPS = [
         ("rate_limit_count", "حداکثر تعداد پیام/دکمه‌ی هر کاربر در بازه‌ی زیر؛ بیشتر از این نادیده گرفته می‌شه (0 = بدون محدودیت). ادمین مستثناست", "30", "number"),
         ("rate_limit_window", "طول بازه‌ی محدودیت بالا (ثانیه، حداقل 1) — مثلاً 30 پیام در 60 ثانیه", "60", "number"),
         ("auto_ban_enabled", "بن دائم خودکار کاربرِ فشارآور||روشن باشه: اگه کاربری از سقف پیام رد بشه و هم‌زمان ربات در آستانه‌ی کندی باشه (صف پردازش پر)، به تعداد «اخطار» تکرار کنه، برای همیشه مسدود می‌شه. فقط از صفحه‌ی کاربران آزاد می‌شه. ادمین مستثناست. بدون «سقف پیام» (بالا) کار نمی‌کنه", "0", "toggle"),
+        ("auto_ban_permanent", "نوع بن خودکار: دائم||روشن = بن دائم (فقط دستی از صفحه‌ی کاربران آزاد می‌شه). خاموش = بن موقت به‌مدت «مدت بن موقت» که بعدش خودکار آزاد می‌شه", "1", "toggle"),
+        ("auto_ban_minutes", "مدت بن موقت (دقیقه) — فقط وقتی «نوع بن: دائم» خاموشه", "60", "number"),
         ("auto_ban_queue", "آستانه‌ی کندی ربات برای بن خودکار (تعداد آپدیتِ منتظرِ پردازش تو صف)", "8", "number"),
         ("auto_ban_strikes", "تعداد اخطار تا بن دائم (هر بار رد شدن از سقف پیام هم‌زمان با شلوغی ربات = ۱ اخطار؛ اخطارها بعد از ۵ دقیقه صفر می‌شن)", "5", "number"),
+        ("auto_ban_always", "بن حتی وقتی ربات شلوغ نیست: تعداد دفعاتی که کاربر تو ۱۰ دقیقه از سقف پیام رد بشه (0 = خاموش)", "40", "number"),
+        ("max_inflight_per_user", "حداکثر آپدیتِ هم‌زمان هر کاربر (در حال پردازش + منتظر)؛ اضافه‌ها دور ریخته می‌شن (0 = خاموش)", "2", "number"),
+        ("busy_rate_limit", "سقف پیام هر کاربر وقتی ربات در آستانه‌ی کندیه (تو همون بازه‌ی «طول بازه»؛ 0 = خاموش)", "10", "number"),
+        ("busy_global_per_sec", "وقتی ربات شلوغه: حداکثر آپدیت در ثانیه برای کل ربات (همه‌ی کاربرها روی هم؛ 0 = خاموش)", "30", "number"),
+        ("user_write_backlog", "سقف نوشتن‌های معوقِ «آخرین فعالیت کاربر» تو دیتابیس؛ بیشتر بشه ثبت فعالیتِ کاربرهای قدیمی موقتاً رد می‌شه (0 = خاموش)", "300", "number"),
         ("extend_min_gb", "حداقل حجم هر تمدید (گیگ — اعشاری مجاز). جلوی تمدید تقریباً رایگان با حجم خیلی کم رو می‌گیره، چون قیمت فقط از حجم حساب می‌شه", "1", "float"),
         ("buy_max_gb", "سقف حجم هر خرید/تمدید (گیگ)", "100000", "number"),
         ("buy_max_days", "سقف مدت هر خرید/تمدید (روز)", "3650", "number"),
@@ -132,7 +143,7 @@ CONFIG_GROUPS = [
     ("⚙️ تنظیمات پیشرفته ربات (بدون نیاز به ری‌استارت)", [
         ("bot_username", "یوزرنیم ربات برای لینک دعوت (بدون @)", os.getenv("BOT_USERNAME", "SKYTUNNELbot"), "text"),
         ("gate_enabled", "عضویت اجباری کانال||خاموش = هیچ‌کس برای استفاده از ربات مجبور به عضویت نیست (کانال‌ها از داخل خود ربات، دکمه‌ی ادمین، مدیریت می‌شن)", "1", "toggle"),
-        ("gate_fail_open", "اگه چک عضویت جواب نداد، کاربر رد بشه||روشن = وقتی اکانت گیت وصل نیست یا چک خطا داد، کاربر وارد ربات می‌شه؛ خاموش = تا چک موفق نشه وارد نمی‌شه", "1", "toggle"),
+        ("gate_fail_open", "اگه چک عضویت جواب نداد، کاربر رد بشه||روشن = وقتی اکانت گیت وصل نیست یا چک خطا داد، کاربر وارد ربات می‌شه (ریسک: عضویت چک نمی‌شه)؛ خاموش (پیش‌فرض و امن‌تر) = اگه چک جواب نداد فقط کاربرهای تأییدشده‌ی ۷ روز اخیر وارد می‌شن، کاربر جدید نه؛ ادمین هم خبردار می‌شه و بات خودش دوباره وصل می‌شه", "0", "toggle"),
         ("gate_cache_ttl", "مدت اعتبار عضویتِ تاییدشده (ثانیه، حداقل 5)", "60", "number"),
         ("gate_sync_interval", "فاصله‌ی تازه‌سازی لیست اعضای کانال (ثانیه، حداقل 5؛ عدد کمتر = فشار بیشتر روی API سروش)", "30", "number"),
         ("divider", "خط جداکننده‌ی پیام‌های ربات", "┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄", "text"),
@@ -392,13 +403,19 @@ def normalize_setting(kind, raw):
     """(مقدار نرمال‌شده, پیام خطا). برای نوع‌های number/float/url/tiers/text."""
     if kind == "number":
         try:
-            return str(max(0, int(float(raw)))), None
-        except ValueError:
+            f = float(raw)
+            if not math.isfinite(f):
+                return None, "باید عدد صحیح باشه"
+            return str(max(0, int(f))), None
+        except (ValueError, OverflowError):
             return None, "باید عدد صحیح باشه"
     if kind == "float":
         try:
-            return "%g" % max(0.0, float(raw)), None
-        except ValueError:
+            f = float(raw)
+            if not math.isfinite(f):
+                return None, "باید عدد باشه (اعشاری هم مجازه)"
+            return "%g" % max(0.0, f), None
+        except (ValueError, OverflowError):
             return None, "باید عدد باشه (اعشاری هم مجازه)"
     if kind == "url":
         if not re.match(r"^https?://\S+$", raw):
@@ -594,7 +611,7 @@ def delete_discount_code(code):
 def get_all_user_ids():
     conn = get_conn()
     c = conn.cursor()
-    c.execute("SELECT user_id FROM users WHERE COALESCE(banned, 0) = 0")
+    c.execute("SELECT user_id FROM users WHERE NOT " + BANNED_ACTIVE_SQL)
     res = [r[0] for r in c.fetchall()]
     conn.close()
     return res
@@ -675,6 +692,7 @@ def ensure_schema():
             "ALTER TABLE user_configs ADD COLUMN base_gb REAL",
             "ALTER TABLE user_configs ADD COLUMN base_days INTEGER",
             "ALTER TABLE users ADD COLUMN banned INTEGER DEFAULT 0",
+            "ALTER TABLE users ADD COLUMN banned_until REAL DEFAULT 0",
         ):
             try:
                 c.execute(stmt)
@@ -867,7 +885,7 @@ USER_SORTS = {
 def _users_where(search, only_recent, only_banned=False):
     where, params = [], []
     if only_banned:
-        where.append("banned = 1")
+        where.append(BANNED_ACTIVE_SQL)
     if search:
         like = f"%{search}%"
         where.append("(CAST(user_id AS TEXT) LIKE ? OR username LIKE ? OR first_name LIKE ?)")
@@ -926,7 +944,7 @@ def get_banned_ids(ids):
     conn = get_conn()
     c = conn.cursor()
     try:
-        c.execute("SELECT user_id FROM users WHERE banned=1 AND user_id IN (%s)" % ",".join("?" * len(ids)), ids)
+        c.execute("SELECT user_id FROM users WHERE " + BANNED_ACTIVE_SQL + " AND user_id IN (%s)" % ",".join("?" * len(ids)), ids)
         res = {r[0] for r in c.fetchall()}
     except Exception as e:
         if "stream" in str(e).lower():
@@ -940,7 +958,7 @@ def get_banned_ids(ids):
 def set_user_banned(user_id, banned):
     conn = get_conn()
     c = conn.cursor()
-    c.execute("UPDATE users SET banned=? WHERE user_id=?", (1 if banned else 0, user_id))
+    c.execute("UPDATE users SET banned=?, banned_until=0 WHERE user_id=?", (1 if banned else 0, user_id))
     conn.commit()
     conn.close()
 
@@ -1047,7 +1065,7 @@ def get_full_stats():
     s = {}
     # کاربران
     s["users_total"] = val("SELECT COUNT(*) FROM users")
-    s["users_banned"] = val("SELECT COUNT(*) FROM users WHERE banned=1")
+    s["users_banned"] = val("SELECT COUNT(*) FROM users WHERE " + BANNED_ACTIVE_SQL)
     s["users_online"] = val("SELECT COUNT(*) FROM users WHERE last_active >= ?", (iso_utc(minutes=5),))
     s["users_24h"] = val("SELECT COUNT(*) FROM users WHERE last_active >= ?", (iso_utc(hours=24),))
     s["users_7d"] = val("SELECT COUNT(*) FROM users WHERE last_active >= ?", (iso_utc(days=7),))
@@ -1511,8 +1529,84 @@ LOGIN_FAILS = {}          # ip -> [تعداد, زمان اولین خطا]
 LOGIN_MAX_FAILS, LOGIN_LOCK_SECONDS = 6, 600
 
 
+def _env_int(name, default):
+    try:
+        return int(str(os.getenv(name, str(default))).strip() or default)
+    except (TypeError, ValueError):
+        return default
+
+
+BANNED_ACTIVE_SQL = ("(COALESCE(banned,0)=1 AND (COALESCE(banned_until,0)=0 "
+                     "OR banned_until>CAST(strftime('%s','now') AS REAL)))")   # بن دائم، یا موقتِ هنوز منقضی‌نشده
+PROXY_HOPS = max(1, _env_int("TRUSTED_PROXY_HOPS", 1))   # تعداد پراکسی‌های جلوی پنل (nginx = 1، Cloudflare + nginx = 2)
+
+
+ON_RAILWAY = bool(os.getenv("RAILWAY_ENVIRONMENT") or os.getenv("RAILWAY_PROJECT_ID") or os.getenv("RAILWAY_SERVICE_ID"))
+
+
+def _is_trusted_proxy_addr(ra):
+    """درخواست از یه پراکسیِ داخلی اومده؟ (لوپ‌بک، شبکه‌ی خصوصی، یا 100.64.0.0/10 که Railway ازش استفاده می‌کنه)"""
+    import ipaddress
+    try:
+        a = ipaddress.ip_address(ra)
+    except ValueError:
+        return False
+    return a.is_private or a.is_loopback or a in ipaddress.ip_network("100.64.0.0/10")
+
+
+def _valid_ip(x):
+    import ipaddress
+    try:
+        ipaddress.ip_address(x)
+        return True
+    except ValueError:
+        return False
+
+
 def _client_ip():
-    return request.headers.get("X-Forwarded-For", "").split(",")[0].strip() or request.remote_addr or "?"
+    """IP واقعی کلاینت.
+    - Railway: لبه‌ی Railway هدر X-Forwarded-For/X-Real-IP رو خودش می‌ذاره و نسخه‌ی کلاینت رو دور می‌ریزه؛ طبق توصیه‌ی خودشون
+      اولین IP از X-Forwarded-For خونده می‌شه.
+    - بقیه (nginx و ...): هدر فقط وقتی قبول می‌شه که درخواست از پراکسی داخلی اومده باشه و از انتهای لیست
+      (به تعداد TRUSTED_PROXY_HOPS) خونده می‌شه، چون آیتم اول رو کاربر می‌تونه جعل کنه.
+    مقدار نامعتبر هیچ‌وقت کلید نمی‌شه؛ تو اون حالت IP اتصال مستقیم برگردونده می‌شه."""
+    ra = request.remote_addr or "?"
+    if not _is_trusted_proxy_addr(ra):
+        return ra
+    parts = [x.strip() for x in request.headers.get("X-Forwarded-For", "").split(",") if x.strip()]
+    if ON_RAILWAY:
+        cand = parts[0] if parts else (request.headers.get("X-Real-IP", "").strip())
+    elif parts:
+        cand = parts[-PROXY_HOPS] if len(parts) >= PROXY_HOPS else parts[0]
+    else:
+        cand = ""
+    return cand if cand and _valid_ip(cand) else ra
+
+
+PANEL_RATE = {}            # ip -> deque زمان درخواست‌ها
+PANEL_RATE_LOCK = threading.Lock()
+PANEL_RATE_PER_MIN = _env_int("PANEL_RATE_PER_MIN", 300)   # 0 = خاموش
+
+
+def panel_rate_limited():
+    """سقف درخواست در دقیقه برای هر IP روی کل پنل (جلوی اسپم/فشار روی خودِ پنل)."""
+    if PANEL_RATE_PER_MIN <= 0:
+        return False
+    ip = _client_ip()
+    now = time.time()
+    with PANEL_RATE_LOCK:
+        dq = PANEL_RATE.get(ip)
+        if dq is None:
+            dq = PANEL_RATE[ip] = deque()
+        while dq and now - dq[0] > 60:
+            dq.popleft()
+        if len(dq) >= PANEL_RATE_PER_MIN:
+            return True
+        dq.append(now)
+        if len(PANEL_RATE) > 5000:
+            for k in [k for k, v in PANEL_RATE.items() if not v or now - v[-1] > 60]:
+                PANEL_RATE.pop(k, None)
+    return False
 
 
 def login_locked():
@@ -1585,6 +1679,8 @@ def apply_env_overrides(force=False):
 def _before_request():
     if request.endpoint in ("static", "panel_font"):
         return None
+    if panel_rate_limited():
+        return ("درخواست‌های بیش از حد؛ چند لحظه صبر کنید.", 429)
     try:
         apply_env_overrides()
     except Exception as e:
@@ -3275,6 +3371,8 @@ SETTING_HELP = {
     "trial_cooldown_hours": ("فاصله‌ی بین دو تست", "بعد از هر تست، کاربر باید این مدت صبر کنه تا بتونه دوباره تست بگیره (اعشاری مجازه).", {"unit": "ساعت", "zero": "بدون فاصله"}),
     "trial_new_users_only": ("🆕 تست فقط برای کاربر بدون خرید", "روشن: کسی که قبلاً حتی یک خرید داشته دیگه تست رایگان نمی‌گیره. مناسب برای جلوگیری از سوءاستفاده مشتری‌های فعلی.", ""),
     "trial_proto": ("نوع سرویس تست رایگان", "تست رایگان از کدوم نوع سرویس ساخته بشه.", ""),
+    "trial_paid": ("💰 تست پولی", "روشن: کاربر قبل از گرفتن تست، مبلغ «قیمت تست» رو از کیف پولش می‌پردازه (با تایید خودش؛ اگه ساخت تست شکست بخوره پول برمی‌گرده). خاموش: تست رایگان مثل قبل.", ""),
+    "trial_price": ("قیمت تست پولی", "فقط وقتی «تست پولی» روشنه اعمال می‌شه. بین 0 تا 1,000,000 تومان؛ 0 یعنی رایگان.", {"unit": "تومان", "zero": "رایگان"}),
     "default_gb": ("حجم پیش‌فرض صفحه‌ی خرید", "وقتی کاربر وارد صفحه‌ی خرید می‌شه، این مقدار حجم از قبل انتخاب شده.", "گیگ"),
     "default_days": ("مدت پیش‌فرض صفحه‌ی خرید", "مدتی که تو صفحه‌ی خرید از قبل انتخاب شده.", "روز"),
     "refund_ratio": ("نسبت بازگشت وجه هنگام حذف کانفیگ", "وقتی کاربر کانفیگش رو حذف می‌کنه، این نسبت از ارزش باقی‌مانده به کیف پولش برمی‌گرده. بین 0 تا 1؛ مثلاً 0.5 یعنی نصف، 0 یعنی بدون بازگشت.", ""),
@@ -3293,8 +3391,15 @@ SETTING_HELP = {
     "rate_limit_count": ("سقف پیام هر کاربر (ضد اسپم)", "هر کاربر تو «بازه‌ی زمانی» پایین بیشتر از این تعداد پیام/دکمه بزنه، پیام‌های اضافه نادیده گرفته می‌شن. ادمین مستثناست.", {"unit": "پیام", "zero": "بدون محدودیت"}),
     "rate_limit_window": ("بازه‌ی زمانی سقف پیام", "طول بازه‌ی بالا؛ مثلاً 30 پیام در 60 ثانیه (حداقل 1).", "ثانیه"),
     "auto_ban_enabled": ("🚨 بن دائم خودکار کاربر فشارآور", "روشن: کاربری که از «سقف پیام» رد بشه و هم‌زمان ربات در آستانه‌ی کندی باشه (صف پردازش از «آستانه‌ی کندی» بیشتر)، بعد از تعداد «اخطار» تعیین‌شده برای همیشه مسدود می‌شه (نه موقت). آزاد کردن فقط از صفحه‌ی کاربران ← ⛔ مسدودها. ادمین مستثناست و بدون «سقف پیام» کار نمی‌کنه. وقتی کسی بن بشه پیام تلگرام به ادمین میاد.", ""),
+    "auto_ban_permanent": ("نوع بن خودکار: دائم یا موقت", "روشن: کاربر فشارآور برای همیشه بن می‌شه و فقط خودت از صفحه‌ی کاربران ← ⛔ مسدودها آزادش می‌کنی. خاموش: فقط به‌اندازه‌ی «مدت بن موقت» بن می‌شه و بعدش خودکار آزاد می‌شه (هنوز هم می‌تونی زودتر دستی آزادش کنی). اگه کاربری از قبل دائم بن شده باشه، بن موقت جایگزینش نمی‌شه.", ""),
+    "auto_ban_minutes": ("مدت بن موقت", "وقتی «نوع بن» روی موقته، کاربر فشارآور این‌قدر بن می‌مونه. مثال: 30 = نیم ساعت، 60 = یک ساعت، 1440 = یک روز، 10080 = یک هفته. (حداقل 1)", "دقیقه"),
     "auto_ban_queue": ("آستانه‌ی کندی ربات", "صف یعنی پیام‌هایی که ربات هنوز نرسیده بهشون جواب بده (ربات هم‌زمان ۱۶ پیام رو پردازش می‌کنه). عدد کمتر = ربات زودتر «در آستانه‌ی کندی» حساب می‌شه و بن زودتر انجام می‌شه. مثال: ۸ = وقتی ۸ پیام منتظر مونده (هنوز کاربرای عادی کندی حس نکردن) متجاوزها بن می‌شن، حساس و سخت‌گیر. ۱۶ = وقتی ۱۶ پیام منتظره (ربات واقعاً داره کند می‌شه) بن می‌شن، متعادل. ۳۰ یا بیشتر = فقط وقتی ربات تقریباً قفل کرده، خیلی آسان‌گیر. اگه می‌ترسی کاربر بی‌گناه بن بشه عدد رو بالاتر ببر.", "آپدیت"),
     "auto_ban_strikes": ("تعداد اخطار تا بن دائم", "هر بار که کاربر هم‌زمان با شلوغی ربات از سقف پیام رد بشه ۱ اخطار می‌گیره (اخطارها بعد از ۵ دقیقه صفر می‌شن). مثال: ۱ = همون بار اول بن دائم، خیلی سخت‌گیر و ریسک بن اشتباهی. ۵ = بعد از ۵ بار تجاوز بن می‌شه، متعادل. ۱۰ = ۱۰ بار فرصت داره، آسان‌گیر ولی ربات بیشتر فشار می‌خوره.", "اخطار"),
+    "auto_ban_always": ("بن مستقل از شلوغی", "اگه کاربری تو ۱۰ دقیقه این‌قدر بار از سقف پیام رد بشه بن می‌شه، حتی وقتی ربات کند نیست (برای کسی که همیشه کمی زیر سقف می‌مونه و مدام فشار میاره). مثال: 40 = تو ۱۰ دقیقه ۴۰ پیام اضافه فرستاده؛ 0 = فقط وقتی ربات شلوغه بن شه. فقط وقتی «بن دائم خودکار» روشنه کار می‌کنه.", "بار"),
+    "max_inflight_per_user": ("سقف هم‌زمانی هر کاربر", "هر کاربر حداکثر این‌قدر آپدیت هم‌زمان تو ربات داره (۱ در حال اجرا + بقیه منتظر). مثال: 2 = اگه ۲۵ بار پشت‌سرهم دکمه‌ی سنگینی (مثل ساخت کانفیگ) بزنه، فقط ۲ تاش پردازش می‌شه و بقیه دور ریخته می‌شن، پس ترددهای ربات پر نمی‌شه. 1 = سخت‌گیرتر؛ 0 = خاموش. دور ریختن‌های پشت‌سرهم به شمارنده‌ی بن خودکار هم اضافه می‌شه.", "آپدیت"),
+    "busy_rate_limit": ("سقف پیام کاربر وقتی ربات شلوغه", "وقتی صف ربات به «آستانه‌ی کندی» برسه، سقف پیامِ هر کاربر از «سقف پیام» (مثلاً 30) به این عدد کم می‌شه تا چند اکانت هم‌زمان نتونن ربات رو بخوابونن. مثال: 10 = تو شلوغی هر کاربر تو هر بازه فقط 10 پیام؛ 0 = خاموش (همون سقف عادی).", "پیام"),
+    "busy_global_per_sec": ("سقف کل ربات وقتی شلوغه", "فقط وقتی صف ربات به «آستانه‌ی کندی» رسیده: کل ربات (همه‌ی کاربرها روی هم) حداکثر این‌قدر آپدیت در ثانیه وارد صف می‌کنه و بقیه دور ریخته می‌شن؛ دفاع آخر در برابر حمله با چندین اکانت. مثال: 30 = ۳۰ پیام در ثانیه؛ 0 = خاموش. عدد خیلی کم باعث می‌شه کاربرای عادی هم موقع شلوغی پیام‌شون گم شه.", "در ثانیه"),
+    "user_write_backlog": ("سقف نوشتن‌های معوقِ فعالیت کاربر", "ثبت «آخرین فعالیت» کاربرها تو صف جدا و پس‌زمینه انجام می‌شه. اگه دیتابیس عقب بیفته و این‌قدر ثبت معوق جمع بشه، ثبت فعالیتِ کاربرهای قدیمی موقتاً رد می‌شه (فقط ستون «آخرین فعالیت» تو پنل دیرتر آپدیت می‌شه؛ ثبت‌نامِ کاربر جدید و موجودی/خرید هیچ‌وقت رد نمی‌شن). مثال: 300 = تا ۳۰۰ ثبت معوق؛ 0 = بدون سقف.", "ثبت"),
     "extend_min_gb": ("حداقل حجم هر تمدید", "جلوی تمدید تقریباً رایگان با حجم خیلی کم رو می‌گیره، چون قیمت فقط از حجم حساب می‌شه. اعشاری مجازه.", "گیگ"),
     "buy_max_gb": ("سقف حجم هر خرید/تمدید", "کاربر نمی‌تونه تو یک خرید بیشتر از این حجم بخره.", "گیگ"),
     "buy_max_days": ("سقف مدت هر خرید/تمدید", "کاربر نمی‌تونه تو یک خرید مدتی بیشتر از این انتخاب کنه.", "روز"),
@@ -3304,7 +3409,7 @@ SETTING_HELP = {
     "ticket_max_chars": ("سقف طول پیام تیکت", "پیام تیکتِ طولانی‌تر از این قبول نمی‌شه.", {"unit": "کاراکتر", "zero": "بدون سقف"}),
     # --- کانال و عمومی ---
     "gate_enabled": ("📢 عضویت اجباری کانال", "روشن: کاربر قبل از استفاده از ربات باید تو کانال‌های اجباری عضو باشه. خاموش: هیچ‌کس مجبور نیست. لیست کانال‌ها از صفحه‌ی «کانال‌ها و پست».", ""),
-    "gate_fail_open": ("اگه چک عضویت جواب نداد، کاربر وارد بشه", "روشن: وقتی اکانت گیت وصل نیست یا چک عضویت خطا داد، کاربر وارد ربات می‌شه. خاموش: تا چک موفق نشه کاربر وارد نمی‌شه.", ""),
+    "gate_fail_open": ("اگه چک عضویت جواب نداد، کاربر وارد بشه", "روشن: وقتی اکانت گیت وصل نیست یا چک عضویت خطا داد، کاربر وارد ربات می‌شه. خاموش (پیش‌فرض، امن‌تر): اگه چک جواب نداد فقط کاربرهای تأییدشده‌ی ۷ روز اخیر وارد می‌شن و کاربر جدید نه؛ هر ۳۰ دقیقه به ادمین هشدار می‌ره و بات خودش دوباره وصل شدن رو امتحان می‌کنه.", ""),
     "gate_cache_ttl": ("مدت اعتبار عضویتِ تاییدشده", "بعد از تأیید عضویت، تا این مدت دوباره چک نمی‌شه (حداقل 5).", "ثانیه"),
     "gate_sync_interval": ("فاصله‌ی تازه‌سازی لیست اعضا", "هر چند ثانیه لیست اعضای کانال از سروش دوباره گرفته بشه. عدد کمتر = دقیق‌تر ولی فشار بیشتر روی API (حداقل 5).", "ثانیه"),
     "admin_id": ("آیدی عددی ادمین", "تیکت‌ها و رسیدهای شارژ برای این آیدی فرستاده می‌شه و این حساب از محدودیت‌ها مستثناست.", ""),
@@ -3351,7 +3456,7 @@ SETTINGS_TABS = [
     ]),
     ("trial", "🧪 تست و خرید", [
         ("🧪 تست رایگان", ["trial_gb", "trial_days", "trial_proto", "trial_label", "trial_max_per_user",
-                           "trial_cooldown_hours", "trial_new_users_only"]),
+                           "trial_cooldown_hours", "trial_new_users_only", "trial_paid", "trial_price"]),
         ("🛍 صفحه‌ی خرید و حذف", ["default_gb", "default_days", "extend_min_gb", "buy_max_gb", "buy_max_days", "max_configs_per_user", "refund_ratio"]),
         ("🏪 فروشندگی", ["reseller_price", "reseller_panel_url"]),
     ]),
@@ -3361,7 +3466,7 @@ SETTINGS_TABS = [
     ]),
     ("limits", "🚦 محدودیت‌ها", [
         ("🚦 ضد اسپم", ["rate_limit_count", "rate_limit_window"]),
-        ("🚨 بن دائم خودکار", ["auto_ban_enabled", "auto_ban_queue", "auto_ban_strikes"]),
+        ("🛡️ بن خودکار و محافظت", ["auto_ban_enabled", "auto_ban_permanent", "auto_ban_minutes", "auto_ban_queue", "auto_ban_strikes", "auto_ban_always", "max_inflight_per_user", "busy_rate_limit", "busy_global_per_sec", "user_write_backlog"]),
         ("🎫 پشتیبانی", ["ticket_max_open", "ticket_max_chars"]),
     ]),
     ("channel", "📢 کانال و عمومی", [
@@ -4310,6 +4415,16 @@ def save_config():
         _ranges = {"crypto_margin_percent": 20, "crypto_match_tolerance_percent": 50, "crypto_round_max_over_percent": 100}
         if key in _ranges and float(value) > _ranges[key]:
             flash(f"⚠️ «{label}»: باید بین 0 و {_ranges[key]} باشه — ذخیره نشد.")
+            continue
+        if key.startswith("price_") and key != "price_per_gb" and key in ("price_wireguard", "price_config", "price_both", "price_openvpn", "price_dns") \
+                and not (1 <= int(value) <= 1000000):
+            flash(f"⚠️ «{label}»: باید بین 1 و 1,000,000 تومان باشه (قیمت صفر یعنی سرویس رایگان) — ذخیره نشد.")
+            continue
+        if key == "topup_multiplier" and not (0 < float(value) <= 10):
+            flash(f"⚠️ «{label}»: باید بزرگ‌تر از 0 و حداکثر 10 باشه — ذخیره نشد.")
+            continue
+        if key == "trial_price" and int(value) > 1000000:
+            flash(f"⚠️ «{label}»: حداکثر 1,000,000 تومان — ذخیره نشد.")
             continue
         if key == "trial_gb" and float(value) <= 0:
             flash(f"⚠️ «{label}»: باید بزرگ‌تر از صفر باشه — ذخیره نشد.")
@@ -5477,9 +5592,14 @@ def restore_settings():
             or not all(isinstance(k, str) and isinstance(v, str) and len(k) <= 100 and len(v) <= 20000 for k, v in data.items())):
         flash("⚠️ فایل معتبر نیست (باید خروجی «تنظیمات» همین پنل باشه).")
         return redirect(url_for("backup_page"))
+    skipped = [k for k in data if _is_secret_setting(k)]
+    applied = 0
     for k, v in data.items():
+        if _is_secret_setting(k):
+            continue        # توکن‌ها/متغیرهای محیطی هیچ‌وقت از فایل بازگردانی نمی‌شن
         set_setting(k, v)
-    flash(f"{len(data)} تنظیم بازگردانی شد.")
+        applied += 1
+    flash(f"{applied} تنظیم بازگردانی شد." + (f" ({len(skipped)} مورد حساس نادیده گرفته شد.)" if skipped else ""))
     return redirect(url_for("backup_page"))
 
 
