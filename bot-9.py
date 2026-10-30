@@ -1449,6 +1449,91 @@ def ui_setting_key(lang, key):
     return 'ui_' + lang + '_' + key
 
 
+# ---- نامحدود و پروکسی تلگرام ----
+UI_TEXT['fa'].update({
+    'svc_unlimited': '♾ پلن نامحدود',
+    'svc_proxy': '📡 پروکسی تلگرام',
+    'btn_unl_rebuy': '🔁 خرید پلن نامحدود جدید',
+    'btn_open_proxy': '📡 اتصال به پروکسی',
+    'unl_unavailable': '⚠️ فروش پلن نامحدود الان در دسترس نیست. کمی بعد دوباره تلاش کنید.',
+    'proxy_unavailable': '⚠️ فروش پروکسی تلگرام الان در دسترس نیست. کمی بعد دوباره تلاش کنید.',
+    'unl_pick_devices': '♾ <b>پلن نامحدود</b>\n{divider}\nتعداد دستگاه هم‌زمان رو انتخاب کنید:\n\n💳 موجودی فعلی: <b>{wallet}</b> تومان',
+    'unl_pick_days': '♾ <b>پلن نامحدود — {devices} کاربره</b>\n{divider}\nمدت پلن رو انتخاب کنید:\n\n💳 موجودی فعلی: <b>{wallet}</b> تومان',
+    'proxy_pick_gb': ('📡 <b>پروکسی تلگرام</b>\n{divider}\nحجم رو از دکمه‌ها انتخاب کنید یا یه عدد دلخواه (گیگ) بفرستید.\n'
+                      '📏 حداقل <b>{min_gb}</b> و حداکثر <b>{max_gb}</b> گیگ — هر گیگ <b>{ppg}</b> تومان\n\n💳 موجودی فعلی: <b>{wallet}</b> تومان'),
+    'proxy_gb_bad': '⚠️ عدد نامعتبره. یه عدد بین {min_gb} تا {max_gb} (گیگ) بفرستید.',
+    'unl_no_extend': 'ℹ️ پلن نامحدود تمدید نداره؛ بعد از اتمام مدت، یه پلن جدید بخرید.',
+    'extra_inv_devices': '📱 تعداد کاربر هم‌زمان: <b>{devices}</b>',
+    'extra_inv_days': '⏳ مدت: <b>{days}</b> روز',
+    'extra_inv_proxy_days': '⏳ مدت: طبق سرویس (بعد از خرید نمایش داده می‌شه)',
+    'extra_inv_gb': '📶 حجم: <b>{gb}</b> گیگ',
+    'extra_days_left': '⏳ باقی‌مانده: <b>{days}</b> روز',
+    'unl_success': ('✅ <b>پلن نامحدود ساخته شد</b>\n{divider}\n♾ نوع: {ctype_label}\n🏷 نام: <b>{label}</b>\n'
+                    '📱 کاربر هم‌زمان: <b>{devices}</b>\n⏳ مدت: <b>{days}</b> روز\n💵 مبلغ: <b>{price}</b> تومان\n{divider}\n'
+                    '🔗 لینک اشتراک (کپی کنید و تو اپ وارد کنید):\n<code>{sub_url}</code>'),
+    'proxy_success': ('✅ <b>پروکسی تلگرام ساخته شد</b>\n{divider}\n🏷 نام: <b>{label}</b>\n📶 حجم: <b>{gb}</b> گیگ\n'
+                      '⏳ مدت: <b>{days}</b> روز\n💵 مبلغ: <b>{price}</b> تومان\n{divider}\n'
+                      '🌐 سرور: <code>{server}</code>\n🔌 پورت: <code>{port}</code>\n👤 یوزرنیم: <code>{user}</code>\n🔑 رمز: <code>{password}</code>\n\n'
+                      '👇 با دکمه‌ی پایین مستقیم تو تلگرام وصل بشید.'),
+    'unl_card': '{head}\n♾ {ctype_label}\n⏳ <b>{days_left}</b> روز مانده\n🔗 <code>{sub_url}</code>',
+    'proxy_card': ('{head}\n{bar}\n📶 حجم: <b>{gb}</b> گیگ | مصرف: <b>{used}</b> | مانده: <b>{rem}</b>\n'
+                   '⏳ <b>{days_left}</b> روز مانده\n📡 {ctype_label}\n🔗 {sub_url}'),
+    'extra_order_item': '<b>{idx}.</b> {label} — {ctype_label}\n{detail} | 💵 {price} تومان',
+})
+UI_TEXT['en'].update({
+    'svc_unlimited': '♾ Unlimited plan',
+    'svc_proxy': '📡 Telegram proxy',
+    'btn_unl_rebuy': '🔁 Buy a new unlimited plan',
+    'btn_open_proxy': '📡 Connect to proxy',
+    'unl_unavailable': '⚠️ Unlimited plans are not available right now. Please try again later.',
+    'proxy_unavailable': '⚠️ Telegram proxy is not available right now. Please try again later.',
+    'unl_pick_devices': '♾ <b>Unlimited plan</b>\n{divider}\nChoose the number of simultaneous devices:\n\n💳 Balance: <b>{wallet}</b>',
+    'unl_pick_days': '♾ <b>Unlimited plan — {devices} device(s)</b>\n{divider}\nChoose the duration:\n\n💳 Balance: <b>{wallet}</b>',
+    'proxy_pick_gb': ('📡 <b>Telegram proxy</b>\n{divider}\nPick a volume or send a custom number (GB).\n'
+                      '📏 Min <b>{min_gb}</b> / max <b>{max_gb}</b> GB — <b>{ppg}</b> per GB\n\n💳 Balance: <b>{wallet}</b>'),
+    'proxy_gb_bad': '⚠️ Invalid number. Send a value between {min_gb} and {max_gb} (GB).',
+    'unl_no_extend': 'ℹ️ Unlimited plans cannot be extended; buy a new one when it ends.',
+    'extra_inv_devices': '📱 Simultaneous devices: <b>{devices}</b>',
+    'extra_inv_days': '⏳ Duration: <b>{days}</b> days',
+    'extra_inv_proxy_days': '⏳ Duration: set by the service (shown after purchase)',
+    'extra_inv_gb': '📶 Volume: <b>{gb}</b> GB',
+    'extra_days_left': '⏳ Remaining: <b>{days}</b> days',
+    'unl_success': ('✅ <b>Unlimited plan created</b>\n{divider}\n♾ Type: {ctype_label}\n🏷 Name: <b>{label}</b>\n'
+                    '📱 Devices: <b>{devices}</b>\n⏳ Duration: <b>{days}</b> days\n💵 Price: <b>{price}</b>\n{divider}\n'
+                    '🔗 Subscription link:\n<code>{sub_url}</code>'),
+    'proxy_success': ('✅ <b>Telegram proxy created</b>\n{divider}\n🏷 Name: <b>{label}</b>\n📶 Volume: <b>{gb}</b> GB\n'
+                      '⏳ Duration: <b>{days}</b> days\n💵 Price: <b>{price}</b>\n{divider}\n'
+                      '🌐 Server: <code>{server}</code>\n🔌 Port: <code>{port}</code>\n👤 User: <code>{user}</code>\n🔑 Pass: <code>{password}</code>\n\n'
+                      '👇 Tap the button below to connect in Telegram.'),
+    'unl_card': '{head}\n♾ {ctype_label}\n⏳ <b>{days_left}</b> days left\n🔗 <code>{sub_url}</code>',
+    'proxy_card': ('{head}\n{bar}\n📶 Volume: <b>{gb}</b> GB | used: <b>{used}</b> | left: <b>{rem}</b>\n'
+                   '⏳ <b>{days_left}</b> days left\n📡 {ctype_label}\n🔗 {sub_url}'),
+    'extra_order_item': '<b>{idx}.</b> {label} — {ctype_label}\n{detail} | 💵 {price}',
+})
+
+
+UI_TEXT['fa'].update({
+    'unl_screen': ('♾ <b>پلن نامحدود</b>\n{divider}\n💳 موجودی: <b>{wallet}</b> تومان\n\n'
+                   'تعداد کاربر و مدت رو با دکمه‌های + / - تنظیم کن:\n\n💰 قیمت فعلی: <b>{price}</b> تومان'),
+    'unl_users_btn': '👥 {n} کاربر',
+    'buy_hub_text': '🛍 <b>خرید سرویس</b>\n{divider}\nیکی از گزینه‌ها رو انتخاب کنید:\n\n💳 موجودی فعلی: <b>{wallet}</b> تومان',
+    'btn_buy_plans': '📦 بسته‌های آماده',
+    'btn_back_buy': '↩️ بازگشت',
+    'unl_support_error': '⚠️ ساخت پلن ناموفق بود. اگه مبلغی کم شده به کیف پولت برگشته؛ لطفاً به پشتیبانی پیام بده تا سریع حلش کنیم.',
+    'unl_days_btn': '⏳ {n} روز',
+})
+UI_TEXT['en'].update({
+    'unl_screen': ('♾ <b>Unlimited plan</b>\n{divider}\n💳 Balance: <b>{wallet}</b>\n\n'
+                   'Adjust devices and duration with the + / - buttons:\n\n💰 Current price: <b>{price}</b>'),
+    'unl_users_btn': '👥 {n} device(s)',
+    'buy_hub_text': '🛍 <b>Buy a service</b>\n{divider}\nChoose an option:\n\n💳 Balance: <b>{wallet}</b>',
+    'btn_buy_plans': '📦 Ready-made packages',
+    'btn_back_buy': '↩️ Back',
+    'unl_support_error': '⚠️ Creating the plan failed. Any charged amount was returned to your wallet; please message support.',
+    'unl_days_btn': '⏳ {n} days',
+})
+
+
 def u(chat_id_or_lang, key, **kwargs):
     """متن ترجمه‌شده رو برمی‌گردونه؛ اولین آرگومان یا خودِ chat_id است یا مستقیم
     'fa'/'en'. اول override ذخیره‌شده از پنل ادمین (جدول settings) چک می‌شه؛
@@ -1486,6 +1571,10 @@ def cancel_kb(chat_id):
 def get_ctype_label(chat_id, ctype):
     """لیبل نوع سرویس: برای فارسی همون لیبل قابل‌تغییر از پنل ادمین، برای
     انگلیسی یه ترجمه‌ی ثابت (چون پنل ادمین فقط فارسی رو مدیریت می‌کنه)."""
+    if ctype in ('unlimited', 'proxy'):
+        if get_user_lang(chat_id) == 'en':
+            return u(chat_id, 'svc_' + ctype)
+        return extra_label(ctype)
     if get_user_lang(chat_id) == 'en':
         return u(chat_id, 'svc_' + ctype) if ('svc_' + ctype) in UI_TEXT['en'] else ctype
     return get_config_types().get(ctype, get_config_types()['both'])['label']
@@ -3468,12 +3557,676 @@ def clean_label(text):
     return t[:40].strip()
 
 
+# ---------------------------------------------------------------------------
+# محصولات «پلن نامحدود» و «پروکسی تلگرام» (Seller API) + کلید روشن/خاموش هر محصول
+# ---------------------------------------------------------------------------
+EXTRA_TYPES = ('unlimited', 'proxy')
+EXTRA_DEFAULT_LABELS = {'unlimited': '♾ پلن نامحدود', 'proxy': '📡 پروکسی تلگرام'}
+
+
+def product_enabled(key):
+    """کلید روشن/خاموش هر محصول از پنل ادمین (تب «محصولات»). پیش‌فرض: روشن."""
+    return get_setting('product_on_' + str(key), '1') == '1'
+
+
+def extra_label(ctype):
+    return get_setting('ctype_label_' + ctype, EXTRA_DEFAULT_LABELS.get(ctype, ctype))
+
+
+def _sapi(method, path, payload=None, params=None, timeout=20):
+    """درخواست به Seller API با کلید اصلی (CONFIG_KEY). خروجی: (ok, data, status_code)"""
+    if not CONFIG_KEY:
+        return False, {'error': 'no_key'}, 0
+    try:
+        res = SESSION.request(method, SELLER_API_BASE + path,
+                              headers={'Authorization': 'Bearer ' + CONFIG_KEY},
+                              json=payload, params=params, timeout=timeout)
+        try:
+            data = res.json()
+        except Exception:
+            data = {}
+        return (res.status_code in (200, 201, 204)), data, res.status_code
+    except Exception as e:
+        return False, {'error': str(e)}, 0
+
+
+def _int_list(raw, default):
+    out = []
+    txt = str(raw if raw not in (None, '') else default).replace('،', ',')
+    for x in txt.split(','):
+        x = x.strip()
+        if x.isdigit() and int(x) > 0 and int(x) not in out:
+            out.append(int(x))
+    return out
+
+
+# ---------- نامحدود ----------
+_unl_cache = {'t': 0.0, 'd': None}
+
+
+def get_unl_status(force=False):
+    now = time.time()
+    if not force and _unl_cache['d'] is not None and now - _unl_cache['t'] < 300:
+        return _unl_cache['d']
+    ok, d, _st = _sapi('GET', '/unlimited/status', timeout=10)
+    if ok and isinstance(d, dict) and d.get('options'):
+        _unl_cache['t'] = now
+        _unl_cache['d'] = d
+        return d
+    if _unl_cache['d'] is not None and now - _unl_cache['t'] < 3600:
+        return _unl_cache['d']
+    return None
+
+
+def _unl_opt(devices):
+    for o in (get_unl_status() or {}).get('options') or []:
+        try:
+            if int(o.get('devices') or 0) == int(devices):
+                return o
+        except Exception:
+            pass
+    return None
+
+
+def unl_device_options():
+    st = get_unl_status()
+    if not st:
+        return []
+    api = []
+    for o in st.get('options') or []:
+        try:
+            api.append(int(o.get('devices') or 0))
+        except Exception:
+            pass
+    return [d for d in _int_list(get_setting('unl_devices', '1,2,3,4,5'), '1,2,3,4,5') if d in api]
+
+
+def unl_day_options(devices):
+    o = _unl_opt(devices)
+    if not o:
+        return []
+    want = _int_list(get_setting('unl_days_options', ''), '')      # خالی = همه‌ی مدت‌های سرویس
+    dp = o.get('dayPrices') or {}
+    api_days = sorted(int(k) for k in dp if str(k).isdigit())
+    lo, hi = int(o.get('minDays') or 1), int(o.get('maxDays') or 90)
+    if not api_days:
+        api_days = list(range(lo, hi + 1))
+    return [d for d in api_days if d in want] if want else api_days
+
+
+def unl_wholesale(devices, days):
+    o = _unl_opt(devices)
+    if not o:
+        return None
+    dp = o.get('dayPrices') or {}
+    if str(days) in dp:
+        return int(dp[str(days)])
+    base = o.get('priceToman')
+    term = int((get_unl_status() or {}).get('days') or 30)
+    return int(round(base * days / term)) if base else None
+
+
+def unl_sell_price(devices, days):
+    """قیمت فروش به کاربر: اگه قیمت دستی (override) ثبت شده همون؛ وگرنه قیمت عمده + درصد سود، گرد به بالا."""
+    for part in re.split(r'[,\n،;]+', get_setting('unl_price_overrides', '') or ''):
+        m = re.match(r'^\s*(\d+)\s*[:xX]\s*(\d+)\s*=\s*([\d,]+)\s*$', part)
+        if m and int(m.group(1)) == int(devices) and int(m.group(2)) == int(days):
+            return int(m.group(3).replace(',', ''))
+    wh = unl_wholesale(devices, days)
+    if wh is None:
+        return None
+    try:
+        pct = float(str(get_setting('unl_markup_percent', '30')).replace(',', '.'))
+    except Exception:
+        pct = 30.0
+    pct = max(0.0, min(pct, 1000.0))
+    rnd = max(1, _setting_int('unl_round_to', 1000))
+    return int(math.ceil(wh * (1 + pct / 100.0) / rnd) * rnd)
+
+
+def unl_available():
+    if not product_enabled('unlimited'):
+        return False
+    st = get_unl_status()
+    return bool(st and st.get('enabled', True) and unl_device_options())
+
+
+# ---------- تبدیل خودکار اعتبار گیگ → انبار نامحدود (حداکثر ۱ واحد در هر خرید) ----------
+_unl_lock = threading.Lock()
+_wallet_cache = {'t': 0.0, 'd': None}
+
+
+def get_seller_wallet(force=False):
+    now = time.time()
+    if not force and _wallet_cache['d'] is not None and now - _wallet_cache['t'] < 30:
+        return _wallet_cache['d']
+    ok, d, _st = _sapi('GET', '/wallet', timeout=10)
+    if ok and isinstance(d, dict):
+        _wallet_cache['t'] = now
+        _wallet_cache['d'] = d
+        return d
+    return None
+
+
+def unl_units_needed(devices, days):
+    o = _unl_opt(devices)
+    uc = (o or {}).get('unitCosts') or {}
+    if str(days) in uc:
+        return float(uc[str(days)])
+    term = int((get_unl_status() or {}).get('days') or 30)
+    return float(devices) * float(days) / float(term)
+
+
+_frac_cache = {'t': 0.0, 'ok': None}
+
+
+def unl_fraction_supported(per_unit_gb):
+    """با یک quote فقط‌خواندنی می‌سنجه که API تبدیل «کسری» (مثلاً ۰.۴۸ واحد) رو قبول می‌کنه یا فقط عدد صحیح.
+    نتیجه ۱۰ دقیقه کش می‌شه. هیچ تبدیلی انجام نمی‌ده."""
+    now = time.time()
+    if _frac_cache['ok'] is not None and now - _frac_cache['t'] < 600:
+        return _frac_cache['ok']
+    sup = False
+    try:
+        amt = max(1, int(per_unit_gb) // 2)
+        ok, q, _st = _sapi('GET', '/wallet/convert/quote', params={'direction': 'config_to_unlimited', 'amount': amt})
+        if ok and isinstance(q, dict) and q.get('success'):
+            to = float(q.get('toAmount') or 0)
+            sup = 0 < to < 1 - 1e-9
+    except Exception:
+        sup = False
+    _frac_cache['t'] = now
+    _frac_cache['ok'] = sup
+    return sup
+
+
+def unl_stock_plan(devices, days, fresh=False, whole_only=False):
+    """('ok', 0, 0): انبار کافیه | ('convert', گیگ, واحد): کمبود رو به عدد صحیح گرد می‌کنیم بالا و همون‌قدر تبدیل می‌کنیم
+    (مثلاً کمبود ۱.۱ یا ۱.۷ → ۲ واحد) | ('no', 0, 0): اعتبار گیگ برای جبران کمبود کافی نیست."""
+    if get_setting('unl_auto_convert', '1') != '1':
+        return 'ok', 0, 0
+    w = get_seller_wallet(force=fresh)
+    if not w:
+        return 'ok', 0, 0           # موجودی معلوم نیست؛ مثل قبل خود API تصمیم می‌گیره
+    bal = w.get('balances') or {}
+    try:
+        stock = float(bal.get('unlimitedUnits') or 0)
+        need = unl_units_needed(devices, days)
+    except Exception:
+        return 'ok', 0, 0
+    if stock + 1e-9 >= need:
+        return 'ok', 0, 0
+    short = need - stock
+    try:
+        pr = (w.get('convert') or {}).get('prices') or {}
+        per_unit = int(math.ceil(float(pr['unlimited']['list']) / float(pr['config']['list'])))
+        credit = float(bal.get('sellerCreditGb') if bal.get('sellerCreditGb') is not None else (w.get('creditGb') or 0))
+    except Exception:
+        return 'no', 0, 0
+    # اگه API تبدیل کسری رو قبول کنه، فقط همون‌قدر که لازمه تبدیل می‌شه (گرد به بالا به گیگ)
+    if not whole_only and unl_fraction_supported(per_unit):
+        gb_amt = max(1, int(math.ceil(short * per_unit - 1e-9)))
+        if credit >= gb_amt:
+            return 'convert', gb_amt, short
+    # وگرنه سیستم قبلی: کمبود به عدد صحیح واحد گرد می‌شه بالا
+    units = max(1, int(math.ceil(short - 1e-9)))
+    gb_amt = per_unit * units
+    if credit < gb_amt:
+        return 'no', 0, 0
+    return 'convert', gb_amt, units
+
+
+def unl_convert(gb_amt, units):
+    """اعتبار گیگ رو به `units` واحد نامحدود تبدیل می‌کنه (نرخ رو قبلش از quote می‌گیره)."""
+    for amt in (gb_amt, gb_amt + 1, gb_amt + 2):
+        ok, q, _st = _sapi('GET', '/wallet/convert/quote', params={'direction': 'config_to_unlimited', 'amount': amt})
+        if not (ok and isinstance(q, dict) and q.get('success')):
+            return False
+        try:
+            to = float(q.get('toAmount') or 0)
+        except Exception:
+            return False
+        if to < units - 1e-9:
+            continue
+        if to > units + 0.5:
+            return False
+        ok, d, _st = _sapi('POST', '/wallet/convert', payload={'direction': 'config_to_unlimited', 'amount': amt})
+        if ok and isinstance(d, dict) and d.get('success'):
+            _wallet_cache['t'] = 0.0
+            try:
+                send_message(ADMIN_ID, f'♻️ تبدیل خودکار: {amt} گیگ از اعتبار گیگ به {to:g} واحد نامحدود تبدیل شد '
+                                       f'(برای تحویل فوری خرید یک مشتری).', parse_mode=None)
+            except Exception:
+                pass
+            return True
+        return False
+    return False
+
+
+# ---------- پروکسی ----------
+_proxy_st_cache = {'t': 0.0, 'd': None}
+_proxy_map_cache = {'t': 0.0, 'm': {}}
+
+
+def get_proxy_status(force=False):
+    now = time.time()
+    if not force and _proxy_st_cache['d'] is not None and now - _proxy_st_cache['t'] < 120:
+        return _proxy_st_cache['d']
+    ok, d, _st = _sapi('GET', '/proxy/wallet', timeout=10)
+    if ok and isinstance(d, dict):
+        _proxy_st_cache['t'] = now
+        _proxy_st_cache['d'] = d
+        return d
+    if _proxy_st_cache['d'] is not None and now - _proxy_st_cache['t'] < 1800:
+        return _proxy_st_cache['d']
+    return None
+
+
+def proxy_available():
+    if not product_enabled('proxy'):
+        return False
+    st = get_proxy_status()
+    return bool(st and st.get('endpoint'))      # endpoint خالی یعنی الان هیچ نودی پروکسی نمی‌ده
+
+
+def proxy_price_per_gb():
+    return max(1, _setting_int('proxy_price_per_gb', 5000))
+
+
+def proxy_limits():
+    st = get_proxy_status() or {}
+    try:
+        api_min = float(st.get('minGb') or 1)
+        api_max = float(st.get('maxGb') or 200)
+    except Exception:
+        api_min, api_max = 1.0, 200.0
+    try:
+        mn = float(get_setting('proxy_min_gb', '0') or 0)
+        mx = float(get_setting('proxy_max_gb', '0') or 0)
+    except Exception:
+        mn = mx = 0.0
+    mn = max(api_min, mn) if mn > 0 else api_min
+    mx = min(api_max, mx) if mx > 0 else api_max
+    if mn > mx:
+        mn = mx
+    return mn, mx
+
+
+def proxy_gb_options():
+    mn, mx = proxy_limits()
+    return [g for g in _int_list(get_setting('proxy_gb_options', '20,50,100,200'), '20,50,100,200') if mn <= g <= mx]
+
+
+def proxy_price(gb):
+    return int(round(float(gb) * proxy_price_per_gb()))
+
+
+def _fmt_gb(v):
+    try:
+        return '%g' % float(v)
+    except Exception:
+        return str(v)
+
+
+def _proxy_map(force=False):
+    now = time.time()
+    if not force and now - _proxy_map_cache['t'] < 20:
+        return _proxy_map_cache['m']
+    ok, d, _st = _sapi('GET', '/proxies', params={'status': 'all'})
+    if ok and isinstance(d, dict):
+        _proxy_map_cache['m'] = {str(p.get('id')): p for p in (d.get('proxies') or [])}
+        _proxy_map_cache['t'] = now
+    return _proxy_map_cache['m']
+
+
+# ---------- تشخیص نوع کانفیگ از روی config_id (برای مسیر درست API) ----------
+_cfg_kind_cache = {}
+
+
+@with_db_retry
+def _cfg_kind(config_id):
+    key = str(config_id)
+    k = _cfg_kind_cache.get(key)
+    if k:
+        return k
+    conn = get_conn()
+    c = conn.cursor()
+    c.execute('SELECT type FROM user_configs WHERE config_id=? LIMIT 1', (key,))
+    r = c.fetchone()
+    conn.close()
+    k = r[0] if r and r[0] in EXTRA_TYPES else 'config'
+    if r:
+        _cfg_kind_cache[key] = k
+    return k
+
+
+def _cfg_url(config_id):
+    k = _cfg_kind(config_id)
+    if k == 'unlimited':
+        return SELLER_API_BASE + '/unlimited/' + str(config_id)
+    if k == 'proxy':
+        return SELLER_API_BASE + '/proxies/' + str(config_id)
+    return '%s/%s' % (CONFIG_API, config_id)
+
+
+@with_db_retry
+def update_config_id_db(row_id, new_id):
+    conn = get_conn()
+    c = conn.cursor()
+    c.execute('UPDATE user_configs SET config_id=? WHERE id=?', (str(new_id), row_id))
+    conn.commit()
+    conn.close()
+
+
+# ---------- ساخت ----------
+def make_unlimited(devices, days, label, note=''):
+    body = {'label': label, 'devices': int(devices), 'days': int(days)}
+    if note:
+        body['note'] = note
+    with _unl_lock:
+        plan, gb_amt, _units = unl_stock_plan(devices, days, fresh=True)
+        if plan == 'no':
+            print('⚠️ انبار نامحدود کافی نیست و اعتبار گیگ هم برای تبدیل کافی نیست.')
+            try:
+                send_message(ADMIN_ID, f'🚨 خرید نامحدود مشتری ({label}) ناموفق شد: انبار نامحدود و اعتبار گیگ کافی نیست. '
+                                       f'پول مشتری برگشت؛ لطفاً اعتبار شارژ کنید.', parse_mode=None)
+            except Exception:
+                pass
+            return {'success': False, 'error': 'no_stock', 'error_code': 'no_stock'}
+        if plan == 'convert' and not unl_convert(gb_amt, _units):
+            _done = False
+            if abs(_units - round(_units)) > 1e-9:          # تبدیل کسری نشد → همون سیستم قبلی (عدد صحیح)
+                plan2, gb2, units2 = unl_stock_plan(devices, days, fresh=True, whole_only=True)
+                if plan2 == 'convert':
+                    _done = unl_convert(gb2, units2)
+                elif plan2 == 'ok':
+                    _done = True
+            if not _done:
+                print('⚠️ تبدیل خودکار اعتبار گیگ به نامحدود ناموفق بود.')
+                return {'success': False, 'error': 'convert_failed', 'error_code': 'convert_failed'}
+        ok, d, st = _sapi('POST', '/unlimited', payload=body)
+        _wallet_cache['t'] = 0.0
+    if ok and isinstance(d, dict) and d.get('subUrl'):
+        _unl_cache['t'] = 0.0
+        return {'success': True, 'sub_url': d.get('subUrl'), 'config_id': d.get('id'), 'data': d}
+    print('⚠️ خطای خرید پلن نامحدود (کد ' + str(st) + '):', d)
+    err = d.get('error') if isinstance(d, dict) else None
+    return {'success': False, 'error': str(st), 'error_code': err}
+
+
+def make_proxy(gb, label, note=''):
+    body = {'gb': float(gb), 'label': label}
+    if note:
+        body['note'] = note
+    ok, d, st = _sapi('POST', '/proxies', payload=body)
+    if ok and isinstance(d, dict) and d.get('link'):
+        days = None
+        try:
+            import datetime as _dtm
+            exp = _dtm.datetime.fromisoformat(str(d.get('expiresAt')).replace('Z', '+00:00'))
+            days = max(1, math.ceil((exp - _dtm.datetime.now(_dtm.timezone.utc)).total_seconds() / 86400))
+        except Exception:
+            days = None
+        _proxy_st_cache['t'] = 0.0
+        return {'success': True, 'sub_url': d.get('link'), 'config_id': d.get('id'), 'days': days, 'data': d}
+    print('⚠️ خطای خرید پروکسی (کد ' + str(st) + '):', d)
+    err = d.get('error') if isinstance(d, dict) else None
+    return {'success': False, 'error': str(st), 'error_code': err}
+
+
+def build_extra_success(chat_id, ctype, label, price, res, days, gb, devices):
+    """(متن, کیبورد) پیام موفقیت خرید نامحدود/پروکسی"""
+    cl = get_ctype_label(chat_id, ctype)
+    if ctype == 'unlimited':
+        return u(chat_id, 'unl_success', divider=DIVIDER, ctype_label=cl, label=_html.escape(str(label)),
+                 devices=devices or 1, days=days, price=f'{price:,}', sub_url=_html.escape(str(res['sub_url']))), None
+    d = res.get('data') or {}
+    text = u(chat_id, 'proxy_success', divider=DIVIDER, label=_html.escape(str(label)), gb=_fmt_gb(gb), days=days,
+             price=f'{price:,}', server=_html.escape(str(d.get('server', ''))), port=d.get('port', ''),
+             user=_html.escape(str(d.get('username', ''))), password=_html.escape(str(d.get('password', ''))))
+    kb = {'inline_keyboard': [[{'text': u(chat_id, 'btn_open_proxy'), 'url': str(res['sub_url'])}]]}
+    return text, kb
+
+
+def _build_extra_invoice(chat_id, step_data):
+    ctype = step_data.get('type')
+    price = step_data['price']
+    base_price = step_data.get('base_price', price)
+    lines = [u(chat_id, 'invoice_title'), DIVIDER,
+             u(chat_id, 'invoice_type', ctype_label=get_ctype_label(chat_id, ctype))]
+    if ctype == 'unlimited':
+        lines.append(u(chat_id, 'extra_inv_devices', devices=step_data.get('devices') or 1))
+        lines.append(u(chat_id, 'extra_inv_days', days=step_data['days']))
+    else:
+        lines.append(u(chat_id, 'extra_inv_gb', gb=_fmt_gb(step_data['gb'])))
+        lines.append(u(chat_id, 'extra_inv_proxy_days'))
+    lines.append(u(chat_id, 'invoice_name', label=step_data['label']))
+    lines.append(DIVIDER)
+    if step_data.get('discount_code'):
+        lines.append(u(chat_id, 'invoice_discount_line', code=step_data['discount_code'], percent=step_data.get('discount_percent')))
+        lines.append(u(chat_id, 'invoice_base_price', base_price=base_price))
+        lines.append(u(chat_id, 'invoice_final_price', price=price))
+    else:
+        lines.append(u(chat_id, 'invoice_price', price=price))
+    lines.append('')
+    lines.append(u(chat_id, 'invoice_footer'))
+    return '\n'.join(lines)
+
+
+# ---------- منوهای خرید ----------
+def _snap(lst, v):
+    """نزدیک‌ترین مقدار لیست به v"""
+    return min(lst, key=lambda x: (abs(x - v), x)) if lst else v
+
+
+def build_unl_screen(chat_id, st):
+    price = unl_sell_price(st['devices'], st['days'])
+    text = u(chat_id, 'unl_screen', divider=DIVIDER, wallet=f'{get_wallet_db(chat_id):,}',
+             price=f'{price:,}' if price else '—')
+    kb = {'inline_keyboard': [
+        [{'text': u(chat_id, 'btn_qty_minus'), 'callback_data': 'unl_dev_dec'},
+         {'text': u(chat_id, 'unl_users_btn', n=st['devices']), 'callback_data': 'qty_noop'},
+         {'text': u(chat_id, 'btn_qty_plus'), 'callback_data': 'unl_dev_inc'}],
+        [{'text': u(chat_id, 'btn_qty_minus'), 'callback_data': 'unl_days_dec'},
+         {'text': u(chat_id, 'unl_days_btn', n=st['days']), 'callback_data': 'qty_noop'},
+         {'text': u(chat_id, 'btn_qty_plus'), 'callback_data': 'unl_days_inc'}],
+        [{'text': '−۷', 'callback_data': 'unl_days_dec7'}, {'text': '+۷', 'callback_data': 'unl_days_inc7'}],
+        [{'text': u(chat_id, 'qty_continue'), 'callback_data': 'unl_confirm'}],
+        [{'text': u(chat_id, 'btn_cancel'), 'callback_data': 'menu'}],
+    ]}
+    return text, kb
+
+
+def unl_adjust(st, action):
+    devs = unl_device_options()
+    if not devs:
+        return
+    if st['devices'] not in devs:
+        st['devices'] = devs[0]
+    if action in ('unl_dev_inc', 'unl_dev_dec'):
+        i = devs.index(st['devices']) + (1 if action == 'unl_dev_inc' else -1)
+        st['devices'] = devs[max(0, min(i, len(devs) - 1))]
+    days = unl_day_options(st['devices'])
+    if not days:
+        return
+    cur = _snap(days, st['days'])
+    if action == 'unl_days_inc':
+        cur = days[min(days.index(cur) + 1, len(days) - 1)]
+    elif action == 'unl_days_dec':
+        cur = days[max(days.index(cur) - 1, 0)]
+    elif action == 'unl_days_inc7':
+        cur = next((d for d in days if d >= cur + 7), days[-1])
+    elif action == 'unl_days_dec7':
+        cur = next((d for d in reversed(days) if d <= cur - 7), days[0])
+    st['days'] = cur
+
+
+def action_unl_menu(chat_id):
+    devs = unl_device_options()
+    days = unl_day_options(devs[0]) if devs else []
+    if not devs or not days:
+        send_message(chat_id, u(chat_id, 'unl_unavailable'))
+        return
+    st = {'step': 'pick_unl', 'devices': devs[0], 'days': 30 if 30 in days else days[0]}
+    user_steps[str(chat_id)] = st
+    text, kb = build_unl_screen(chat_id, st)
+    send_message(chat_id, text, reply_markup=kb)
+
+
+def action_unl_days(chat_id, devices):
+    cur = u(chat_id, 'cur')
+    rows = []
+    if devices in unl_device_options():
+        for n in unl_day_options(devices):
+            p = unl_sell_price(devices, n)
+            if p:
+                rows.append([{'text': f'⏳ {n} روزه — {p:,} {cur}', 'callback_data': f'unl_days_{devices}_{n}'}])
+    if not rows:
+        send_message(chat_id, u(chat_id, 'unl_unavailable'))
+        return
+    rows.append([{'text': '↩️', 'callback_data': 'buy_unl'}, {'text': u(chat_id, 'btn_cancel'), 'callback_data': 'menu'}])
+    send_message(chat_id, u(chat_id, 'unl_pick_days', divider=DIVIDER, devices=devices, wallet=f'{get_wallet_db(chat_id):,}'),
+                 reply_markup={'inline_keyboard': rows})
+
+
+def action_proxy_menu(chat_id):
+    mn, mx = proxy_limits()
+    cur = u(chat_id, 'cur')
+    rows = [[{'text': f'📶 {g} گیگ — {proxy_price(g):,} {cur}', 'callback_data': 'proxy_gb_' + str(g)}] for g in proxy_gb_options()]
+    rows.append([{'text': u(chat_id, 'btn_cancel'), 'callback_data': 'menu'}])
+    user_steps[str(chat_id)] = {'step': 'proxy_ask_gb'}
+    send_message(chat_id, u(chat_id, 'proxy_pick_gb', divider=DIVIDER, min_gb=_fmt_gb(mn), max_gb=_fmt_gb(mx),
+                            ppg=f'{proxy_price_per_gb():,}', wallet=f'{get_wallet_db(chat_id):,}'),
+                 reply_markup={'inline_keyboard': rows})
+
+
+def proxy_go_label(chat_id, gb):
+    user_steps[str(chat_id)] = {'step': 'ask_label', 'gb': gb, 'days': 0, 'price': proxy_price(gb), 'type': 'proxy'}
+    send_ask_label_prompt(chat_id)
+
+
+# ---------- کارت کانفیگ‌های من / پنل مدیریت ----------
+def build_extra_card(chat_id, idx, cfg):
+    ctype = cfg[9]
+    status = cfg[10] if len(cfg) > 10 else 'active'
+    days_left = days_remaining(cfg[8])
+    if status == 'paused':
+        st = u(chat_id, 'myconfigs_status_paused')
+    elif days_left <= 0:
+        st = u(chat_id, 'myconfigs_status_expired')
+    else:
+        st = u(chat_id, 'myconfigs_status_active')
+    head = '<b>' + str(idx) + '. ' + _html.escape(str(cfg[4])) + '</b> ' + st
+    cl = get_ctype_label(chat_id, ctype)
+    if ctype == 'unlimited':
+        return u(chat_id, 'unl_card', head=head, ctype_label=cl, days_left=days_left, sub_url=_html.escape(str(cfg[1])))
+    total = float(cfg[3] or 0)
+    it = _proxy_map().get(str(cfg[2]))
+    used = None
+    try:
+        if it and it.get('usedGb') is not None:
+            used = max(0.0, float(it.get('usedGb')))
+    except Exception:
+        used = None
+    if used is None:
+        bar, used_s, rem_s = '', '—', '—'
+    else:
+        bar, used_s, rem_s = build_usage_bar(used, total), f'{used:.2f}', f'{max(0.0, total - used):.2f}'
+    return u(chat_id, 'proxy_card', head=head, bar=bar, gb=_fmt_gb(total), used=used_s, rem=rem_s,
+             ctype_label=cl, days_left=days_left, sub_url=_html.escape(str(cfg[1])))
+
+
+def _send_extra_manage_panel(chat_id, cfg, note=None):
+    row_id, ctype = cfg[0], cfg[9]
+    status = cfg[10] if len(cfg) > 10 else 'active'
+    rows = []
+    if ctype == 'unlimited':
+        if status == 'paused':
+            toggle = {'text': u(chat_id, 'btn_resume'), 'callback_data': 'cfgresume_' + str(row_id)}
+            status_line = u(chat_id, 'manage_status_paused')
+        else:
+            toggle = {'text': u(chat_id, 'btn_pause'), 'callback_data': 'cfgpause_' + str(row_id)}
+            status_line = u(chat_id, 'manage_status_active')
+        rows += [[{'text': u(chat_id, 'btn_unl_rebuy'), 'callback_data': 'buy_unl'}],
+                 [{'text': u(chat_id, 'btn_rename'), 'callback_data': 'cfgrename_' + str(row_id)}],
+                 [{'text': u(chat_id, 'btn_qr'), 'callback_data': 'cfgqr_' + str(row_id)}],
+                 [toggle],
+                 [{'text': u(chat_id, 'btn_rotate'), 'callback_data': 'cfgrotate_' + str(row_id)}]]
+        extra = ''
+    else:
+        status_line = u(chat_id, 'manage_status_active')
+        rows += [[{'text': u(chat_id, 'btn_extend'), 'callback_data': 'cfgext_' + str(row_id)}],
+                 [{'text': u(chat_id, 'btn_qr'), 'callback_data': 'cfgqr_' + str(row_id)}],
+                 [{'text': u(chat_id, 'btn_open_proxy'), 'url': str(cfg[1])}]]
+        extra = u(chat_id, 'manage_volume', gb=_fmt_gb(cfg[3])) + '\n'
+    rows.append([{'text': u(chat_id, 'btn_close'), 'callback_data': 'menu'}])
+    text = (u(chat_id, 'manage_title') + '\n' + DIVIDER + '\n' + u(chat_id, 'manage_name', label=cfg[4]) + '\n' + extra +
+            u(chat_id, 'extra_days_left', days=days_remaining(cfg[8])) + '\n' + status_line + '\n' + u(chat_id, 'manage_footer'))
+    if note:
+        text = note + '\n' + DIVIDER + '\n' + text
+    send_message(chat_id, text, reply_markup={'inline_keyboard': rows})
+
+
+def _delete_extra_with_refund(chat_id, row_id, cfg):
+    """حذف نامحدود/پروکسی + بازپرداخت متناسب با باقی‌مانده (با ضریب refund_ratio). خروجی مثل delete_config_with_refund."""
+    config_id, gb, price, ctype = cfg[2], float(cfg[3] or 0), int(cfg[6] or 0), cfg[9]
+    refund = 0
+    try:
+        if ctype == 'unlimited':
+            total = int(cfg[5] or 0)
+            if total > 0 and price > 0:
+                refund = int(price * (min(days_remaining(cfg[8]), total) / float(total)) * get_refund_ratio())
+        else:
+            used = get_config_usage_gb(config_id)
+            if used is not None and gb > 0 and price > 0:
+                used = min(max(float(used), 0.0), gb)
+                refund = int((price - used * (price / gb)) * get_refund_ratio())
+    except Exception as e:
+        print('⚠️ محاسبه‌ی بازپرداخت ناموفق:', e)
+        refund = 0
+    refund = max(0, min(refund, price))
+    st = delete_config_from_panel_strict(config_id)
+    if st == 'fail':
+        return 'panel_error', 0
+    if st == 'gone':
+        refund = 0
+    if not _claim_delete_config_row(chat_id, row_id):
+        return 'not_found', 0
+    if refund > 0:
+        update_wallet_db(chat_id, refund, 'refund_delete_config')
+    return 'ok', refund
+
+
+def _reorder_extra(chat_id, order):
+    _oid, _label, gb, days, _price, ctype, _c = order
+    if ctype == 'unlimited':
+        devices, days = int(gb or 1), int(days or 30)
+        p = unl_sell_price(devices, days) if (unl_available() and devices in unl_device_options()
+                                              and days in unl_day_options(devices)) else None
+        if not p:
+            send_message(chat_id, u(chat_id, 'unl_unavailable'))
+            return
+        step = {'step': 'confirm_buy', 'gb': 0, 'days': days, 'price': p, 'base_price': p,
+                'label': get_next_user_label(), 'type': 'unlimited', 'devices': devices}
+    else:
+        if not proxy_available():
+            send_message(chat_id, u(chat_id, 'proxy_unavailable'))
+            return
+        mn, mx = proxy_limits()
+        g = min(max(float(gb or mn), mn), mx)
+        p = proxy_price(g)
+        step = {'step': 'confirm_buy', 'gb': g, 'days': 0, 'price': p, 'base_price': p,
+                'label': get_next_user_label(), 'type': 'proxy'}
+    user_steps[str(chat_id)] = step
+    send_message(chat_id, build_purchase_invoice(chat_id, step), reply_markup=build_purchase_kb(chat_id))
+
+
 def delete_config_from_panel(config_id):
     if not config_id:
         return True
     try:
         res = SESSION.delete(
-            CONFIG_API + '/' + str(config_id),
+            _cfg_url(config_id),
             headers={'Authorization': 'Bearer ' + CONFIG_KEY},
             timeout=15
         )
@@ -3487,7 +4240,7 @@ def _panel_action(method, path_suffix, config_id, json_body=None):
     try:
         res = SESSION.request(
             method,
-            CONFIG_API + '/' + str(config_id) + path_suffix,
+            _cfg_url(config_id) + path_suffix,
             headers={'Authorization': 'Bearer ' + CONFIG_KEY},
             json=json_body,
             timeout=20
@@ -3527,8 +4280,16 @@ def get_config_limit_gb(config_id):
     خروجی: ('ok', عدد) | ('nofield', None) اگه پنل جواب داد ولی فیلد نبود | ('error', None) اگه نتونست بخونه."""
     if not config_id:
         return 'error', None
+    if _cfg_kind(config_id) == 'proxy':
+        _it = _proxy_map(force=True).get(str(config_id))
+        try:
+            return ('ok', float(_it.get('limitGb'))) if _it and _it.get('limitGb') is not None else ('error', None)
+        except Exception:
+            return 'error', None
+    if _cfg_kind(config_id) == 'unlimited':
+        return 'error', None
     try:
-        res = SESSION.get(CONFIG_API + '/' + str(config_id),
+        res = SESSION.get(_cfg_url(config_id),
                           headers={'Authorization': 'Bearer ' + CONFIG_KEY}, timeout=15)
         if res.status_code not in (200, 201):
             return 'error', None
@@ -3553,9 +4314,18 @@ def get_config_usage_gb(config_id):
     """
     if not config_id:
         return None
+    _k = _cfg_kind(config_id)
+    if _k == 'proxy':
+        _it = _proxy_map().get(str(config_id))
+        try:
+            return float(_it.get('usedGb')) if _it and _it.get('usedGb') is not None else None
+        except Exception:
+            return None
+    if _k == 'unlimited':
+        return None
     try:
         res = SESSION.get(
-            CONFIG_API + '/' + str(config_id),
+            _cfg_url(config_id),
             headers={'Authorization': 'Bearer ' + CONFIG_KEY},
             timeout=15
         )
@@ -3603,7 +4373,7 @@ def delete_config_from_panel_strict(config_id):
     if not config_id:
         return 'ok'
     try:
-        res = SESSION.delete(CONFIG_API + '/' + str(config_id),
+        res = SESSION.delete(_cfg_url(config_id),
                              headers={'Authorization': 'Bearer ' + CONFIG_KEY}, timeout=15)
         if res.status_code in (200, 201, 204):
             return 'ok'
@@ -3638,6 +4408,8 @@ def delete_config_with_refund(chat_id, row_id):
     cfg = get_config_row(chat_id, row_id)          # فقط کانفیگ‌های خودِ همین کاربر
     if not cfg:
         return 'not_found', 0
+    if len(cfg) > 9 and cfg[9] in EXTRA_TYPES:
+        return _delete_extra_with_refund(chat_id, row_id, cfg)
     config_id, gb, price = cfg[2], cfg[3], (cfg[6] or 0)
     was_paused = len(cfg) > 10 and cfg[10] == 'paused'
     paused_now = False
@@ -4555,6 +5327,8 @@ def build_purchase_invoice(chat_id, step_data):
     """یه صفحه‌ی فاکتور واحد می‌سازه (شبیه فاکتور خرید تلگرام): همه‌ی اطلاعات
     سفارش رو یه‌جا نشون می‌ده، و اگه کد تخفیف اعمال شده باشه قیمت قبل/بعد از
     تخفیف رو هم اضافه می‌کنه."""
+    if step_data.get('type') in EXTRA_TYPES:
+        return _build_extra_invoice(chat_id, step_data)
     ctype = step_data.get('type', 'both')
     ctype_label = get_ctype_label(chat_id, ctype)
     gb = step_data['gb']
@@ -4622,23 +5396,114 @@ def get_plans(active_only=True):
             continue
         gb = int(gb) if gb == int(gb) else gb
         ctype = p.get('type') if p.get('type') in types else 'both'
+        if active_only and not product_enabled(ctype):
+            continue
         title = str(p.get('title') or '').strip() or f'{gb:g} گیگ / {days} روزه'
         out.append({'id': pid, 'title': title, 'gb': gb, 'days': days, 'price': price, 'type': ctype})
     return out
 
 
+# ---- چیدمان صفحه‌های خرید (ترتیب و محل هر دکمه از پنل: «دکمه‌ها و ظاهر ربات» → صفحه‌ی خرید) ----
+BUY_ITEM_KEYS = ('unlimited', 'proxy', 'plans', 'custom')
+_BUY_CB = {'unlimited': 'buy_unl', 'proxy': 'buy_proxy', 'plans': 'buy_plans', 'custom': 'buy_custom'}
+_BUY_PAGES = {'unlimited': ('hub', 'plans', 'custom'), 'proxy': ('hub', 'plans', 'custom'),
+              'plans': ('hub', 'custom'), 'custom': ('hub', 'plans')}
+
+
+def buy_item_available(k):
+    try:
+        if k == 'unlimited':
+            return unl_available()
+        if k == 'proxy':
+            return proxy_available()
+        if k == 'plans':
+            return bool(get_plans())
+        if k == 'custom':
+            return any(product_enabled(t) for t in ('wireguard', 'config', 'both', 'openvpn', 'dns'))
+    except Exception as e:
+        print('⚠️ بررسی دکمه‌ی خرید ناموفق:', k, e)
+    return False
+
+
+def buy_item_label(chat_id, k):
+    en = get_user_lang(chat_id) == 'en'
+    if k == 'unlimited':
+        return u(chat_id, 'svc_unlimited') if en else extra_label('unlimited')
+    if k == 'proxy':
+        return u(chat_id, 'svc_proxy') if en else extra_label('proxy')
+    if k == 'plans':
+        return u(chat_id, 'btn_buy_plans') if en else (get_setting('buy_label_plans', '') or u(chat_id, 'btn_buy_plans'))
+    return u(chat_id, 'btn_buy_custom') if en else (get_setting('buy_label_custom', '') or u(chat_id, 'btn_buy_custom'))
+
+
+def buy_layout(chat_id):
+    """{'hub': [...], 'plans': [...], 'custom': [...]}: کلیدهای دکمه‌های هر صفحه به ترتیبی که ادمین چیده.
+    دکمه‌ای که صفحه‌ی میزبانش خالی/غیرفعاله میاد صفحه‌ی اصلی؛ و چیدمان‌هایی که یه صفحه رو دست‌نیافتنی می‌کنن اصلاح می‌شن."""
+    avail = {k: buy_item_available(k) for k in BUY_ITEM_KEYS}
+    place = {}
+    for k in BUY_ITEM_KEYS:
+        pl = get_setting('buy_place_' + k, 'hub')
+        if pl not in _BUY_PAGES[k]:
+            pl = 'hub'
+        if pl in ('plans', 'custom') and not avail[pl]:
+            pl = 'hub'
+        place[k] = pl
+    if place['plans'] == 'custom' and place['custom'] == 'plans':
+        place['custom'] = 'hub'
+    layout = {'hub': [], 'plans': [], 'custom': []}
+    for k in get_ordered_keys('menu_order_buyhub', list(BUY_ITEM_KEYS)):
+        if avail[k]:
+            layout[place[k]].append(k)
+    if not layout['hub']:
+        layout = {'hub': [k for pg in ('hub', 'plans', 'custom') for k in layout[pg]], 'plans': [], 'custom': []}
+    return layout
+
+
+def _buy_rows(chat_id, keys):
+    return [[{'text': buy_item_label(chat_id, k), 'callback_data': _BUY_CB[k]}] for k in keys]
+
+
+def _open_buy_item(chat_id, k):
+    if k == 'custom':
+        _action_buy_custom_menu(chat_id)
+    elif k == 'plans':
+        action_plans_menu(chat_id)
+    elif k == 'unlimited':
+        action_unl_menu(chat_id)
+    else:
+        action_proxy_menu(chat_id)
+
+
 def action_buy_menu(chat_id):
+    """صفحه‌ی اصلی خرید؛ دکمه‌ها و ترتیبشون از پنل تنظیم می‌شه (پیش‌فرض: نامحدود، پروکسی، بسته‌های آماده، خرید دلخواه)."""
     if not is_feature_enabled('buy'):
         send_message(chat_id, u(chat_id, 'disabled_feature'))
         return
-    plans = get_plans()
-    if not plans:
-        _action_buy_custom_menu(chat_id)
+    hub = buy_layout(chat_id)['hub']
+    if not hub:
+        send_message(chat_id, u(chat_id, 'disabled_feature'))
         return
     user_steps[str(chat_id)] = {}
+    if len(hub) == 1:                           # فقط یه گزینه داریم؛ مستقیم بره سراغش
+        _open_buy_item(chat_id, hub[0])
+        return
+    send_message(chat_id, u(chat_id, 'buy_hub_text', divider=DIVIDER, wallet=f'{get_wallet_db(chat_id):,}'),
+                 reply_markup={'inline_keyboard': _buy_rows(chat_id, hub)})
+
+
+def action_plans_menu(chat_id):
+    """صفحه‌ی «بسته‌های آماده»"""
+    plans = get_plans()
+    if not plans:
+        action_buy_menu(chat_id)
+        return
+    user_steps[str(chat_id)] = {}
+    layout = buy_layout(chat_id)
     cur = u(chat_id, 'cur')
     rows = [[{'text': f"📦 {p['title']} — {p['price']:,} {cur}", 'callback_data': 'plan_' + p['id']}] for p in plans]
-    rows.append([{'text': u(chat_id, 'btn_buy_custom'), 'callback_data': 'buy_custom'}])
+    rows.extend(_buy_rows(chat_id, layout['plans']))
+    if len(layout['hub']) > 1:
+        rows.append([{'text': u(chat_id, 'btn_back_buy'), 'callback_data': 'buy_hub'}])
     send_message(chat_id, u(chat_id, 'plans_menu_text', divider=DIVIDER, wallet=f'{get_wallet_db(chat_id):,}'),
                  reply_markup={'inline_keyboard': rows})
 
@@ -4647,7 +5512,11 @@ def _action_buy_custom_menu(chat_id):
     wallet = get_wallet_db(chat_id)
     ct = get_config_types()
     user_steps[str(chat_id)] = {}
-    order = get_ordered_keys('menu_order_buytypes', ['wireguard', 'config', 'both', 'openvpn', 'dns'])
+    order = [k for k in get_ordered_keys('menu_order_buytypes', ['wireguard', 'config', 'both', 'openvpn', 'dns'])
+             if product_enabled(k)]
+    if not order:
+        send_message(chat_id, u(chat_id, 'disabled_feature'))
+        return
     # قیمت هر نوع سرویس رو مستقیم رو خودِ دکمه می‌ذاریم (نه فقط تو متن پیام)،
     # چون هر بار که این کیبورد ساخته می‌شه ct از get_config_types() (یعنی از
     # جدول settings) خونده شده، پس با تغییر قیمت از پنل، متن دکمه هم بدون نیاز
@@ -4685,6 +5554,10 @@ def _action_buy_custom_menu(chat_id):
             wallet=f'{wallet:,}',
             divider=DIVIDER,
         )
+    try:
+        type_kb['inline_keyboard'].extend(_buy_rows(chat_id, buy_layout(chat_id)['custom']))
+    except Exception as _e:
+        print('⚠️ دکمه‌های اضافه‌ی صفحه‌ی خرید دلخواه:', _e)
     send_message(chat_id, text, reply_markup=type_kb)
 
 
@@ -5611,6 +6484,11 @@ def action_my_configs(chat_id):
     manage_rows = []
     for i, cfg in enumerate(configs, 1):
         ctype = cfg[9] if len(cfg) > 9 else 'both'
+        if ctype in EXTRA_TYPES:
+            txt += build_extra_card(chat_id, i, cfg) + '\n\n'
+            manage_rows.append([{'text': u(chat_id, 'btn_manage_config', idx=i, label=str(cfg[4])[:20]),
+                                 'callback_data': 'managecfg_' + str(cfg[0])}])
+            continue
         ctype_label = get_ctype_label(chat_id, ctype)
         status = cfg[10] if len(cfg) > 10 else 'active'
         remaining_days = days_remaining(cfg[8])
@@ -5652,6 +6530,8 @@ def send_manage_panel(chat_id, cfg, note=None):
     اساس وضعیت فعلیِ کانفیگ (active/paused) متن و عملکردش عوض می‌شه، تا به‌جای
     دو دکمه‌ی جدا («توقف» و «از سرگیری» که همیشه هر دو نشون داده می‌شدن)، کاربر
     فقط یک دکمه ببینه که همیشه کار درست (متضاد وضعیت فعلی) رو انجام می‌ده."""
+    if len(cfg) > 9 and cfg[9] in EXTRA_TYPES:
+        return _send_extra_manage_panel(chat_id, cfg, note)
     row_id = cfg[0]
     status = cfg[10] if len(cfg) > 10 else 'active'
     if status == 'paused':
@@ -5729,6 +6609,12 @@ def _action_recent_orders(chat_id):
     rows = []
     for i, o in enumerate(orders, 1):
         oid, label, gb, days, price, ctype, _created = o
+        if ctype in EXTRA_TYPES:
+            _detail = (f'📱 {int(gb or 1)} | ⏳ {days}' if ctype == 'unlimited' else f'📶 {_fmt_gb(gb)} GB')
+            txt += u(chat_id, 'extra_order_item', idx=i, label=_html.escape(str(label)),
+                     ctype_label=get_ctype_label(chat_id, ctype), detail=_detail, price=price or 0) + '\n\n'
+            rows.append([{'text': u(chat_id, 'btn_reorder', idx=i), 'callback_data': 'reord_' + str(oid)}])
+            continue
         txt += u(
             chat_id, 'recentorders_item',
             idx=i, label=str(label), gb='%g' % (gb or 0), days=str(days),
@@ -6371,6 +7257,8 @@ def quick_renew_pack(user_id, row_id):
         if p['type'] == ctype and float(p['gb']) == gb and p['days'] == days:
             price = p['price']
             break
+    if price is None and ctype == 'proxy':
+        price = proxy_price(gb)
     if price is None:
         types = get_config_types()
         price = round(gb * types.get(ctype, types['both'])['price_per_gb'])
@@ -6456,8 +7344,15 @@ def _alerts_candidates():
 
 
 def _alert_send(uid, row_id, key, **kw):
+    _renew = {'text': u(uid, 'btn_alert_renew'), 'callback_data': 'qrenew_' + str(row_id)}
+    try:
+        _c = get_config_row(uid, row_id)
+        if _c and len(_c) > 9 and _c[9] == 'unlimited':
+            _renew = {'text': u(uid, 'btn_unl_rebuy'), 'callback_data': 'buy_unl'}
+    except Exception:
+        pass
     kb = {'inline_keyboard': [
-        [{'text': u(uid, 'btn_alert_renew'), 'callback_data': 'qrenew_' + str(row_id)}],
+        [_renew],
         [{'text': u(uid, 'btn_alert_manage'), 'callback_data': 'managecfg_' + str(row_id)}]]}
     try:
         send_message(uid, u(uid, key, divider=DIVIDER, **kw), reply_markup=kb)
@@ -6708,7 +7603,13 @@ def process_update(update):
                 send_message(chat_id, u(chat_id, 'reorder_not_found'))
             else:
                 types = get_config_types()
+                if order[5] in EXTRA_TYPES:
+                    _reorder_extra(chat_id, order)
+                    return
                 ctype = order[5] if order[5] in types else 'both'
+                if not product_enabled(ctype):
+                    send_message(chat_id, u(chat_id, 'disabled_feature'))
+                    return
                 gb, days = order[2], order[3]
                 if gb is not None and float(gb).is_integer():
                     gb = int(gb)
@@ -6771,6 +7672,11 @@ def process_update(update):
                 ctype = s.get('type', 'both')
                 cfg_type = get_config_types().get(ctype, get_config_types()['both'])
                 ctype_label = get_ctype_label(chat_id, ctype)
+                if (not product_enabled(ctype)) or (ctype == 'unlimited' and not unl_available()) \
+                        or (ctype == 'proxy' and not proxy_available()):
+                    user_steps[str(chat_id)] = {}
+                    send_message(chat_id, u(chat_id, 'disabled_feature'))
+                    return
                 _max_cfg = get_max_configs_per_user()
                 if _max_cfg > 0 and len(get_user_configs(chat_id)) >= _max_cfg:
                     user_steps[str(chat_id)] = {}
@@ -6812,12 +7718,20 @@ def process_update(update):
                         return
                     send_message(chat_id, u(chat_id, 'building_config'))
                     try:
-                        res = make_config(gb, label, days, proto=cfg_type['proto'])
+                        if ctype == 'unlimited':
+                            res = make_unlimited(s.get('devices') or 1, days, label,
+                                                 build_config_note(chat_id, query.get('from', {}).get('username'), price))
+                        elif ctype == 'proxy':
+                            res = make_proxy(gb, label,
+                                             build_config_note(chat_id, query.get('from', {}).get('username'), price))
+                        else:
+                            res = make_config(gb, label, days, proto=cfg_type['proto'])
                     except Exception as _mc_err:
                         print('⚠️ استثنا هنگام ساخت کانفیگ:', _mc_err)
                         res = {'success': False, 'error': str(_mc_err), 'error_code': None}
                     if res['success'] and res['sub_url']:
                         try:
+                            days = res.get('days') or days
                             save_user_config(chat_id, res['sub_url'], res['config_id'], gb, label, days, price, ctype)
                         except Exception as _sv_err:
                             # کانفیگ ساخته شده و پول کم شده؛ کاربر باید لینکش رو بگیره و ادمین خبردار بشه
@@ -6829,25 +7743,29 @@ def process_update(update):
                             except Exception:
                                 pass
                         try:
-                            save_order(chat_id, label, gb, days, price, ctype, res['config_id'])
+                            save_order(chat_id, label, (s.get('devices') if ctype == 'unlimited' else gb), days, price, ctype, res['config_id'])
                         except Exception as order_err:
                             print('⚠️ ثبت سفارش در جدول orders انجام نشد:', order_err)
-                        set_config_note(
-                            res['config_id'],
-                            build_config_note(chat_id, query.get('from', {}).get('username'), price)
-                        )
-                        if ctype == 'wireguard':
-                            output_label = u(chat_id, 'output_label_wireguard')
-                        elif ctype == 'openvpn':
-                            output_label = u(chat_id, 'output_label_openvpn')
+                        _kb = None
+                        if ctype in EXTRA_TYPES:
+                            success_text, _kb = build_extra_success(chat_id, ctype, label, price, res, days, gb, s.get('devices'))
                         else:
-                            output_label = u(chat_id, 'output_label_default')
-                        success_text = u(
-                            chat_id, 'purchase_success', divider=DIVIDER, ctype_label=ctype_label,
-                            gb=gb, label=label, days=days, price=price,
-                            output_label=output_label, sub_url=res['sub_url'],
-                        )
-                        send_message(chat_id, success_text)
+                            set_config_note(
+                                res['config_id'],
+                                build_config_note(chat_id, query.get('from', {}).get('username'), price)
+                            )
+                            if ctype == 'wireguard':
+                                output_label = u(chat_id, 'output_label_wireguard')
+                            elif ctype == 'openvpn':
+                                output_label = u(chat_id, 'output_label_openvpn')
+                            else:
+                                output_label = u(chat_id, 'output_label_default')
+                            success_text = u(
+                                chat_id, 'purchase_success', divider=DIVIDER, ctype_label=ctype_label,
+                                gb=gb, label=label, days=days, price=price,
+                                output_label=output_label, sub_url=res['sub_url'],
+                            )
+                        send_message(chat_id, success_text, reply_markup=_kb)
                         if price and price > 0:
                             process_referral_reward(chat_id, 'purchase', price)   # بعد از پیام موفقیت، تا خریدار معطل نشه
                     else:
@@ -6863,7 +7781,9 @@ def process_update(update):
                                              parse_mode=None)
                             except Exception:
                                 pass
-                        if res.get('error_code') and 'proto_unavailable' in str(res.get('error_code')).lower():
+                        if res.get('error_code') in ('no_stock', 'convert_failed'):
+                            send_message(chat_id, u(chat_id, 'unl_support_error'))
+                        elif res.get('error_code') and 'proto_unavailable' in str(res.get('error_code')).lower():
                             send_message(chat_id, u(chat_id, 'proto_unavailable', ctype_label=ctype_label))
                         elif res.get('error_code') and any(
                             c in str(res.get('error_code')).lower() for c in ('dns_unavailable', 'dns_off_for_seller')
@@ -6969,6 +7889,8 @@ def process_update(update):
             cfg = get_config_row(chat_id, row_id)
             if not cfg:
                 send_message(chat_id, u(chat_id, 'config_not_found'))
+            elif len(cfg) > 9 and cfg[9] == 'unlimited':
+                send_message(chat_id, u(chat_id, 'unl_no_extend'))
             else:
                 user_steps[str(chat_id)] = {'step': 'ext_ask_gb', 'row_id': row_id}
                 send_message(chat_id, u(chat_id, 'ext_ask_gb'), reply_markup=cancel_kb(chat_id))
@@ -7039,6 +7961,9 @@ def process_update(update):
                     new_url = None
                     if isinstance(resp, dict):
                         new_url = resp.get('sub_url') or resp.get('subUrl') or resp.get('url')
+                    if isinstance(resp, dict) and resp.get('id') and len(cfg) > 9 and cfg[9] == 'unlimited' \
+                            and str(resp.get('id')) != str(cfg[2]):
+                        update_config_id_db(row_id, resp['id'])      # تغییر لینک نامحدود، شناسه‌ی جدید هم می‌ده
                     if new_url:
                         update_config_suburl_db(row_id, new_url)
                         send_message(chat_id, u(chat_id, 'rotate_success', label=cfg[4], sub_url=new_url))
@@ -7119,6 +8044,95 @@ def process_update(update):
             send_message(chat_id, u(chat_id, 'ext_cancelled'))
             main_menu(chat_id)
 
+        elif data in ('unl_dev_inc', 'unl_dev_dec', 'unl_days_inc', 'unl_days_dec', 'unl_days_inc7', 'unl_days_dec7'):
+            _st = user_steps.get(str(chat_id), {})
+            if _st.get('step') != 'pick_unl' or not unl_available():
+                main_menu(chat_id)
+            else:
+                unl_adjust(_st, data)
+                _t, _k = build_unl_screen(chat_id, _st)
+                edit_message(chat_id, query['message']['message_id'], _t, reply_markup=_k)
+
+        elif data == 'unl_confirm':
+            _st = user_steps.get(str(chat_id), {})
+            _price = None
+            if _st.get('step') == 'pick_unl' and is_feature_enabled('buy') and unl_available() \
+                    and _st['devices'] in unl_device_options() and _st['days'] in unl_day_options(_st['devices']):
+                _price = unl_sell_price(_st['devices'], _st['days'])
+                if unl_stock_plan(_st['devices'], _st['days'])[0] == 'no':
+                    send_message(chat_id, u(chat_id, 'unl_support_error'))
+                    return
+            if not _price:
+                send_message(chat_id, u(chat_id, 'unl_unavailable'))
+            else:
+                user_steps[str(chat_id)] = {'step': 'ask_label', 'gb': 0, 'days': _st['days'], 'price': _price,
+                                            'type': 'unlimited', 'devices': _st['devices']}
+                send_ask_label_prompt(chat_id)
+
+        elif data == 'buy_hub':
+            action_buy_menu(chat_id)
+
+        elif data == 'buy_plans':
+            if not is_feature_enabled('buy'):
+                send_message(chat_id, u(chat_id, 'disabled_feature'))
+            else:
+                action_plans_menu(chat_id)
+
+        elif data == 'buy_unl':
+            if not is_feature_enabled('buy'):
+                send_message(chat_id, u(chat_id, 'disabled_feature'))
+            elif not unl_available():
+                send_message(chat_id, u(chat_id, 'unl_unavailable'))
+            else:
+                action_unl_menu(chat_id)
+
+        elif data.startswith('unl_dev_'):
+            try:
+                _d = int(data.split('_')[2])
+            except Exception:
+                _d = 0
+            if is_feature_enabled('buy') and unl_available():
+                action_unl_days(chat_id, _d)
+            else:
+                send_message(chat_id, u(chat_id, 'unl_unavailable'))
+
+        elif data.startswith('unl_days_'):
+            try:
+                _p = data.split('_')
+                _d, _n = int(_p[2]), int(_p[3])
+            except Exception:
+                _d = _n = 0
+            _price = None
+            if is_feature_enabled('buy') and unl_available() and _d in unl_device_options() and _n in unl_day_options(_d):
+                _price = unl_sell_price(_d, _n)
+            if not _price:
+                send_message(chat_id, u(chat_id, 'unl_unavailable'))
+            else:
+                user_steps[str(chat_id)] = {'step': 'ask_label', 'gb': 0, 'days': _n, 'price': _price,
+                                            'type': 'unlimited', 'devices': _d}
+                send_ask_label_prompt(chat_id)
+
+        elif data == 'buy_proxy':
+            if not is_feature_enabled('buy'):
+                send_message(chat_id, u(chat_id, 'disabled_feature'))
+            elif not proxy_available():
+                send_message(chat_id, u(chat_id, 'proxy_unavailable'))
+            else:
+                action_proxy_menu(chat_id)
+
+        elif data.startswith('proxy_gb_'):
+            try:
+                _g = float(data[len('proxy_gb_'):])
+            except Exception:
+                _g = 0
+            _mn, _mx = proxy_limits()
+            if not (is_feature_enabled('buy') and proxy_available()):
+                send_message(chat_id, u(chat_id, 'proxy_unavailable'))
+            elif not (_mn <= _g <= _mx):
+                send_message(chat_id, u(chat_id, 'proxy_gb_bad', min_gb=_fmt_gb(_mn), max_gb=_fmt_gb(_mx)))
+            else:
+                proxy_go_label(chat_id, int(_g) if _g == int(_g) else _g)
+
         elif data == 'buy_custom':
             if is_feature_enabled('buy'):
                 _action_buy_custom_menu(chat_id)
@@ -7138,8 +8152,8 @@ def process_update(update):
         elif data.startswith('buytype_'):
             ctype = data.split('_', 1)[1]
             cfg_type = get_config_types().get(ctype)
-            if not cfg_type:
-                main_menu(chat_id)
+            if not cfg_type or not product_enabled(ctype):
+                send_message(chat_id, u(chat_id, 'disabled_feature'))
             else:
                 user_steps[str(chat_id)] = {'step': 'pick_quantity', 'type': ctype, 'gb': get_default_gb(), 'days': get_default_days()}
                 text, kb = build_quantity_screen(chat_id, user_steps[str(chat_id)])
@@ -7189,7 +8203,8 @@ def process_update(update):
                     'price': price,
                     'base_price': price,
                     'label': label,
-                    'type': ctype
+                    'type': ctype,
+                    'devices': s.get('devices')
                 }
                 send_message(chat_id, build_purchase_invoice(chat_id, user_steps[str(chat_id)]), reply_markup=build_purchase_kb(chat_id))
             else:
@@ -7350,13 +8365,29 @@ def process_update(update):
                 'price': price,
                 'base_price': price,
                 'label': label,
-                'type': ctype
+                'type': ctype,
+                'devices': step.get('devices')
             }
             send_message(
                 chat_id,
                 build_purchase_invoice(chat_id, user_steps[str(chat_id)]),
                 reply_markup=build_purchase_kb(chat_id)
             )
+
+        elif step.get('step') == 'proxy_ask_gb':
+            _mn, _mx = proxy_limits()
+            try:
+                _g = float(str(text).replace(',', '.').strip())
+                if not math.isfinite(_g) or not (_mn <= _g <= _mx):
+                    raise ValueError
+            except Exception:
+                send_message(chat_id, u(chat_id, 'proxy_gb_bad', min_gb=_fmt_gb(_mn), max_gb=_fmt_gb(_mx)))
+            else:
+                if proxy_available():
+                    proxy_go_label(chat_id, int(_g) if _g == int(_g) else _g)
+                else:
+                    user_steps[str(chat_id)] = {}
+                    send_message(chat_id, u(chat_id, 'proxy_unavailable'))
 
         elif step.get('step') == 'buy_enter_discount':
             ok, result = validate_discount_code(text, chat_id)
@@ -7483,7 +8514,10 @@ def process_update(update):
                         user_steps[str(chat_id)] = {}
                     else:
                         ctype = cfg[9] if len(cfg) > 9 else 'both'
-                        price_per_gb = get_config_types().get(ctype, get_config_types()['both'])['price_per_gb']
+                        if ctype == 'proxy':
+                            price_per_gb = proxy_price_per_gb()
+                        else:
+                            price_per_gb = get_config_types().get(ctype, get_config_types()['both'])['price_per_gb']
                         price = round(extra_gb * price_per_gb)
                         user_steps[str(chat_id)] = {
                             'step': 'ext_confirm',
@@ -7523,7 +8557,8 @@ def process_update(update):
                         # با نام قدیمی روی پنل ساخته و کش شده، برای همین بعد
                         # از تغییر نام، لینک رو هم رفرش (rotate) می‌کنیم تا
                         # نام جدید واقعاً داخل ساب‌لینک/فایل دیده بشه.
-                        rotate_res = rotate_link_config_on_panel(cfg[2])
+                        rotate_res = (rotate_link_config_on_panel(cfg[2]) if not (len(cfg) > 9 and cfg[9] == 'unlimited')
+                                      else {'success': False})
                         new_url = None
                         if rotate_res.get('success'):
                             resp = rotate_res.get('data') or {}

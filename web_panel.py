@@ -93,6 +93,27 @@ CONFIG_GROUPS = [
         ("default_days", "مدت پیش‌فرض صفحه‌ی خرید (روز)", "30", "number"),
         ("refund_ratio", "نسبت بازگشت وجه هنگام حذف کانفیگ (بین 0 تا 1؛ مثلاً 0.5 یعنی نصف ارزش باقی‌مانده)", "0.5", "float"),
     ]),
+    ("♾ محصولات: روشن/خاموش، نامحدود و پروکسی", [
+        ("product_on_wireguard", "فروش «فقط وایرگارد»", "1", "toggle"),
+        ("product_on_config", "فروش «فقط کانفیگ»", "1", "toggle"),
+        ("product_on_both", "فروش «هر دو»", "1", "toggle"),
+        ("product_on_openvpn", "فروش «فقط OpenVPN»", "1", "toggle"),
+        ("product_on_dns", "فروش «فقط DNS بازی»", "1", "toggle"),
+        ("product_on_unlimited", "فروش «پلن نامحدود»", "1", "toggle"),
+        ("product_on_proxy", "فروش «پروکسی تلگرام»", "1", "toggle"),
+        ("ctype_label_unlimited", "نام دکمه‌ی پلن نامحدود", "♾ پلن نامحدود", "text"),
+        ("ctype_label_proxy", "نام دکمه‌ی پروکسی تلگرام", "📡 پروکسی تلگرام", "text"),
+        ("unl_auto_convert", "تبدیل خودکار اعتبار گیگ به نامحدود", "1", "toggle"),
+        ("unl_devices", "پله‌های تعداد کاربر نامحدود", "1,2,3,4,5", "text"),
+        ("unl_days_options", "محدود کردن مدت‌های نامحدود (اختیاری)", "", "text"),
+        ("unl_markup_percent", "درصد سود روی قیمت عمده‌ی نامحدود", "30", "float"),
+        ("unl_round_to", "گرد کردن قیمت نامحدود به بالا (تومان)", "1000", "number"),
+        ("unl_price_overrides", "قیمت دستی نامحدود (اختیاری)", "", "text"),
+        ("proxy_price_per_gb", "قیمت هر گیگ پروکسی (تومان)", "5000", "number"),
+        ("proxy_min_gb", "حداقل حجم پروکسی (گیگ)", "0", "number"),
+        ("proxy_max_gb", "حداکثر حجم پروکسی (گیگ)", "0", "number"),
+        ("proxy_gb_options", "حجم‌های آماده‌ی دکمه‌ای پروکسی (گیگ)", "20,50,100,200", "text"),
+    ]),
     ("🏪 فروشندگی (پنل فروشنده)", [
         ("reseller_price", "هزینه‌ی ساخت حساب فروشندگی (تومان) — از کیف پول کاربر کم می‌شه؛ اگه ساخت حساب شکست بخوره پول برمی‌گرده. 0 = رایگان", "0", "number"),
         ("reseller_panel_url", "آدرس پنل فروشندگی — فقط وقتی سرویس آدرس نداد به‌عنوان جایگزین نشون داده می‌شه. متن‌ها و دکمه‌های این بخش: منوی «متن‌ها» ← گروه «🏪 فروشندگی»", DEFAULT_RESELLER_PANEL_URL, "url"),
@@ -196,6 +217,17 @@ CONFIG_TYPE_BUTTONS = [
     ("dns", "دکمه‌ی «فقط DNS بازی»", "🎮 فقط DNS بازی"),
 ]
 CONFIG_TYPE_KEYS = [key for key, _label, _default in CONFIG_TYPE_BUTTONS]
+
+
+# دکمه‌های صفحه‌ی خرید: (کلید، توضیح، اسم پیش‌فرض، کلید ذخیره‌ی اسم، صفحه‌هایی که می‌تونه توشون باشه)
+BUY_PAGE_ITEMS = [
+    ("unlimited", "♾ پلن نامحدود", "♾ پلن نامحدود", "ctype_label_unlimited", ("hub", "plans", "custom")),
+    ("proxy", "📡 پروکسی تلگرام", "📡 پروکسی تلگرام", "ctype_label_proxy", ("hub", "plans", "custom")),
+    ("plans", "📦 بسته‌های آماده", "📦 بسته‌های آماده", "buy_label_plans", ("hub", "custom")),
+    ("custom", "🛠 خرید دلخواه", "🛠 خرید دلخواه (انتخاب حجم و مدت)", "buy_label_custom", ("hub", "plans")),
+]
+BUY_PAGE_KEYS = [k for k, *_ in BUY_PAGE_ITEMS]
+BUY_PAGE_NAMES = {"hub": "صفحه‌ی اصلی خرید", "plans": "داخل «بسته‌های آماده»", "custom": "داخل «خرید دلخواه»"}
 
 
 def get_ordered_keys(setting_key, default_keys, settings_dict=None):
@@ -2105,9 +2137,63 @@ BASE_HTML = """<!DOCTYPE html>
     .sw-btn { align-self: stretch; justify-content: space-between; }
     .reset-btn { align-self: flex-start; }
   }
+
+  /* ===== ✨ لایه‌ی فانتزی (Aurora) ===== */
+  body::before { animation: auroraShift 22s ease-in-out infinite alternate; }
+  @keyframes auroraShift { 0% { filter: hue-rotate(0deg) } 100% { filter: hue-rotate(28deg) } }
+  .fx-orb { position: fixed; z-index: -1; pointer-events: none; border-radius: 50%; filter: blur(60px); opacity: .35; animation: orbFloat 18s ease-in-out infinite alternate; }
+  .fx-orb.o1 { width: 280px; height: 280px; background: var(--g1); top: 8%; left: -80px; }
+  .fx-orb.o2 { width: 240px; height: 240px; background: var(--g3); bottom: 6%; right: -60px; animation-delay: -6s; }
+  .fx-orb.o3 { width: 200px; height: 200px; background: var(--g2); top: 52%; left: 42%; opacity: .18; animation-delay: -11s; }
+  @keyframes orbFloat { 0% { transform: translate(0,0) scale(1) } 100% { transform: translate(40px,-50px) scale(1.18) } }
+  .card, .panel, .stat, .kpi, .set, .tile { backdrop-filter: var(--blur); -webkit-backdrop-filter: var(--blur); border-radius: 22px; transition: transform .25s cubic-bezier(.2,.8,.2,1), box-shadow .25s, border-color .25s; }
+  .card:hover, .stat:hover, .kpi:hover, .tile:hover { transform: translateY(-3px); box-shadow: var(--shadow), 0 0 0 1px var(--brand-dim), var(--glow); border-color: var(--brand); }
+  .btn, button.btn, a.btn { border-radius: 14px; transition: transform .18s, box-shadow .2s, filter .2s; }
+  .btn:hover { transform: translateY(-2px) scale(1.02); box-shadow: var(--glow); filter: brightness(1.08); }
+  .btn:active { transform: scale(.97); }
+  .page-title { background: var(--grad); -webkit-background-clip: text; background-clip: text; -webkit-text-fill-color: transparent; font-weight: 800; }
+  .title-stk { display: inline-flex; width: 46px; height: 46px; align-items: center; justify-content: center; border-radius: 16px; font-size: 24px; background: var(--surface); box-shadow: var(--glow); animation: bob 4s ease-in-out infinite; }
+  @keyframes bob { 50% { transform: translateY(-4px) rotate(-4deg) } }
+  .side-link { border-radius: 14px; transition: background .2s, transform .2s; }
+  .side-link:hover { transform: translateX(-4px); background: var(--side-active); }
+  .side-link.active { background: var(--grad); color: #fff; box-shadow: var(--glow); }
+  input, select, textarea { border-radius: 12px !important; transition: box-shadow .2s, border-color .2s; }
+  input:focus, select:focus, textarea:focus { outline: none; border-color: var(--brand) !important; box-shadow: 0 0 0 4px var(--brand-dim); }
+  ::-webkit-scrollbar { width: 9px; height: 9px; } ::-webkit-scrollbar-thumb { background: var(--grad); border-radius: 9px; }
+  main.app > * { animation: riseIn .5s cubic-bezier(.2,.8,.2,1) both; }
+  main.app > *:nth-child(2) { animation-delay: .05s } main.app > *:nth-child(3) { animation-delay: .1s } main.app > *:nth-child(4) { animation-delay: .15s }
+  @keyframes riseIn { from { opacity: 0; transform: translateY(14px) } to { opacity: 1; transform: none } }
+  @media (prefers-reduced-motion: reduce) { *, *::before, *::after { animation: none !important; transition: none !important; } }
+
+  /* ===== 💡 کارت راهنمای هر صفحه ===== */
+  details.help { margin: 0 0 16px; border-radius: 20px; border: 1px solid var(--border); background: var(--surface); backdrop-filter: var(--blur); -webkit-backdrop-filter: var(--blur); box-shadow: var(--shadow); overflow: hidden; }
+  details.help > summary { cursor: pointer; list-style: none; padding: 12px 18px; font-weight: 700; display: flex; align-items: center; gap: 10px; background: linear-gradient(90deg, var(--brand-dim), transparent); }
+  details.help > summary::-webkit-details-marker { display: none; }
+  details.help > summary::after { content: '▾'; margin-right: auto; transition: transform .25s; color: var(--muted); }
+  details.help[open] > summary::after { transform: rotate(180deg); }
+  details.help .hb { padding: 4px 20px 18px; }
+  details.help .hb p { margin: 8px 0; color: var(--ink); }
+  details.help .hb h5 { margin: 14px 0 6px; font-size: 14px; color: var(--brand); }
+  details.help .hrow { display: flex; gap: 10px; align-items: flex-start; padding: 8px 12px; border-radius: 14px; background: var(--surface-2); margin: 6px 0; }
+  details.help .hrow b { white-space: nowrap; background: var(--grad); -webkit-background-clip: text; background-clip: text; -webkit-text-fill-color: transparent; }
+  details.help .hrow span { color: var(--muted); }
+  details.help ul { margin: 6px 0; padding-right: 20px; color: var(--muted); }
+  details.help .warn { margin-top: 10px; padding: 10px 14px; border-radius: 14px; background: var(--warn-dim); color: var(--warn); font-weight: 600; }
+  .qa-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(210px, 1fr)); gap: 12px; margin: 12px 0 20px; }
+  .qa { display: block; text-decoration: none; color: var(--ink); padding: 16px; border-radius: 20px; background: var(--surface); border: 1px solid var(--border); backdrop-filter: var(--blur); transition: transform .25s, box-shadow .25s; }
+  .qa:hover { transform: translateY(-4px) rotate(-.5deg); box-shadow: var(--glow); }
+  .qa .qe { font-size: 28px; display: block; margin-bottom: 4px; } .qa b { display: block; } .qa small { color: var(--muted); line-height: 1.6; display: block; }
+  .guide-sec { margin: 22px 0 8px; font-size: 18px; font-weight: 800; }
+  .chk { display: flex; align-items: center; gap: 10px; padding: 10px 14px; border-radius: 14px; background: var(--surface-2); margin: 6px 0; cursor: pointer; }
+  .chk input { width: 20px; height: 20px; accent-color: var(--brand); }
+  .chk.done span { text-decoration: line-through; opacity: .55; }
+  .gloss dt { font-weight: 700; color: var(--brand); margin-top: 10px; } .gloss dd { margin: 2px 0 0; color: var(--muted); }
+  details.faq { background: var(--surface); border: 1px solid var(--border); border-radius: 16px; margin: 8px 0; padding: 10px 16px; }
+  details.faq summary { cursor: pointer; font-weight: 700; } details.faq p { color: var(--muted); margin: 8px 0 2px; }
 </style>
 </head>
 <body>
+<div class="fx-orb o1"></div><div class="fx-orb o2"></div><div class="fx-orb o3"></div>
 __BODY__
 <script>
   function toggleTheme() {
@@ -2287,6 +2373,7 @@ def render_page(title, active, content_html, actions=""):
       <main class="app">
         <div class="page-head"><div class="title-row">{('<span class="title-stk">' + STICKERS[active][0] + '</span>') if active in STICKERS and active not in ('more', 'logout') else ''}<h2 class="page-title">{title}</h2></div><div class="flex">{actions}</div></div>
         {flashes}
+        {help_card(active)}
         {content_html}
       </main>
       {render_bottom(active)}
@@ -3434,6 +3521,28 @@ SETTING_HELP = {
     "cmd_invite": ("/invite", "توضیح دستور دعوت دوستان تو منوی «/».", ""),
 }
 
+SETTING_HELP.update({
+    "product_on_wireguard": ("🔒 فروش «فقط وایرگارد»", "خاموش باشه این نوع از صفحه‌ی خرید و «خرید دلخواه» حذف می‌شه و بسته‌های آماده‌ی همین نوع هم نمایش داده نمی‌شن. کانفیگ‌های قبلاً خریده‌شده کار می‌کنن.", ""),
+    "product_on_config": ("⚙️ فروش «فقط کانفیگ»", "خاموش باشه این نوع از صفحه‌ی خرید و بسته‌های آماده حذف می‌شه.", ""),
+    "product_on_both": ("🔀 فروش «هر دو»", "خاموش باشه این نوع از صفحه‌ی خرید و بسته‌های آماده حذف می‌شه.", ""),
+    "product_on_openvpn": ("📱 فروش «فقط OpenVPN»", "خاموش باشه این نوع از صفحه‌ی خرید و بسته‌های آماده حذف می‌شه.", ""),
+    "product_on_dns": ("🎮 فروش «فقط DNS بازی»", "خاموش باشه این نوع از صفحه‌ی خرید و بسته‌های آماده حذف می‌شه.", ""),
+    "product_on_unlimited": ("♾ فروش «پلن نامحدود»", "خاموش باشه دکمه‌ی نامحدود از صفحه‌ی «بسته‌های آماده» برداشته می‌شه و کسی نمی‌تونه پلن جدید بخره. پلن‌های قبلاً خریده‌شده کار می‌کنن و قابل مدیریتن. اگه سرویس هم فروش نامحدود رو بسته باشه، دکمه خودکار نشون داده نمی‌شه.", ""),
+    "product_on_proxy": ("📡 فروش «پروکسی تلگرام»", "خاموش باشه دکمه‌ی پروکسی از صفحه‌ی «بسته‌های آماده» برداشته می‌شه. پروکسی‌های قبلی کار می‌کنن. اگه سرویس الان نودی برای پروکسی نداشته باشه هم دکمه خودکار مخفی می‌شه.", ""),
+    "ctype_label_unlimited": ("نام دکمه‌ی پلن نامحدود", "متنی که روی دکمه‌ی نامحدود تو صفحه‌ی «بسته‌های آماده» و تو فاکتور/کانفیگ‌های من دیده می‌شه.", ""),
+    "ctype_label_proxy": ("نام دکمه‌ی پروکسی تلگرام", "متنی که روی دکمه‌ی پروکسی دیده می‌شه.", ""),
+    "unl_auto_convert": ("♻️ تبدیل خودکار اعتبار گیگ به نامحدود", "روشن: اگه انبار نامحدود شما برای خرید مشتری کم بود، خودکار از اعتبار گیگ به نامحدود تبدیل می‌شه و همون لحظه پلن تحویل داده می‌شه. ربات اول با یه quote بدون‌ضرر چک می‌کنه سرویس تبدیل کسری رو قبول می‌کنه یا نه؛ اگه قبول کنه فقط همون‌قدر که لازمه تبدیل می‌شه (گرد به بالا به گیگ)، وگرنه کمبود به عدد صحیح گرد می‌شه بالا (مثلاً ۱.۱ یا ۱.۷ واحد → ۲ واحد) تا مشتری هیچ‌وقت بدون پلن نمونه. فقط اگه اعتبار گیگ هم کافی نباشه، خرید ناموفق می‌شه، پول مشتری برمی‌گرده، بهش پیام «به پشتیبانی پیام بده» نشون داده می‌شه و برای شما هم هشدار میاد. خاموش: رفتار پیش‌فرض خود سرویس (کسر از وی‌پوینت).", ""),
+    "unl_devices": ("پله‌های تعداد کاربر (نامحدود)", "با کاما جدا کن؛ مثلاً 1,2,3,4,5. فقط پله‌هایی که خود سرویس هم پشتیبانی می‌کنه نشون داده می‌شن.", ""),
+    "unl_days_options": ("محدود کردن مدت‌های نامحدود", "خالی = کاربر با + / - هر مدتی که سرویس پشتیبانی می‌کنه رو انتخاب می‌کنه. اگه بخوای فقط چند مدت مجاز باشه، با کاما بنویس؛ مثلاً 7,30,90.", ""),
+    "unl_markup_percent": ("درصد سود نامحدود", "قیمت فروش = قیمت عمده‌ی سرویس (خودکار از API) + این درصد. مثلاً 30 یعنی ۳۰٪ بالاتر از قیمت خرید شما.", "درصد"),
+    "unl_round_to": ("گرد کردن قیمت نامحدود", "قیمت نهایی به بالا به مضرب این عدد گرد می‌شه؛ مثلاً 1000 → 147,000 می‌شه 147,000 و 146,200 می‌شه 147,000.", "تومان"),
+    "unl_price_overrides": ("قیمت دستی نامحدود (اختیاری)", "برای ترکیب‌های خاص قیمت ثابت بذار؛ قالب «کاربر:روز=قیمت» با کاما جدا. مثال: 1:30=150000,2:30=290000. هر ترکیبی که اینجا نباشه با درصد سود حساب می‌شه.", ""),
+    "proxy_price_per_gb": ("قیمت هر گیگ پروکسی", "قیمت فروش هر گیگ پروکسی تلگرام به کاربر (برای خرید و تمدید). قیمت خرید شما از سرویس جداست.", "تومان"),
+    "proxy_min_gb": ("حداقل حجم پروکسی", "0 یعنی همون حداقل خود سرویس. عدد بزرگ‌تر از حداقل سرویس بذاری، همون اعمال می‌شه.", {"unit": "گیگ", "zero": "طبق سرویس"}),
+    "proxy_max_gb": ("حداکثر حجم پروکسی", "0 یعنی همون حداکثر خود سرویس. عدد کوچک‌تر بذاری، همون اعمال می‌شه.", {"unit": "گیگ", "zero": "طبق سرویس"}),
+    "proxy_gb_options": ("حجم‌های آماده‌ی پروکسی", "دکمه‌های انتخاب سریع حجم؛ با کاما جدا. مثلاً 20,50,100,200. کاربر می‌تونه عدد دلخواه هم بفرسته.", ""),
+})
+
 # گزینه‌های انتخابی (به‌جای تایپ متن)
 SETTING_CHOICES = {
     "trial_proto": [("both", "🔀 هر دو (وایرگارد + کانفیگ)"), ("xray", "⚙️ فقط کانفیگ"), ("wireguard", "🔒 فقط وایرگارد"),
@@ -3446,6 +3555,14 @@ SETTINGS_TABS = [
         ("🚨 کلید اصلی", ["maintenance", "maintenance_text"]),
         ("🔌 دکمه‌های منوی ربات (روشن = نمایش بده)", ["feature:buy", "feature:trial", "feature:topup", "feature:exchange",
                                                     "feature:delete_config", "feature:support", "feature:reseller", "feature:guide"]),
+    ]),
+    ("products", "♾ محصولات", [
+        ("🔌 روشن/خاموش کردن محصولات (خاموش = از صفحه‌ی خرید حذف می‌شه)",
+         ["product_on_wireguard", "product_on_config", "product_on_both", "product_on_openvpn", "product_on_dns",
+          "product_on_unlimited", "product_on_proxy"]),
+        ("♾ پلن نامحدود", ["ctype_label_unlimited", "unl_auto_convert", "unl_devices", "unl_days_options", "unl_markup_percent",
+                           "unl_round_to", "unl_price_overrides"]),
+        ("📡 پروکسی تلگرام", ["ctype_label_proxy", "proxy_price_per_gb", "proxy_min_gb", "proxy_max_gb", "proxy_gb_options"]),
     ]),
     ("price", "💰 قیمت و پرداخت", [
         ("💵 قیمت هر گیگ", ["price_wireguard", "price_config", "price_both", "price_openvpn", "price_dns"]),
@@ -4426,6 +4543,19 @@ def save_config():
         if key == "trial_price" and int(value) > 1000000:
             flash(f"⚠️ «{label}»: حداکثر 1,000,000 تومان — ذخیره نشد.")
             continue
+        if key in ("unl_devices", "unl_days_options", "proxy_gb_options") and not re.match(r"^\d+(\s*,\s*\d+)*$", value.replace("،", ",")):
+            flash(f"⚠️ «{label}»: فقط عدد با کاما جدا کن (مثلاً 1,2,3) — ذخیره نشد.")
+            continue
+        if key == "unl_price_overrides" and not all(re.match(r"^\s*\d+\s*[:xX]\s*\d+\s*=\s*[\d,]+\s*$", p)
+                                                     for p in re.split(r"[,\n،;]+", value) if p.strip()):
+            flash(f"⚠️ «{label}»: قالب درست «کاربر:روز=قیمت» است؛ مثل 1:30=150000,2:30=290000 — ذخیره نشد.")
+            continue
+        if key == "unl_markup_percent" and float(value) > 1000:
+            flash(f"⚠️ «{label}»: حداکثر 1000 درصد — ذخیره نشد.")
+            continue
+        if key in ("unl_round_to", "proxy_price_per_gb") and int(value) < 1:
+            flash(f"⚠️ «{label}»: باید حداقل 1 باشه — ذخیره نشد.")
+            continue
         if key == "trial_gb" and float(value) <= 0:
             flash(f"⚠️ «{label}»: باید بزرگ‌تر از صفر باشه — ذخیره نشد.")
             continue
@@ -4488,6 +4618,31 @@ def appearance_page():
         </div>
         """
 
+    buyhub_order = get_ordered_keys("menu_order_buyhub", BUY_PAGE_KEYS, all_settings)
+    buyhub_meta = {k: (label, default, name_key, pages) for k, label, default, name_key, pages in BUY_PAGE_ITEMS}
+    buyhub_html = ""
+    for key in buyhub_order:
+        label, default, name_key, pages = buyhub_meta[key]
+        value = all_settings.get(name_key, default)
+        place = all_settings.get("buy_place_" + key, "hub")
+        if place not in pages:
+            place = "hub"
+        options = "".join(
+            f'<option value="{pg}"{" selected" if pg == place else ""}>{BUY_PAGE_NAMES[pg]}</option>' for pg in pages)
+        buyhub_html += f"""
+        <div class="reorder-row" data-key="{key}">
+          <div>
+            <label>{label}</label>
+            <input type="text" name="buyl_{key}" value="{esc(value)}" required>
+            <select name="buyp_{key}" style="margin-top:6px;">{options}</select>
+          </div>
+          <div class="reorder-arrows">
+            <button type="button" class="secondary" onclick="moveRow(this,-1)" title="بالا">▲</button>
+            <button type="button" class="secondary" onclick="moveRow(this,1)" title="پایین">▼</button>
+          </div>
+        </div>
+        """
+
     content = f"""
     <div class="panel">
       <form method="post" action="{url_for('save_appearance')}" id="appearanceForm">
@@ -4525,6 +4680,13 @@ def appearance_page():
         </div>
         <input type="hidden" name="order_buytypes" id="order_buytypes">
 
+        <h3>🛒 دکمه‌های صفحه‌ی خرید (نامحدود، پروکسی، بسته‌ها، دلخواه)</h3>
+        <p class="muted" style="font-size:12.5px;margin:0 0 10px;">با فلش‌ها ترتیب رو عوض کن، اسم دکمه رو بنویس و از لیست پایینش انتخاب کن دکمه تو کدوم صفحه باشه: «صفحه‌ی اصلی خرید» یا داخل «بسته‌های آماده» یا داخل «خرید دلخواه». دکمه‌ای که فعال/موجود نباشه خودکار نشون داده نمی‌شه. روشن/خاموش کردن محصولات از تب «♾ محصولات» تو تنظیمات انجام می‌شه.</p>
+        <div class="reorder-list" id="buyhubList">
+          {buyhub_html}
+        </div>
+        <input type="hidden" name="order_buyhub" id="order_buyhub">
+
         <div style="margin-top:14px;"><button type="submit">💾 ذخیره‌ی تغییرات</button></div>
       </form>
     </div>
@@ -4550,6 +4712,7 @@ def appearance_page():
         }}
         serialize('mainBtnList', 'order_main');
         serialize('buytypeBtnList', 'order_buytypes');
+        serialize('buyhubList', 'order_buyhub');
       }});
     </script>
     """
@@ -4589,6 +4752,24 @@ def save_appearance():
                 keys.append(k)
         if keys:
             set_setting("menu_order_buytypes", ",".join(keys))
+
+    for key, _label, _default, name_key, pages in BUY_PAGE_ITEMS:
+        value = request.form.get("buyl_" + key, "").strip()
+        if value:
+            set_setting(name_key, value)
+        pl = request.form.get("buyp_" + key, "hub")
+        set_setting("buy_place_" + key, pl if pl in pages else "hub")
+    # «بسته‌های آماده» و «خرید دلخواه» نباید داخل هم بیفتن (هیچ‌کدوم از صفحه‌ی اصلی در دسترس نمی‌موند)
+    if get_setting("buy_place_plans", "hub") == "custom" and get_setting("buy_place_custom", "hub") == "plans":
+        set_setting("buy_place_custom", "hub")
+        flash("«بسته‌های آماده» و «خرید دلخواه» نمی‌تونن داخل هم باشن؛ «خرید دلخواه» برگشت صفحه‌ی اصلی.")
+    order_buyhub = request.form.get("order_buyhub", "").strip()
+    if order_buyhub:
+        keys = [k for k in order_buyhub.split(",") if k in BUY_PAGE_KEYS]
+        for k in BUY_PAGE_KEYS:
+            if k not in keys:
+                keys.append(k)
+        set_setting("menu_order_buyhub", ",".join(keys))
 
     flash("دکمه‌ها و ظاهر ربات ذخیره شد.")
     return redirect(url_for("appearance_page"))
@@ -6270,6 +6451,169 @@ def env_save():
         flash("تغییری ثبت نشد.")
     return redirect(url_for("env_page"))
 
+
+
+
+# ======================================================================
+# 💡 راهنمای هر صفحه + صفحه‌ی «راهنمای کامل»
+# ======================================================================
+# قالب: کلید صفحه -> (توضیح کلی، [(نام دکمه/بخش، توضیح)], [نکته‌ها], هشدار)
+PAGE_HELP = {
+    "dashboard": ("پیشخوان «نمای یک‌نگاه» از وضعیت کسب‌وکار شماست: چند نفر عضو شدن، چقدر فروش رفته، چه چیزهایی منتظر رسیدگی هستن.",
+        [("کارت‌های بالا", "اعداد کلی: تعداد کاربران، فروش، تیکت‌های باز و شارژهای در انتظار. با کلیک روی هر کارت وارد همون بخش می‌شید."),
+         ("نمودارها", "روند فروش و عضوگیری در روزهای اخیر. هرچه ستون بلندتر باشه، اون روز بیشتر بوده."),
+         ("آخرین کاربران", "کسایی که تازه با ربات کار کردن؛ برای دیدن جزئیات روی اسمشون بزنید.")],
+        ["هر روز صبح یک سر به پیشخوان بزنید: اگر تیکت باز یا شارژ در انتظار دارید اول اون‌ها رو انجام بدید.",
+         "اگر «راهنمای کامل» رو هنوز نخوندید، از منوی کناری وارد بشید؛ همه‌چیز رو از صفر توضیح می‌ده."], ""),
+    "users": ("لیست همه‌ی کسایی که ربات رو استارت کردن. اینجا می‌تونید پیداشون کنید، موجودی‌شون رو ببینید و تغییر بدید.",
+        [("جستجو", "اسم، یوزرنیم یا شناسه‌ی عددی تلگرام رو بنویسید تا کاربر پیدا بشه."),
+         ("مرتب‌سازی", "لیست رو بر اساس آخرین فعالیت، موجودی یا تاریخ عضویت مرتب می‌کنه."),
+         ("باز کردن کاربر", "با کلیک روی ردیف، صفحه‌ی کاربر باز می‌شه: شارژ دستی، کانفیگ‌ها، مسدود کردن، پیام مستقیم.")],
+        ["برای جبران مشکل مشتری از «شارژ دستی» استفاده کنید؛ مبلغ مثبت اضافه و منفی کم می‌کنه.",
+         "مسدود کردن کاربر قابل برگشته؛ هر وقت خواستید رفع مسدودی کنید."], "تغییر موجودی کاربر مستقیم روی حساب واقعی اثر می‌ذاره؛ قبل از تایید، مبلغ رو دوباره چک کنید."),
+    "orders": ("تاریخچه‌ی همه‌ی خریدها. اینجا می‌بینید چه کسی، چه چیزی و کی خریده.",
+        [("فیلتر", "بر اساس وضعیت یا تاریخ لیست رو کوتاه کنید."), ("جزئیات", "با کلیک روی سفارش، مبلغ و کانفیگ ساخته‌شده رو می‌بینید.")],
+        ["اگر مشتری گفت خرید کردم ولی چیزی نگرفتم، اول اینجا دنبالش بگردید."], ""),
+    "tickets": ("پیام‌هایی که مشتری‌ها از طریق ربات برای پشتیبانی می‌فرستن. مثل صندوق ایمیل پشتیبانی شماست.",
+        [("باز / بسته", "تیکت باز یعنی هنوز جواب نگرفته. بعد از حل شدن مشکل، تیکت رو ببندید."), ("پاسخ", "متنتون مستقیم داخل ربات برای مشتری ارسال می‌شه.")],
+        ["جواب سریع باعث رضایت و تکرار خرید می‌شه؛ تیکت‌های باز رو تا شب معطل نذارید."], ""),
+    "resellers": ("فروشنده‌ها یا نماینده‌هایی که از طرف شما می‌فروشن. هرکدوم ربات یا حساب جدا و تنظیمات خودشون رو دارن.",
+        [("افزودن فروشنده", "یک نماینده‌ی جدید تعریف کنید."), ("ویرایش", "درصد سود، وضعیت فعال/غیرفعال و اطلاعاتش رو تغییر بدید.")],
+        ["قبل از فعال کردن فروشنده‌ی جدید، یک خرید آزمایشی انجام بدید."], ""),
+    "finance": ("مرکز مالی: درآمد، شارژها و جمع‌های روزانه و ماهانه رو یک‌جا می‌بینید.",
+        [("بازه‌ی زمانی", "عددها رو برای امروز، هفته یا ماه نشون می‌ده."), ("خروجی", "گزارش رو برای حسابداری دانلود کنید.")],
+        ["اعداد از دیتابیس خود ربات خونده می‌شن، پس با جیب واقعی شما مقایسه‌شون کنید."], ""),
+    "topups": ("درخواست‌های شارژ کیف پول (کارت‌به‌کارت). مشتری رسید می‌فرسته و شما تایید یا رد می‌کنید.",
+        [("تایید", "مبلغ به کیف پول مشتری اضافه می‌شه و بهش اطلاع داده می‌شه."), ("رد", "درخواست بسته می‌شه و مشتری پیام رد می‌گیره.")],
+        ["قبل از تایید، واریز رو در حساب بانکی‌تون ببینید؛ فقط به عکس رسید اعتماد نکنید."], "تایید یک شارژ برگشت‌پذیر نیست؛ مطمئن بشید پول واقعاً رسیده."),
+    "crypto": ("پرداخت با رمزارز: ربات آدرس ولت می‌ده و بعد از واریز، شارژ رو خودکار انجام می‌ده.",
+        [("لیست تراکنش‌ها", "هر واریز و وضعیتش (در انتظار، تایید‌شده، منقضی) رو نشون می‌ده."), ("نرخ", "قیمت تتر/دلار که برای تبدیل استفاده می‌شه.")],
+        ["اگر نرخ خودکار از نوبیتکس نیومد، از تنظیمات یک نرخ دستی بذارید."], ""),
+    "donito": ("مانیتور دونیتو: وضعیت اتصال به سرویس دونیتو و موجودی/سفارش‌هاش رو نشون می‌ده.",
+        [("وضعیت اتصال", "سبز یعنی همه‌چیز سالمه، قرمز یعنی توکن یا سرویس مشکل داره.")], ["اگر قرمز بود اول «متغیرهای محیطی» رو چک کنید."], ""),
+    "plans": ("بسته‌های آماده‌ای که مشتری می‌تونه بخره؛ مثل منوی یک رستوران.",
+        [("افزودن بسته", "اسم، حجم، مدت و قیمت رو بنویسید."), ("فعال/غیرفعال", "بسته‌ی غیرفعال از ربات پنهان می‌شه ولی پاک نمی‌شه.")],
+        ["به‌جای پاک کردن، بسته رو غیرفعال کنید تا تاریخچه‌اش حفظ بشه."], ""),
+    "discounts": ("کدهای تخفیفی که مشتری موقع خرید وارد می‌کنه.",
+        [("ساخت کد", "درصد یا مبلغ تخفیف، تعداد دفعات استفاده و تاریخ انقضا رو تعیین کنید."), ("حذف", "کد دیگه کار نمی‌کنه.")],
+        ["برای کمپین‌ها کد با سقف تعداد بسازید تا ضرر نکنید."], ""),
+    "broadcast": ("ارسال یک پیام به همه یا گروهی از کاربران ربات؛ مثل اطلاع‌رسانی تخفیف یا قطعی.",
+        [("متن پیام", "هر چی بنویسید برای مخاطبین ارسال می‌شه."), ("ارسال", "پیام‌ها آهسته و پشت‌سرهم می‌رن تا تلگرام محدودتون نکنه.")],
+        ["اول برای خودتون تست بفرستید و بعد برای همه."], "پیام ارسال‌شده قابل پس‌گرفتن نیست؛ غلط املایی و لینک رو قبل از ارسال چک کنید."),
+    "channels": ("کانال‌های تلگرام شما و پست‌گذاری مستقیم از پنل.",
+        [("افزودن کانال", "ربات باید ادمین کانال باشه."), ("پست جدید", "متن/عکس رو بنویسید و با یک کلیک منتشر کنید.")],
+        ["قفل عضویت اجباری هم از همین کانال‌ها استفاده می‌کنه."], ""),
+    "salenotify": ("هر وقت فروشی انجام بشه، یک اعلان (مثلاً توی کانال) فرستاده می‌شه تا اعتماد مشتری‌های جدید بالا بره.",
+        [("روشن/خاموش", "ارسال خودکار اعلان فروش."), ("قالب پیام", "متنی که برای هر فروش نمایش داده می‌شه.")],
+        ["اطلاعات خصوصی مشتری رو در قالب نذارید."], ""),
+    "alerts": ("هشدار خودکار به مشتری وقتی سرویسش داره تموم می‌شه (زمان یا حجم). فروش تمدید رو بالا می‌بره.",
+        [("چند روز مونده", "چند روز قبل از انقضا پیام بره."), ("چند درصد حجم", "با رسیدن به این درصد مصرف، هشدار بره.")],
+        ["۳ روز قبل از انقضا معمولاً بهترین زمانه."], ""),
+    "settings": ("تنظیمات اصلی ربات: روشن/خاموش کردن امکانات، قیمت‌ها و محدودیت‌ها. تغییرها تا حدود ۲۰ ثانیه بعد در ربات اعمال می‌شه و نیازی به ری‌استارت نیست.",
+        [("تب‌ها", "تنظیمات دسته‌بندی شدن؛ بین تب‌ها جابه‌جا بشید."), ("جستجو", "اسم تنظیم رو بنویسید تا سریع پیداش کنید."),
+         ("کلید روشن/خاموش", "با یک کلیک ذخیره می‌شه."), ("ذخیره", "برای فیلدهای عددی/متنی لازمه؛ دکمه وقتی تغییری دارید چشمک می‌زنه."),
+         ("بازگشت به پیش‌فرض", "آیکن کنار هر تنظیم، مقدار رو به حالت اولیه برمی‌گردونه.")],
+        ["زیر هر تنظیم یک توضیح ساده هست؛ قبل از تغییر بخونیدش."], "تنظیمات قیمت و پرداخت مستقیم روی فروش اثر می‌ذارن؛ آروم و یکی‌یکی تغییر بدید."),
+    "texts": ("همه‌ی متن‌هایی که ربات به مشتری می‌گه (خوش‌آمد، راهنما، خطاها). می‌تونید همه رو به سلیقه‌ی خودتون بنویسید.",
+        [("ویرایش متن", "متن رو عوض و ذخیره کنید؛ همون لحظه در ربات اعمال می‌شه."), ("جستجو", "بخشی از متن رو بنویسید تا پیدا بشه.")],
+        ["کلمه‌هایی مثل {name} جای اطلاعات واقعی رو می‌گیرن؛ حذف یا تغییرشون ندید."], ""),
+    "appearance": ("ظاهر و دکمه‌های منوی ربات: اسم، ایموجی، ترتیب و نمایش هر دکمه.",
+        [("اسم/ایموجی", "برچسبی که مشتری روی دکمه می‌بینه."), ("روشن/خاموش", "دکمه‌ی خاموش از منو حذف می‌شه.")],
+        ["اسم‌ها کوتاه باشه تا روی گوشی کامل دیده بشه."], ""),
+    "custombtn": ("دکمه‌هایی که خودتون می‌سازید: مثلاً «آموزش اتصال» یا «لینک سایت» با متن و لینک دلخواه.",
+        [("افزودن دکمه", "اسم و متن/لینک رو بنویسید."), ("حذف", "از منوی ربات برداشته می‌شه.")],
+        ["برای آموزش‌ها یک دکمه‌ی سفارشی بسازید تا تیکت کمتر بیاد."], ""),
+    "backup": ("نسخه‌ی پشتیبان و خروجی از اطلاعات (کاربران، سفارش‌ها و ...).",
+        [("دانلود بکاپ", "یک فایل کامل برای نگهداری امن."), ("خروجی اکسل/CSV", "برای حسابداری یا بررسی خودتون.")],
+        ["هفته‌ای یک بار بکاپ بگیرید و جای امن نگه دارید."], "فایل بکاپ شامل اطلاعات خصوصی کاربرانه؛ به کسی ندیدش."),
+    "envvars": ("متغیرهای محیطی: اطلاعات حساس مثل توکن‌ها و رمزها که ربات و پنل برای اتصال به سرویس‌ها لازم دارن.",
+        [("نمایش", "مقدارها به‌صورت مخفی‌ان؛ برای دیدن روی چشم بزنید."), ("کپی", "مقدار رو بدون نمایش کپی می‌کنه.")],
+        ["اگر جایی لو رفت، توکن رو از سرویس مربوطه عوض کنید و اینجا هم به‌روز کنید."], "این اطلاعات مثل کلید خونه‌ست؛ هیچ‌وقت در گروه یا عکس نفرستیدش."),
+    "guide": ("اینجا همه‌چیز از صفر توضیح داده شده.", [], [], ""),
+}
+
+
+def help_card(active):
+    h = PAGE_HELP.get(active)
+    if not h or active == "guide":
+        return ""
+    intro, rows, tips, warn = h
+    body = f"<p>{esc(intro)}</p>"
+    if rows:
+        body += "<h5>🔘 دکمه‌ها و بخش‌ها</h5>" + "".join(
+            f'<div class="hrow"><b>{esc(a)}</b><span>{esc(b)}</span></div>' for a, b in rows)
+    if tips:
+        body += "<h5>💡 نکته‌ها</h5><ul>" + "".join(f"<li>{esc(t)}</li>" for t in tips) + "</ul>"
+    if warn:
+        body += f'<div class="warn">⚠️ {esc(warn)}</div>'
+    body += f'<p style="margin-top:12px"><a href="{url_for("guide_page")}">📘 راهنمای کامل پنل</a></p>'
+    return (f'<details class="help" id="hc-{active}"><summary>💡 این صفحه چیکار می‌کنه؟ (کلیک کنید)</summary>'
+            f'<div class="hb">{body}</div></details>'
+            f'<script>(function(){{var d=document.getElementById("hc-{active}"),k="help-seen-{active}";'
+            f'try{{if(!localStorage.getItem(k)){{d.open=true;localStorage.setItem(k,"1");}}}}catch(e){{}}}})();</script>')
+
+
+GUIDE_STEPS = [
+    ("توکن ربات رو در «متغیرهای محیطی» بررسی کردم", "envvars"),
+    ("در «تنظیمات ربات» پیام خوش‌آمد و امکانات رو تنظیم کردم", "settings"),
+    ("حداقل یک «بسته‌ی آماده» ساختم", "plans"),
+    ("روش پرداخت (کارت یا رمزارز) رو چک کردم", "topups"),
+    ("یک خرید آزمایشی با اکانت خودم انجام دادم", "orders"),
+    ("یک «کد تخفیف» برای شروع ساختم", "discounts"),
+    ("از اطلاعات «بکاپ» گرفتم", "backup"),
+]
+GLOSSARY = [
+    ("ربات", "برنامه‌ای در تلگرام که با مشتری حرف می‌زنه و می‌فروشه. این پنل «کنترل‌پنل» اونه."),
+    ("پنل", "همین سایتی که الان توش هستید؛ برای مدیریت ربات بدون نیاز به برنامه‌نویسی."),
+    ("کانفیگ", "اطلاعات اتصال سرویسی که مشتری می‌خره (لینک یا فایل)."),
+    ("کیف پول", "موجودی هر مشتری داخل ربات. با شارژ زیاد می‌شه و با خرید کم می‌شه."),
+    ("شارژ دستی", "اضافه یا کم کردن موجودی توسط شما."),
+    ("فروشنده / نماینده", "کسی که از طرف شما می‌فروشه و سهمی می‌گیره."),
+    ("کد تخفیف", "کدی که مشتری وارد می‌کنه تا ارزون‌تر بخره."),
+    ("پیام همگانی", "یک پیام برای همه‌ی کاربران."),
+    ("متغیر محیطی", "اطلاعات حساس مثل توکن و رمز که بیرون از کد نگهداری می‌شه."),
+    ("بکاپ", "نسخه‌ی پشتیبان برای روز مبادا."),
+]
+FAQS = [
+    ("تغییر تنظیمات کی در ربات اعمال می‌شه؟", "معمولاً تا حدود ۲۰ ثانیه. نیازی به ری‌استارت نیست."),
+    ("اشتباهی چیزی رو تغییر دادم، چیکار کنم؟", "در تنظیمات کنار هر مورد آیکن «بازگشت به پیش‌فرض» هست. برای متن‌ها هم می‌تونید متن قبلی رو دوباره بنویسید."),
+    ("مشتری می‌گه پولش رو واریز کرده ولی شارژ نشده؟", "به «شارژهای کیف پول» برید؛ اگر درخواست هست و واریز رو دیدید تایید کنید. اگر نیست از «کاربران» شارژ دستی کنید."),
+    ("چطور رمز پنل رو عوض کنم؟", "در «متغیرهای محیطی» رمز پنل رو عوض کنید و سرویس رو یک‌بار ری‌استارت کنید."),
+    ("حالت تاریک/روشن کجاست؟", "دکمه‌ی 🌗 بالای صفحه یا پایین منوی کناری."),
+    ("روی گوشی چطور بین بخش‌ها برم؟", "پایین صفحه روی «بیشتر» بزنید تا همه‌ی بخش‌ها باز بشن."),
+]
+
+
+@app.route("/guide")
+@login_required
+def guide_page():
+    cards = "".join(
+        f'<a class="qa" href="{url_for(ep)}"><span class="qe">{STICKERS.get(k, ("•",))[0]}</span><b>{esc(lbl)}</b>'
+        f'<small>{esc((PAGE_HELP.get(k) or ("",))[0][:90])}…</small></a>'
+        for grp, items in NAV for k, lbl, ep in items if k in PAGE_HELP and k != "guide")
+    steps = "".join(
+        f'<label class="chk"><input type="checkbox" data-k="{i}" onchange="gchk(this)"><span>{esc(t)} '
+        f'<a href="{url_for(dict((k, ep) for g, it in NAV for k, l, ep in it).get(k, "dashboard"))}">← برو</a></span></label>'
+        for i, (t, k) in enumerate(GUIDE_STEPS))
+    gloss = '<dl class="gloss">' + "".join(f"<dt>{esc(a)}</dt><dd>{esc(b)}</dd>" for a, b in GLOSSARY) + "</dl>"
+    faq = "".join(f'<details class="faq"><summary>{esc(q)}</summary><p>{esc(a)}</p></details>' for q, a in FAQS)
+    html = (f'<div class="card" style="padding:22px"><h3 style="margin-top:0">👋 خوش اومدید!</h3>'
+            f'<p>این پنل برای اینه که بدون هیچ دانش فنی، ربات فروش‌تون رو مدیریت کنید. هر صفحه یک کارت «💡 این صفحه چیکار می‌کنه؟» بالاش داره. '
+            f'اگر مطمئن نیستید یک دکمه چیکار می‌کنه، اول اون کارت رو بخونید.</p></div>'
+            f'<div class="guide-sec">✅ چک‌لیست راه‌اندازی (برای اولین بار)</div>{steps}'
+            f'<div class="guide-sec">🗺 نقشه‌ی بخش‌ها</div><div class="qa-grid">{cards}</div>'
+            f'<div class="guide-sec">📖 معنی کلمه‌ها</div><div class="card" style="padding:8px 20px 16px">{gloss}</div>'
+            f'<div class="guide-sec">❓ سوال‌های رایج</div>{faq}'
+            '<script>function gchk(el){try{var s=JSON.parse(localStorage.getItem("guide-chk")||"{}");s[el.dataset.k]=el.checked;'
+            'localStorage.setItem("guide-chk",JSON.stringify(s));}catch(e){}el.parentNode.classList.toggle("done",el.checked);}'
+            '(function(){try{var s=JSON.parse(localStorage.getItem("guide-chk")||"{}");document.querySelectorAll(".chk input").forEach(function(i){'
+            'if(s[i.dataset.k]){i.checked=true;i.parentNode.classList.add("done");}});}catch(e){}})();</script>')
+    return render_page("راهنمای کامل", "guide", html)
+
+
+STICKERS["guide"] = ("📘", "rgba(34,211,255,.34)")
+ICONS["guide"] = '<path d="M4 4h16v16H4z"/><path d="M8 9h8M8 13h5"/>'
+NAV[0][1].append(("guide", "راهنمای کامل", "guide_page"))
 
 
 
