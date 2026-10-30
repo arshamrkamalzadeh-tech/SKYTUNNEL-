@@ -1534,6 +1534,34 @@ UI_TEXT['en'].update({
 })
 
 
+UI_TEXT['fa'].update({
+    'seller_temp_error': 'مشکل موقتی از سمت سرویس پیش اومده.',
+    'seller_account_missing': 'حساب فروشندگی پیدا نشد.',
+    'seller_no_connection': 'ارتباط با سرویس برقرار نشد، کمی بعد دوباره تلاش کنید.',
+    'topup_too_many_pending': 'شما چند درخواست شارژ در حال بررسی دارید؛ لطفاً تا مشخص شدن نتیجه‌ی اون‌ها صبر کنید.',
+    'plan_default_title': '{gb} گیگ / {days} روزه',
+    'trial_wait_minutes': '{n} دقیقه',
+    'trial_wait_hours': '{n} ساعت',
+    'unl_days_option_btn': '⏳ {n} روزه — {price} {cur}',
+    'proxy_gb_option_btn': '📶 {gb} گیگ — {price} {cur}',
+    'unl_week_minus_btn': '−۷',
+    'unl_week_plus_btn': '+۷',
+})
+UI_TEXT['en'].update({
+    'seller_temp_error': 'A temporary problem occurred on the service side.',
+    'seller_account_missing': 'Seller account not found.',
+    'seller_no_connection': 'Could not reach the service, please try again shortly.',
+    'topup_too_many_pending': 'You already have several top-up requests under review; please wait for their result.',
+    'plan_default_title': '{gb} GB / {days} days',
+    'trial_wait_minutes': '{n} minutes',
+    'trial_wait_hours': '{n} hours',
+    'unl_days_option_btn': '⏳ {n} days — {price} {cur}',
+    'proxy_gb_option_btn': '📶 {gb} GB — {price} {cur}',
+    'unl_week_minus_btn': '−7',
+    'unl_week_plus_btn': '+7',
+})
+
+
 def u(chat_id_or_lang, key, **kwargs):
     """متن ترجمه‌شده رو برمی‌گردونه؛ اولین آرگومان یا خودِ chat_id است یا مستقیم
     'fa'/'en'. اول override ذخیره‌شده از پنل ادمین (جدول settings) چک می‌شه؛
@@ -1586,8 +1614,19 @@ def get_ctype_label(chat_id, ctype):
 # وقتی سرور splus.ir یا شبکه بین راه‌وی و اون کند/پرلتنسی باشه (که با توجه به
 # فیلترینگ/VPN طبیعیه)، این هندشیک تکراری روی هر پیام چند ثانیه اضافه می‌کنه.
 # با یه Session مشترک، اتصال‌ها نگه‌داشته (keep-alive) و دوباره استفاده می‌شن.
+# --- سرعت: ۱) فقط IPv4 (اگه رکورد AAAA قابل‌دسترس نباشه، هر اتصال تا پایان connect-timeout گیر می‌کرد)
+#           ۲) اگه اتصال برقرار نشد، یک بار فوری دوباره تلاش می‌شه (برای POST هم امنه چون درخواست هنوز نرفته)
+import socket as _socket
+import urllib3.util.connection as _u3c
+from urllib3.util.retry import Retry as _Retry
+if os.getenv('FORCE_IPV4', '1') == '1':
+    _u3c.allowed_gai_family = lambda: _socket.AF_INET
+PANEL_CONNECT_TIMEOUT = float(os.getenv('PANEL_CONNECT_TIMEOUT', '4'))
+
 SESSION = requests.Session()
-_adapter = requests.adapters.HTTPAdapter(pool_connections=20, pool_maxsize=40, max_retries=0)
+_adapter = requests.adapters.HTTPAdapter(
+    pool_connections=20, pool_maxsize=64,
+    max_retries=_Retry(total=None, connect=1, read=0, redirect=0, status=0, other=0, backoff_factor=0))
 SESSION.mount('https://', _adapter)
 SESSION.mount('http://', _adapter)
 
@@ -1597,11 +1636,11 @@ SESSION.mount('http://', _adapter)
 # قبلاً تا اون تموم نمی‌شد، بات به هیچ پیام دیگه‌ای (حتی «/start» یه نفر دیگه)
 # جواب نمی‌داد. max_workers=8 یعنی هم‌زمان حداکثر ۸ آپدیت می‌تونن پردازش بشن؛
 # برای یه بات فروش با حجم معمولی کاربر، عدد امن و کافی‌ایه.
-UPDATE_EXECUTOR = ThreadPoolExecutor(max_workers=16)
+UPDATE_EXECUTOR = ThreadPoolExecutor(max_workers=32)
 
 # کارهای فرعیِ «فایر-اند-فورگت» (مثل answerCallbackQuery یا رفرش کش تنظیمات) که
 # نباید جواب اصلی به کاربر رو معطل کنن، تو یه استخر جدا اجرا می‌شن.
-BG_EXECUTOR = ThreadPoolExecutor(max_workers=4)
+BG_EXECUTOR = ThreadPoolExecutor(max_workers=8)
 
 # قفل جدا برای هر chat_id: دو آپدیت از یه کاربر واحد (مثلاً دوبار زدن سریع
 # دکمه‌ی «تایید خرید») صف می‌شن و یکی‌یکی اجرا می‌شن؛ کاربرهای مختلف همچنان
@@ -3573,7 +3612,7 @@ def extra_label(ctype):
     return get_setting('ctype_label_' + ctype, EXTRA_DEFAULT_LABELS.get(ctype, ctype))
 
 
-def _sapi(method, path, payload=None, params=None, timeout=20):
+def _sapi(method, path, payload=None, params=None, timeout=(PANEL_CONNECT_TIMEOUT, 20)):
     """درخواست به Seller API با کلید اصلی (CONFIG_KEY). خروجی: (ok, data, status_code)"""
     if not CONFIG_KEY:
         return False, {'error': 'no_key'}, 0
@@ -3600,22 +3639,61 @@ def _int_list(raw, default):
     return out
 
 
+# ---------- کش «کهنه ولی فوری» برای پنل (stale-while-revalidate) ----------
+# منوی خرید قبلاً هر بار منتظر جواب پنل می‌موند (تا ۱۰ ثانیه × چند درخواست). حالا:
+#  - اگه کش داریم، همون لحظه برمی‌گرده و تازه‌سازی تو پس‌زمینه انجام می‌شه
+#  - اگه پنل خراب بود، تا چند ثانیه دوباره امتحانش نمی‌کنیم (کش منفی)
+#  - یه ترد پس‌زمینه (_panel_warmer) کش‌ها رو گرم نگه می‌داره
+_swr_lock = threading.Lock()
+_swr_running = set()
+PANEL_FAIL_BACKOFF = 15          # ثانیه: بعد از شکست، این‌قدر دوباره تلاش نمی‌کنیم
+PANEL_QUICK = (3, 6)             # (connect, read) برای چک‌های وضعیت
+
+
+def _swr_async(name, fn):
+    with _swr_lock:
+        if name in _swr_running:
+            return
+        _swr_running.add(name)
+
+    def _w():
+        try:
+            fn()
+        except Exception as _e:
+            print('⚠️ تازه‌سازی پس‌زمینه', name, _e)
+        finally:
+            with _swr_lock:
+                _swr_running.discard(name)
+    threading.Thread(target=_w, daemon=True).start()
+
+
 # ---------- نامحدود ----------
-_unl_cache = {'t': 0.0, 'd': None}
+_unl_cache = {'t': 0.0, 'd': None, 'fail': 0.0}
+
+
+def _unl_fetch():
+    ok, d, _st = _sapi('GET', '/unlimited/status', timeout=PANEL_QUICK)
+    if ok and isinstance(d, dict) and d.get('options'):
+        _unl_cache['d'] = d
+        _unl_cache['t'] = time.time()
+        _unl_cache['fail'] = 0.0
+        return True
+    _unl_cache['fail'] = time.time()
+    return False
 
 
 def get_unl_status(force=False):
     now = time.time()
-    if not force and _unl_cache['d'] is not None and now - _unl_cache['t'] < 300:
+    d = _unl_cache['d']
+    if d is None or force:
+        if not force and now - _unl_cache['fail'] < PANEL_FAIL_BACKOFF:
+            return None
+        _unl_fetch()
         return _unl_cache['d']
-    ok, d, _st = _sapi('GET', '/unlimited/status', timeout=10)
-    if ok and isinstance(d, dict) and d.get('options'):
-        _unl_cache['t'] = now
-        _unl_cache['d'] = d
-        return d
-    if _unl_cache['d'] is not None and now - _unl_cache['t'] < 3600:
-        return _unl_cache['d']
-    return None
+    age = now - _unl_cache['t']
+    if age > 60 and now - _unl_cache['fail'] > PANEL_FAIL_BACKOFF:
+        _swr_async('unl', _unl_fetch)
+    return d if age < 3600 else None
 
 
 def _unl_opt(devices):
@@ -3696,16 +3774,28 @@ _unl_lock = threading.Lock()
 _wallet_cache = {'t': 0.0, 'd': None}
 
 
+def _wallet_fetch():
+    ok, d, _st = _sapi('GET', '/wallet', timeout=PANEL_QUICK)
+    if ok and isinstance(d, dict):
+        _wallet_cache['t'] = time.time()
+        _wallet_cache['d'] = d
+        _wallet_cache['fail'] = 0.0
+        return True
+    _wallet_cache['fail'] = time.time()
+    return False
+
+
 def get_seller_wallet(force=False):
     now = time.time()
-    if not force and _wallet_cache['d'] is not None and now - _wallet_cache['t'] < 30:
+    d = _wallet_cache['d']
+    if d is None or force:
+        if not force and now - _wallet_cache.get('fail', 0.0) < PANEL_FAIL_BACKOFF:
+            return d
+        _wallet_fetch()
         return _wallet_cache['d']
-    ok, d, _st = _sapi('GET', '/wallet', timeout=10)
-    if ok and isinstance(d, dict):
-        _wallet_cache['t'] = now
-        _wallet_cache['d'] = d
-        return d
-    return None
+    if now - _wallet_cache['t'] > 30 and now - _wallet_cache.get('fail', 0.0) > PANEL_FAIL_BACKOFF:
+        _swr_async('wallet', _wallet_fetch)
+    return d
 
 
 def unl_units_needed(devices, days):
@@ -3804,22 +3894,33 @@ def unl_convert(gb_amt, units):
 
 
 # ---------- پروکسی ----------
-_proxy_st_cache = {'t': 0.0, 'd': None}
-_proxy_map_cache = {'t': 0.0, 'm': {}}
+_proxy_st_cache = {'t': 0.0, 'd': None, 'fail': 0.0}
+_proxy_map_cache = {'t': 0.0, 'm': {}, 'fail': 0.0}
+
+
+def _proxy_st_fetch():
+    ok, d, _st = _sapi('GET', '/proxy/wallet', timeout=PANEL_QUICK)
+    if ok and isinstance(d, dict):
+        _proxy_st_cache['d'] = d
+        _proxy_st_cache['t'] = time.time()
+        _proxy_st_cache['fail'] = 0.0
+        return True
+    _proxy_st_cache['fail'] = time.time()
+    return False
 
 
 def get_proxy_status(force=False):
     now = time.time()
-    if not force and _proxy_st_cache['d'] is not None and now - _proxy_st_cache['t'] < 120:
+    d = _proxy_st_cache['d']
+    if d is None or force:
+        if not force and now - _proxy_st_cache['fail'] < PANEL_FAIL_BACKOFF:
+            return None
+        _proxy_st_fetch()
         return _proxy_st_cache['d']
-    ok, d, _st = _sapi('GET', '/proxy/wallet', timeout=10)
-    if ok and isinstance(d, dict):
-        _proxy_st_cache['t'] = now
-        _proxy_st_cache['d'] = d
-        return d
-    if _proxy_st_cache['d'] is not None and now - _proxy_st_cache['t'] < 1800:
-        return _proxy_st_cache['d']
-    return None
+    age = now - _proxy_st_cache['t']
+    if age > 60 and now - _proxy_st_cache['fail'] > PANEL_FAIL_BACKOFF:
+        _swr_async('proxy_st', _proxy_st_fetch)
+    return d if age < 1800 else None
 
 
 def proxy_available():
@@ -3868,14 +3969,28 @@ def _fmt_gb(v):
         return str(v)
 
 
-def _proxy_map(force=False):
-    now = time.time()
-    if not force and now - _proxy_map_cache['t'] < 20:
-        return _proxy_map_cache['m']
-    ok, d, _st = _sapi('GET', '/proxies', params={'status': 'all'})
+def _proxy_map_fetch():
+    ok, d, _st = _sapi('GET', '/proxies', params={'status': 'all'}, timeout=(PANEL_CONNECT_TIMEOUT, 10))
     if ok and isinstance(d, dict):
         _proxy_map_cache['m'] = {str(p.get('id')): p for p in (d.get('proxies') or [])}
-        _proxy_map_cache['t'] = now
+        _proxy_map_cache['t'] = time.time()
+        _proxy_map_cache['fail'] = 0.0
+        return True
+    _proxy_map_cache['fail'] = time.time()
+    return False
+
+
+def _proxy_map(force=False):
+    now = time.time()
+    if force:
+        if now - _proxy_map_cache['fail'] >= PANEL_FAIL_BACKOFF or not _proxy_map_cache['m']:
+            _proxy_map_fetch()
+        return _proxy_map_cache['m']
+    if _proxy_map_cache['t'] == 0.0:                 # هیچ‌وقت لود نشده
+        if now - _proxy_map_cache['fail'] >= PANEL_FAIL_BACKOFF:
+            _proxy_map_fetch()
+    elif now - _proxy_map_cache['t'] > 30 and now - _proxy_map_cache['fail'] > PANEL_FAIL_BACKOFF:
+        _swr_async('proxy_map', _proxy_map_fetch)
     return _proxy_map_cache['m']
 
 
@@ -4030,7 +4145,8 @@ def build_unl_screen(chat_id, st):
         [{'text': u(chat_id, 'btn_qty_minus'), 'callback_data': 'unl_days_dec'},
          {'text': u(chat_id, 'unl_days_btn', n=st['days']), 'callback_data': 'qty_noop'},
          {'text': u(chat_id, 'btn_qty_plus'), 'callback_data': 'unl_days_inc'}],
-        [{'text': '−۷', 'callback_data': 'unl_days_dec7'}, {'text': '+۷', 'callback_data': 'unl_days_inc7'}],
+        [{'text': u(chat_id, 'unl_week_minus_btn'), 'callback_data': 'unl_days_dec7'},
+         {'text': u(chat_id, 'unl_week_plus_btn'), 'callback_data': 'unl_days_inc7'}],
         [{'text': u(chat_id, 'qty_continue'), 'callback_data': 'unl_confirm'}],
         [{'text': u(chat_id, 'btn_cancel'), 'callback_data': 'menu'}],
     ]}
@@ -4080,7 +4196,7 @@ def action_unl_days(chat_id, devices):
         for n in unl_day_options(devices):
             p = unl_sell_price(devices, n)
             if p:
-                rows.append([{'text': f'⏳ {n} روزه — {p:,} {cur}', 'callback_data': f'unl_days_{devices}_{n}'}])
+                rows.append([{'text': u(chat_id, 'unl_days_option_btn', n=n, price=f'{p:,}', cur=cur), 'callback_data': f'unl_days_{devices}_{n}'}])
     if not rows:
         send_message(chat_id, u(chat_id, 'unl_unavailable'))
         return
@@ -4092,7 +4208,7 @@ def action_unl_days(chat_id, devices):
 def action_proxy_menu(chat_id):
     mn, mx = proxy_limits()
     cur = u(chat_id, 'cur')
-    rows = [[{'text': f'📶 {g} گیگ — {proxy_price(g):,} {cur}', 'callback_data': 'proxy_gb_' + str(g)}] for g in proxy_gb_options()]
+    rows = [[{'text': u(chat_id, 'proxy_gb_option_btn', gb=g, price=f'{proxy_price(g):,}', cur=cur), 'callback_data': 'proxy_gb_' + str(g)}] for g in proxy_gb_options()]
     rows.append([{'text': u(chat_id, 'btn_cancel'), 'callback_data': 'menu'}])
     user_steps[str(chat_id)] = {'step': 'proxy_ask_gb'}
     send_message(chat_id, u(chat_id, 'proxy_pick_gb', divider=DIVIDER, min_gb=_fmt_gb(mn), max_gb=_fmt_gb(mx),
@@ -4228,7 +4344,7 @@ def delete_config_from_panel(config_id):
         res = SESSION.delete(
             _cfg_url(config_id),
             headers={'Authorization': 'Bearer ' + CONFIG_KEY},
-            timeout=15
+            timeout=(PANEL_CONNECT_TIMEOUT, 12)
         )
         return res.status_code in (200, 201, 204)
     except Exception:
@@ -4243,7 +4359,7 @@ def _panel_action(method, path_suffix, config_id, json_body=None):
             _cfg_url(config_id) + path_suffix,
             headers={'Authorization': 'Bearer ' + CONFIG_KEY},
             json=json_body,
-            timeout=20
+            timeout=(PANEL_CONNECT_TIMEOUT, 20)
         )
         if res.status_code in (200, 201):
             try:
@@ -4290,7 +4406,7 @@ def get_config_limit_gb(config_id):
         return 'error', None
     try:
         res = SESSION.get(_cfg_url(config_id),
-                          headers={'Authorization': 'Bearer ' + CONFIG_KEY}, timeout=15)
+                          headers={'Authorization': 'Bearer ' + CONFIG_KEY}, timeout=(PANEL_CONNECT_TIMEOUT, 10))
         if res.status_code not in (200, 201):
             return 'error', None
         data = res.json()
@@ -4327,7 +4443,7 @@ def get_config_usage_gb(config_id):
         res = SESSION.get(
             _cfg_url(config_id),
             headers={'Authorization': 'Bearer ' + CONFIG_KEY},
-            timeout=15
+            timeout=(PANEL_CONNECT_TIMEOUT, 10)
         )
         if res.status_code not in (200, 201):
             print('⚠️ خطای دریافت اطلاعات کانفیگ (وضعیت ' + str(res.status_code) + '):', res.text[:500])
@@ -4374,7 +4490,7 @@ def delete_config_from_panel_strict(config_id):
         return 'ok'
     try:
         res = SESSION.delete(_cfg_url(config_id),
-                             headers={'Authorization': 'Bearer ' + CONFIG_KEY}, timeout=15)
+                             headers={'Authorization': 'Bearer ' + CONFIG_KEY}, timeout=(PANEL_CONNECT_TIMEOUT, 10))
         if res.status_code in (200, 201, 204):
             return 'ok'
         if res.status_code == 404:
@@ -4732,7 +4848,15 @@ def validate_discount_code(code, user_id=None):
 
 _settings_cache = {}
 _settings_cache_ts = 0.0
-_SETTINGS_CACHE_TTL = 20  # ثانیه
+def _gate_opt(skey, env, default='0'):
+    """گزینه‌ی عضویت اجباری: اگه از پنل (0/1) ثبت شده همون، وگرنه متغیر Environment."""
+    v = get_setting(skey, None)
+    if v in ('0', '1'):
+        return v
+    return os.getenv(env, default).strip()
+
+
+_SETTINGS_CACHE_TTL = 5  # ثانیه (تغییر پنل حداکثر چند ثانیه بعد روی بات اعمال می‌شه)
 
 
 @with_db_retry
@@ -5028,7 +5152,7 @@ def make_config(gb, label, days, proto='both'):
             CONFIG_API,
             headers={'Authorization': 'Bearer ' + CONFIG_KEY},
             json={'gb': gb, 'label': label, 'expiryDays': days, 'proto': proto},
-            timeout=20
+            timeout=(PANEL_CONNECT_TIMEOUT, 20)
         )
         if res.status_code in (200, 201):
             data = res.json()
@@ -5153,10 +5277,18 @@ def set_config_note(config_id, note):
             f'{CONFIG_API}/{config_id}/note',
             headers={'Authorization': 'Bearer ' + CONFIG_KEY, 'Content-Type': 'application/json'},
             json={'note': note},
-            timeout=10
+            timeout=(PANEL_CONNECT_TIMEOUT, 8)
         )
     except Exception as e:
         print('⚠️ خطا در ثبت یادداشت کانفیگ:', e)
+
+
+def set_config_note_async(config_id, note):
+    """ثبت یادداشت روی پنل تو پس‌زمینه؛ تحویل کانفیگ به خریدار منتظرش نمی‌مونه."""
+    try:
+        BG_EXECUTOR.submit(set_config_note, config_id, note)
+    except Exception:
+        set_config_note(config_id, note)
 
 
 # ---------------------------------------------------------------------------
@@ -5398,7 +5530,7 @@ def get_plans(active_only=True):
         ctype = p.get('type') if p.get('type') in types else 'both'
         if active_only and not product_enabled(ctype):
             continue
-        title = str(p.get('title') or '').strip() or f'{gb:g} گیگ / {days} روزه'
+        title = str(p.get('title') or '').strip() or u('fa', 'plan_default_title', gb=f'{gb:g}', days=days)
         out.append({'id': pid, 'title': title, 'gb': gb, 'days': days, 'price': price, 'type': ctype})
     return out
 
@@ -5972,10 +6104,10 @@ TRIAL_USED_PANEL_CODES = ('trial_already_used', 'trial_used', 'already_used', 'a
 def _trial_wait_text(lang, hours):
     mins = max(1, int(round(hours * 60)))
     if mins < 60:
-        return f'{mins} minutes' if lang == 'en' else f'{mins} دقیقه'
+        return u(lang, 'trial_wait_minutes', n=mins)
     h = round(hours, 1)
     h = int(h) if h == int(h) else h
-    return f'{h} hours' if lang == 'en' else f'{h} ساعت'
+    return u(lang, 'trial_wait_hours', n=h)
 
 
 @with_db_retry
@@ -6099,7 +6231,7 @@ def _action_trial_impl(chat_id, confirmed=False, expected_price=None):
             set_free_trial(chat_id)
             try:
                 save_user_config(chat_id, res['sub_url'], res['config_id'], trial_gb, trial_label, trial_days, 0)
-                set_config_note(res['config_id'], build_config_note(chat_id, get_username_db(chat_id), 0))
+                set_config_note_async(res['config_id'], build_config_note(chat_id, get_username_db(chat_id), 0))
             except Exception as _sv_err:
                 print('⚠️ ثبت کانفیگ تست ناموفق (کانفیگ ساخته شده، لینک برای کاربر فرستاده می‌شه):', _sv_err)
             if lang == 'en':
@@ -6165,7 +6297,7 @@ def seller_api(method, path, payload=None, params=None):
     try:
         res = SESSION.request(method, SELLER_API_BASE + path,
                               headers={'Authorization': 'Bearer ' + SELLER_API_KEY},
-                              json=payload, params=params, timeout=20)
+                              json=payload, params=params, timeout=(PANEL_CONNECT_TIMEOUT, 15))
         try:
             data = res.json()
         except Exception:
@@ -6241,7 +6373,7 @@ def _seller_reason(res):
         return _html.escape(msg[:200])
     print('⚠️ خطای Seller API:', res)
     _seller_alert_admin(f"⚠️ خطای Seller API (فروشندگی): {res.get('status')} {res.get('error_code')} {msg[:150]}")
-    return 'مشکل موقتی از سمت سرویس پیش اومده.'
+    return u('fa', 'seller_temp_error')
 
 
 def seller_create_sub(chat_id, username, password):
@@ -6266,13 +6398,13 @@ def seller_create_sub(chat_id, username, password):
 def seller_set_password(chat_id, password):
     acc = get_seller_account(chat_id)
     if not acc or not acc[0]:
-        return {'success': False, 'reason': 'حساب فروشندگی پیدا نشد.'}
+        return {'success': False, 'reason': u(chat_id, 'seller_account_missing')}
     res = seller_api('POST', f'/resale/subs/{acc[0]}/password', {'password': password})
     if not res['success'] and res.get('status') == 404:
         # آیدی ذخیره‌شده قدیمیه: دوباره از روی لیست زیرمجموعه‌ها هماهنگ کن و یک بار دیگه امتحان کن
         acc2, _checked = _sync_seller_account(chat_id)
         if not acc2 or not acc2[0]:
-            return {'success': False, 'reason': 'حساب فروشندگی پیدا نشد.'}
+            return {'success': False, 'reason': u(chat_id, 'seller_account_missing')}
         if acc2[0] != acc[0]:
             res = seller_api('POST', f'/resale/subs/{acc2[0]}/password', {'password': password})
     if res['success']:
@@ -6379,7 +6511,7 @@ def _action_reseller_menu(chat_id):
     acc, checked = _sync_seller_account(chat_id)
     if not acc and not checked and get_old_reseller_creds(chat_id):
         send_message(chat_id, u(chat_id, 'seller_error',
-                                reason='ارتباط با سرویس برقرار نشد، کمی بعد دوباره تلاش کنید.'))
+                                reason=u(chat_id, 'seller_no_connection')))
         return
     if not acc:
         send_message(
@@ -6963,13 +7095,23 @@ def network_diagnostic():
 import string as _string
 
 _TEXT_GROUP_RULES = [
+    # هر محصول خرید یه دسته‌ی جدا داره (متن صفحه، دکمه‌ها، فاکتور، پیام موفقیت، خطاها)
+    (('buy_hub', 'btn_back_buy'), '🛒 صفحه‌ی اصلی خرید'),
+    (('unl_', 'btn_unl', 'extra_inv_devices', 'extra_inv_days'), '♾ پلن نامحدود'),
+    (('proxy_', 'btn_open_proxy', 'extra_inv_gb', 'extra_inv_proxy_days'), '📡 پروکسی تلگرام'),
+    (('plans_menu', 'plan_', 'btn_buy_plans'), '📦 بسته‌های آماده'),
+    (('buy_menu', 'btn_buy_custom', 'qty_', 'btn_qty', 'ask_label'), '🛠 خرید دلخواه (حجم و مدت)'),
+    (('extra_days_left', 'extra_order_item'), '🗂 کانفیگ‌های من و مدیریت'),
+    (('alert_', 'btn_alert', 'qrenew_', 'nudge_', 'btn_nudge'), '🔔 هشدار و یادآوری به کاربر'),
+    (('join_', 'btn_join'), '📢 عضویت اجباری در کانال'),
+    (('exchange_', 'btn_exchange', 'donito', 'btn_donito', 'btn_send_hash'), '💱 مبدل و پرداخت رمزارز/دونیتو'),
     (('menu_btn_', 'ctype_btn_'), '🔘 دکمه‌های منوی اصلی و نوع سرویس'),
     (('reseller_', 'btn_reseller', 'tier_line', 'price_range', 'seller_', 'btn_change_'), '🏪 فروشندگی (پنل فروشنده)'),
     (('referral_', 'btn_referral'), '🎁 دعوت دوستان'),
     (('admin_', 'config_note', 'no_username', 'disabled_feature', 'banned_', 'btn_back_menu', 'btn_open_link'), '🛠 پیام‌های ادمین و سیستمی'),
-    (('qty_', 'btn_qty', 'ask_label', 'invoice_', 'btn_confirm_purchase', 'btn_cancel_purchase', 'btn_apply_discount',
+    (('invoice_', 'btn_confirm_purchase', 'btn_cancel_purchase', 'btn_apply_discount',
       'discount_', 'building_config', 'insufficient_balance', 'purchase_success', 'output_label',
-      'proto_unavailable', 'dns_unavailable', 'server_error', 'buy_menu', 'btn_buy', 'svc_',
+      'proto_unavailable', 'dns_unavailable', 'server_error', 'btn_buy', 'svc_',
       'btn_reorder', 'reorder_', 'recentorders', 'btn_recentorders', 'price_unit_suffix'), '🛍 خرید، فاکتور و سفارشات'),
     (('manage_', 'btn_manage', 'btn_extend', 'btn_rename', 'btn_qr', 'btn_pause', 'btn_resume', 'btn_rotate',
       'btn_close', 'btn_confirm_pay', 'ext_', 'rename_', 'qr_', 'pause_', 'resume_', 'rotate_', 'myconfigs', 'config_not_found',
@@ -6985,9 +7127,9 @@ _TEXT_GROUP_RULES = [
     (('cur', 'unit_'), '🔢 واحدها'),
 ]
 _GROUP_DISPLAY_ORDER = [
-    '🔘 دکمه‌های منوی اصلی و نوع سرویس', '🏠 منوی اصلی و خوش‌آمدگویی', '🛍 خرید، فاکتور و سفارشات', '🗂 کانفیگ‌های من و مدیریت', '🗑 حذف کانفیگ',
+    '🔘 دکمه‌های منوی اصلی و نوع سرویس', '🏠 منوی اصلی و خوش‌آمدگویی', '🛒 صفحه‌ی اصلی خرید', '♾ پلن نامحدود', '📡 پروکسی تلگرام', '📦 بسته‌های آماده', '🛠 خرید دلخواه (حجم و مدت)', '🛍 خرید، فاکتور و سفارشات', '🗂 کانفیگ‌های من و مدیریت', '🗑 حذف کانفیگ',
     '🧪 تست رایگان', '💠 شارژ کیف پول', '🎧 پشتیبانی', '👤 حساب من', '📲 اپ و دانلود', '🌐 زبان',
-    '🏪 فروشندگی (پنل فروشنده)', '🎁 دعوت دوستان', '🛠 پیام‌های ادمین و سیستمی', '🔢 واحدها', '🔘 دکمه‌ها و سایر',
+    '🏪 فروشندگی (پنل فروشنده)', '🎁 دعوت دوستان', '🔔 هشدار و یادآوری به کاربر', '📢 عضویت اجباری در کانال', '💱 مبدل و پرداخت رمزارز/دونیتو', '🛠 پیام‌های ادمین و سیستمی', '🔢 واحدها', '🔘 دکمه‌ها و سایر',
 ]
 
 
@@ -7005,6 +7147,55 @@ _SELLER_ACTIVE_KEYS = {
 def _is_obsolete_seller_key(key):
     return (key.startswith(('reseller_', 'btn_reseller', 'tier_line', 'price_range', 'btn_change_username'))
             and key not in _SELLER_ACTIVE_KEYS)
+
+
+TEXT_WHERE = {
+    'buy_hub_text': '🛍 صفحه‌ای که بعد از زدن «خرید کانفیگ» میاد (بالای دکمه‌های پلن نامحدود / پروکسی / بسته‌ها / خرید دلخواه)',
+    'buy_menu_text': '🛠 فقط صفحه‌ی «خرید دلخواه (انتخاب حجم و مدت)»؛ صفحه‌ی اصلی خرید نیست (اون «buy_hub_text» ـه)',
+    'plans_menu_text': '📦 صفحه‌ی «بسته‌های آماده»',
+    'main_menu_text': '🏠 پیام منوی اصلی',
+    'welcome_intro': '👋 پیام خوش‌آمدگویی اولین ورود',
+    'account_info': '👤 صفحه‌ی «حساب من»',
+    'topup_prompt': '💠 اولین پیام «شارژ کیف پول»',
+    'topup_card_info': '💳 پیام اطلاعات کارت به کارت',
+    'support_prompt': '🎧 صفحه‌ی پشتیبانی',
+    'unl_screen': '♾ صفحه‌ی انتخاب پلن نامحدود',
+    'unl_card': '♾ کارت اطلاعات کانفیگ نامحدود بعد از خرید',
+    'proxy_card': '📡 کارت اطلاعات پروکسی بعد از خرید',
+    'seller_temp_error': '🏪 پیام خطا وقتی سرویس فروشندگی مشکل موقت داره',
+    'seller_account_missing': '🏪 وقتی حساب فروشندگی کاربر پیدا نمی‌شه (تغییر رمز)',
+    'seller_no_connection': '🏪 وقتی ارتباط با سرویس فروشندگی برقرار نمی‌شه',
+    'topup_too_many_pending': '💠 وقتی کاربر بیش از حد درخواست شارژ معلق دارد',
+    'plan_default_title': '📦 اسم پیش‌فرض بسته‌ای که ادمین براش اسم نذاشته',
+    'trial_wait_minutes': '🧪 «چند دقیقه» تو پیام صبر برای تست بعدی',
+    'trial_wait_hours': '🧪 «چند ساعت» تو پیام صبر برای تست بعدی',
+    'proxy_pick_gb': '📡 صفحه‌ی انتخاب حجم پروکسی (بالای دکمه‌های ۲۰/۵۰/۱۰۰ گیگ)',
+    'unl_pick_days': '♾ صفحه‌ی انتخاب مدت بعد از انتخاب تعداد کاربر',
+    'unl_success': '♾ پیام بعد از خرید موفق پلن نامحدود',
+    'proxy_success': '📡 پیام بعد از خرید موفق پروکسی',
+    'unl_unavailable': '♾ وقتی فروش نامحدود بسته‌ست یا پنل جواب نمی‌ده',
+    'proxy_unavailable': '📡 وقتی فروش پروکسی بسته‌ست یا پنل جواب نمی‌ده',
+    'proxy_gb_bad': '📡 وقتی کاربر عدد نامعتبر برای حجم پروکسی می‌فرسته',
+    'unl_support_error': '♾ وقتی ساخت سرویس شکست بخوره (پولش برمی‌گرده)',
+    'unl_no_extend': '♾ وقتی کاربر روی تمدید پلن نامحدود می‌زنه',
+    'extra_inv_devices': '♾ خط «تعداد کاربر» تو فاکتور نامحدود',
+    'extra_inv_days': '♾ خط «مدت» تو فاکتور نامحدود',
+    'extra_inv_gb': '📡 خط «حجم» تو فاکتور پروکسی',
+    'extra_inv_proxy_days': '📡 خط «مدت» تو فاکتور پروکسی',
+    'unl_users_btn': '♾ دکمه‌ی وسط ردیف تعداد کاربر',
+    'unl_days_btn': '♾ دکمه‌ی وسط ردیف مدت',
+    'unl_days_option_btn': '♾ هر دکمه‌ی مدت تو صفحه‌ی انتخاب مدت (مثلاً ۳۰ روزه — قیمت)',
+    'proxy_gb_option_btn': '📡 هر دکمه‌ی حجم تو صفحه‌ی پروکسی (مثلاً ۵۰ گیگ — قیمت)',
+    'unl_week_minus_btn': '♾ دکمه‌ی کم‌کردن یک هفته',
+    'unl_week_plus_btn': '♾ دکمه‌ی اضافه‌کردن یک هفته',
+    'btn_unl_rebuy': '♾ دکمه‌ی خرید دوباره تو کارت کانفیگ نامحدود',
+    'btn_open_proxy': '📡 دکمه‌ی اتصال به پروکسی',
+    'btn_back_buy': '🛒 دکمه‌ی برگشت به صفحه‌ی اصلی خرید',
+    'unl_card': '♾ کارت اطلاعات کانفیگ نامحدود تو «کانفیگ‌های من»',
+    'proxy_card': '📡 کارت اطلاعات پروکسی تو «کانفیگ‌های من»',
+}
+TEXT_WHERE.update({'unl_card': '♾ کارت اطلاعات کانفیگ نامحدود تو «کانفیگ‌های من»',
+                   'proxy_card': '📡 کارت اطلاعات پروکسی تو «کانفیگ‌های من»'})
 
 
 def _text_group(key):
@@ -7037,8 +7228,20 @@ def build_text_registry():
         fa_defaults[k] = v
 
     # دکمه‌های اصلی منو و نام نوع سرویس‌های فارسی تو صفحه‌ی «ظاهر ربات» (با ترتیب) مدیریت می‌شن
-    skip_fa = {'btn_recentorders', 'btn_language', 'btn_reseller', 'btn_referral', 'btn_reseller_status'}
+    skip_fa = {'btn_recentorders', 'btn_language', 'btn_reseller', 'btn_referral', 'btn_reseller_status',
+               'unl_pick_devices', 'btn_exchange', 'topup_choose_method'}   # تو کد جایی استفاده نمی‌شن
     fa_items = []
+    for _k, _s, _d, _g, _w in (
+        ('btn_hub_unlimited', 'ctype_label_unlimited', EXTRA_DEFAULT_LABELS['unlimited'], '♾ پلن نامحدود',
+         'اسم دکمه‌ی نامحدود تو صفحه‌ی اصلی خرید (و اسم این سرویس تو فاکتور و کانفیگ‌های من)'),
+        ('btn_hub_proxy', 'ctype_label_proxy', EXTRA_DEFAULT_LABELS['proxy'], '📡 پروکسی تلگرام',
+         'اسم دکمه‌ی پروکسی تو صفحه‌ی اصلی خرید (و اسم این سرویس تو فاکتور و کانفیگ‌های من)'),
+        ('btn_hub_plans', 'buy_label_plans', UI_TEXT['fa']['btn_buy_plans'], '📦 بسته‌های آماده',
+         'اسم دکمه‌ی «بسته‌های آماده» تو صفحه‌ی اصلی خرید'),
+        ('btn_hub_custom', 'buy_label_custom', UI_TEXT['fa']['btn_buy_custom'], '🛠 خرید دلخواه (حجم و مدت)',
+         'اسم دکمه‌ی «خرید دلخواه» تو صفحه‌ی اصلی خرید'),
+    ):
+        fa_items.append({'k': _k, 's': _s, 'd': _d, 'p': [], 'g': _g, 'w': _w})
     # دکمه‌های منوی اصلی و نوع سرویس‌ها (فارسی) تو settings زیر کلیدهای قدیمی btn_<key> و
     # ctype_label_<key> ذخیره می‌شن (همون چیزی که صفحه‌ی «دکمه‌ها و ظاهر» هم می‌نویسه)؛
     # این‌جا هم می‌آریمشون تا همه‌ی دکمه‌ها یه‌جا و کنار هم قابل ویرایش باشن.
@@ -7053,17 +7256,18 @@ def build_text_registry():
     for k, v in fa_defaults.items():
         if k in skip_fa or k.startswith('svc_') or _is_obsolete_seller_key(k):
             continue
-        fa_items.append({'k': k, 's': ui_setting_key('fa', k), 'd': v, 'p': _tpl_fields(v), 'g': _text_group(k)})
+        fa_items.append({'k': k, 's': ui_setting_key('fa', k), 'd': v, 'p': _tpl_fields(v), 'g': _text_group(k),
+                         'w': TEXT_WHERE.get(k, '')})
 
     en_items = []
     en_keys = list(UI_TEXT['en'].keys()) + [k for k in fa_defaults if k not in UI_TEXT['en']]
     for k in en_keys:
-        if k.startswith('admin_') or k in ('config_note', 'no_username') or _is_obsolete_seller_key(k):
+        if k.startswith('admin_') or k in ('config_note', 'no_username', 'unl_pick_devices', 'btn_exchange', 'topup_choose_method') or _is_obsolete_seller_key(k):
             continue
         d = UI_TEXT['en'].get(k, '')
         ref = fa_defaults.get(k, '')
         en_items.append({'k': k, 's': ui_setting_key('en', k), 'd': d, 'ref': ref,
-                         'p': _tpl_fields(d or ref), 'g': _text_group(k)})
+                         'p': _tpl_fields(d or ref), 'g': _text_group(k), 'w': TEXT_WHERE.get(k, '')})
     return {'version': 1, 'groups': _GROUP_DISPLAY_ORDER, 'fa': fa_items, 'en': en_items}
 
 
@@ -7176,9 +7380,26 @@ try:
 except Exception as e:
     print('⚠️ ریست متن‌های فروشندگی انجام نشد:', e)
 sync_text_registry()
-network_diagnostic()
 delete_webhook()
 set_bot_commands()
+
+
+def _panel_warmer():
+    """کش‌های پنل (نامحدود/پروکسی/کیف پول) رو هر ~۴۰ ثانیه تازه می‌کنه و اتصال TLS رو گرم نگه می‌داره؛
+    پس منوی خرید و ساخت کانفیگ هیچ‌وقت منتظر handshake یا اولین چک نمی‌مونه."""
+    while True:
+        try:
+            if CONFIG_KEY:
+                get_unl_status(force=True)
+                get_proxy_status(force=True)
+                get_seller_wallet(force=True)
+        except Exception as _we:
+            print('⚠️ panel warmer:', _we)
+        time.sleep(40)
+
+
+threading.Thread(target=_panel_warmer, daemon=True).start()
+threading.Thread(target=network_diagnostic, daemon=True).start()     # قبلاً استارت رو تا ۱۶ ثانیه معطل می‌کرد
 
 def _keepalive_url(port):
     """آدرس عمومی سرویس برای پینگ. Render خودش RENDER_EXTERNAL_URL رو ست می‌کنه (نیازی به تنظیم دستی نیست)."""
@@ -7750,7 +7971,7 @@ def process_update(update):
                         if ctype in EXTRA_TYPES:
                             success_text, _kb = build_extra_success(chat_id, ctype, label, price, res, days, gb, s.get('devices'))
                         else:
-                            set_config_note(
+                            set_config_note_async(
                                 res['config_id'],
                                 build_config_note(chat_id, query.get('from', {}).get('username'), price)
                             )
@@ -8442,7 +8663,7 @@ def process_update(update):
                     res = seller_create_sub(chat_id, uname, pw)
                 except Exception as _sc_err:
                     print('⚠️ استثنا هنگام ساخت حساب فروشندگی:', _sc_err)
-                    res = {'success': False, 'reason': 'مشکل موقتی از سمت سرویس پیش اومده.'}
+                    res = {'success': False, 'reason': u(chat_id, 'seller_temp_error')}
                 if _fee > 0 and not res.get('success'):
                     try:
                         update_wallet_db(chat_id, _fee, 'refund_reseller_failed')   # ساخت نشد → پول برمی‌گرده
@@ -8635,9 +8856,9 @@ def process_update(update):
                 or (step.get('method') == 'crypto' and _looks_like_tx_hash(text))):
             # رمزارز: فقط هش تراکنش (متن) قبول می‌شه و عکس لازم نیست؛ کارت‌به‌کارت: فقط عکس رسید
             # رسید کارت‌به‌کارت فقط عکسه؛ رمزارز هم عکس رسید و هم هش تراکنش (متن) رو قبول می‌کنه
-            if count_pending_topups(chat_id) >= 5:
+            if count_pending_topups(chat_id) >= max(1, _setting_int('topup_max_pending', 5)):
                 user_steps[str(chat_id)] = {}
-                send_message(chat_id, 'شما چند درخواست شارژ در حال بررسی دارید؛ لطفاً تا مشخص شدن نتیجه‌ی اون‌ها صبر کنید.')
+                send_message(chat_id, u(chat_id, 'topup_too_many_pending'))
                 return
             photo_id = message['photo'][-1]['file_id'] if 'photo' in message else None
             tx_hash = None if photo_id else text.strip()
@@ -9042,7 +9263,7 @@ async def g_raw_all_users(client, ch):
 async def g_deep_search(client, ch, have):
     """اگه تعداد واقعی اعضای کانال بیشتر از لیست گرفته‌شده بود، با جست‌وجوی حرف‌به‌حرف دنبال بقیه می‌گرده."""
     extra = set()
-    if os.getenv("GATE_DEEP_SEARCH", "0").strip() != "1":
+    if _gate_opt('gate_deep_search', 'GATE_DEEP_SEARCH') != '1':
         return extra  # پیش‌فرض خاموش: ۶۷ درخواست پشت‌سرهم بات رو کند می‌کرد
     if tl_functions is None or tl_types is None:
         return extra
@@ -9169,7 +9390,7 @@ async def g_check_one(client, ch, link, uid, force=False):
             print('[gate] refresh before check failed:', repr(e))
         if uid in _gm(link):
             return True
-    if _G.get('peruser_unsupported', os.getenv('GATE_PERUSER', '0').strip() != '1'):
+    if _G.get('peruser_unsupported', _gate_opt('gate_peruser', 'GATE_PERUSER') != '1'):
         return False  # چک تکی پشتیبانی نمی‌شه و لیست تازه‌ست؛ الکی منتظر نمون
     print(f'[gate] check uid={uid}: not in list (size={len(_gm(link))}, mode={_G["modes"].get(link)}, '
           f'ids={sorted(_gm(link))})')
@@ -9246,7 +9467,7 @@ def g_register_join_handler(client):
         print('[gate] events پشتیبانی نمی‌شه؛ فقط چک زنده فعاله')
         return
     try:
-        async def _on_action(event):
+        async def _on_action(event, *_extra):
             try:
                 uids = list(getattr(event, 'user_ids', None) or [])
                 single = getattr(event, 'user_id', None)
@@ -9483,12 +9704,12 @@ def _check_one_channel(user_id, link, use_cache=True):
             ts = _member_cache.get(ck)
         if ts and now - ts < GATE_CACHE_TTL:
             return True
-    if os.getenv('GATE_BOTAPI', '0').strip() == '1' and bot_api_check_member(user_id, link) is True:
+    if _gate_opt('gate_botapi', 'GATE_BOTAPI') == '1' and bot_api_check_member(user_id, link) is True:
         with _member_cache_guard:
             _member_cache[ck] = now
         return True
     if use_cache and _G['modes'].get(link) == 'full' and now - _G['refreshed'].get(link, 0.0) < 30 \
-            and _G.get('peruser_unsupported', os.getenv('GATE_PERUSER', '0').strip() != '1'):
+            and _G.get('peruser_unsupported', _gate_opt('gate_peruser', 'GATE_PERUSER') != '1'):
         # لیست همین چند ثانیه پیش تازه شده و چک تکی هم ممکن نیست؛ نیازی به رفت‌وبرگشت به لوپ یوزربات نیست
         return False
     try:
@@ -9692,6 +9913,13 @@ def ban_gate(update):
 # کاربرهایی که قبلاً عضویتشون تأیید شده تا GATE_VERIFIED_DAYS روز تو دیتابیس می‌مونن؛ اگه اکانت یوزربات موقتاً
 # قطع بود، فقط همین‌ها (نه کاربر ناشناس/جدید) بدون چک رد می‌شن. بقیه همچنان بسته‌ان (fail-closed).
 GATE_VERIFIED_DAYS = max(1, int(os.getenv("GATE_VERIFIED_DAYS", "7") or 7))
+
+
+def gate_verified_days():
+    v = get_setting('gate_verified_days', None)
+    if v and str(v).strip().isdigit() and int(v) > 0:
+        return int(v)
+    return GATE_VERIFIED_DAYS
 _gate_verified_mem = {}      # user_id -> زمان آخرین نوشتن/خوندن مثبت
 _GATE_VERIFIED_WRITE_EVERY = 3600
 
@@ -9730,14 +9958,14 @@ def gate_mark_verified(user_id):
 
 def gate_recently_verified(user_id):
     """True اگه این کاربر تو GATE_VERIFIED_DAYS روز اخیر عضو بودنش تأیید شده."""
-    if time.time() - _gate_verified_mem.get(user_id, 0) < GATE_VERIFIED_DAYS * 86400 and user_id in _gate_verified_mem:
+    if time.time() - _gate_verified_mem.get(user_id, 0) < gate_verified_days() * 86400 and user_id in _gate_verified_mem:
         return True
     try:
         ts = _gate_verified_read(user_id)
     except Exception as e:
         print('⚠️ خوندن gate_verified ناموفق:', e)
         return False
-    if ts and time.time() - ts < GATE_VERIFIED_DAYS * 86400:
+    if ts and time.time() - ts < gate_verified_days() * 86400:
         _gate_verified_mem[user_id] = ts
         return True
     return False

@@ -167,6 +167,11 @@ CONFIG_GROUPS = [
         ("gate_fail_open", "اگه چک عضویت جواب نداد، کاربر رد بشه||روشن = وقتی اکانت گیت وصل نیست یا چک خطا داد، کاربر وارد ربات می‌شه (ریسک: عضویت چک نمی‌شه)؛ خاموش (پیش‌فرض و امن‌تر) = اگه چک جواب نداد فقط کاربرهای تأییدشده‌ی ۷ روز اخیر وارد می‌شن، کاربر جدید نه؛ ادمین هم خبردار می‌شه و بات خودش دوباره وصل می‌شه", "0", "toggle"),
         ("gate_cache_ttl", "مدت اعتبار عضویتِ تاییدشده (ثانیه، حداقل 5)", "60", "number"),
         ("gate_sync_interval", "فاصله‌ی تازه‌سازی لیست اعضای کانال (ثانیه، حداقل 5؛ عدد کمتر = فشار بیشتر روی API سروش)", "30", "number"),
+        ("gate_verified_days", "چند روز عضویتِ تأییدشده معتبر بمونه (وقتی اکانت گیت قطعه)", "7", "number"),
+        ("gate_botapi", "چک عضویت با خود Bot API||روشن = قبل از چک اکانت گیت، با getChatMember خودِ ربات هم عضویت رو چک می‌کنه (ربات باید تو کانال ادمین باشه)", "0", "toggle"),
+        ("gate_peruser", "چک عضویت تک‌به‌تکِ کاربر روی اکانت گیت||روشن = اگه سروش پشتیبانی کنه، عضویت هر کاربر جدا از روی اکانت یوزربات پرسیده می‌شه (فشار بیشتر روی API)", "0", "toggle"),
+        ("gate_deep_search", "جستجوی عمیق عضو تو کانال||روشن = اگه کاربر تو لیست اعضا پیدا نشد، با جستجوی نام حرف‌به‌حرف دنبالش می‌گرده (کندتر ولی دقیق‌تر؛ فقط وقتی لیست کامل برنمی‌گرده)", "0", "toggle"),
+        ("topup_max_pending", "حداکثر درخواست شارژ هم‌زمانِ در حال بررسی برای هر کاربر", "5", "number"),
         ("divider", "خط جداکننده‌ی پیام‌های ربات", "┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄", "text"),
     ]),
     ("⌨️ توضیح دستورات منوی «/» (تا ~۱ دقیقه بعد روی تلگرام اعمال می‌شه)", [
@@ -264,7 +269,18 @@ FEATURES = {
 
 USERS_PAGE_SIZE = 20
 
+import socket as _socket
+import urllib3.util.connection as _u3c
+from urllib3.util.retry import Retry as _Retry
+if os.getenv("FORCE_IPV4", "1") == "1":
+    _u3c.allowed_gai_family = lambda: _socket.AF_INET   # AAAA ناقابل‌دسترس = گیر کردن تا پایان timeout
+
 SESSION = requests.Session()
+_ad = requests.adapters.HTTPAdapter(
+    pool_connections=10, pool_maxsize=32,
+    max_retries=_Retry(total=None, connect=1, read=0, redirect=0, status=0, other=0, backoff_factor=0))
+SESSION.mount("https://", _ad)
+SESSION.mount("http://", _ad)
 
 
 def esc(value):
@@ -315,14 +331,32 @@ def ensure_settings_table():
     conn.close()
 
 
+_SET_CACHE = {"d": None, "t": 0.0}
+_SET_TTL = 5.0
+
+
+def _settings_invalidate():
+    _SET_CACHE["d"] = None
+
+
 @with_db_retry
-def get_setting(key, default="1"):
+def _fetch_settings_uncached():
     conn = get_conn()
     c = conn.cursor()
-    c.execute("SELECT value FROM settings WHERE key=?", (key,))
-    res = c.fetchone()
+    c.execute("SELECT key, value FROM settings")
+    rows = c.fetchall()
     conn.close()
-    return res[0] if res else default
+    return {row[0]: row[1] for row in rows}
+
+
+def get_setting(key, default="1"):
+    """یه کوئری برای کل جدول و کش ۵ ثانیه‌ای؛ نوشتن (set/delete) کش رو پاک می‌کنه."""
+    d = _SET_CACHE["d"]
+    if d is None or time.time() - _SET_CACHE["t"] > _SET_TTL:
+        d = _fetch_settings_uncached()
+        _SET_CACHE["d"], _SET_CACHE["t"] = d, time.time()
+    v = d.get(key)
+    return default if v is None else v
 
 
 @with_db_retry
@@ -338,7 +372,9 @@ def get_all_settings():
     c.execute("SELECT key, value FROM settings")
     rows = c.fetchall()
     conn.close()
-    return {row[0]: row[1] for row in rows}
+    d = {row[0]: row[1] for row in rows}
+    _SET_CACHE["d"], _SET_CACHE["t"] = d, time.time()
+    return d
 
 
 @with_db_retry
@@ -352,6 +388,7 @@ def set_setting(key, value):
     )
     conn.commit()
     conn.close()
+    _settings_invalidate()
 
 
 @with_db_retry
@@ -361,10 +398,24 @@ def delete_setting(key):
     c.execute("DELETE FROM settings WHERE key=?", (key,))
     conn.commit()
     conn.close()
+    _settings_invalidate()
+
+
+_REG_CACHE = {"d": None, "t": 0.0}
+
+
+def load_text_registry():
+    """رجیستری متن‌ها فقط موقع استارت بات عوض می‌شه؛ ۶۰ ثانیه کش."""
+    if _REG_CACHE["d"] is not None and time.time() - _REG_CACHE["t"] < 60:
+        return _REG_CACHE["d"]
+    d = _load_text_registry_uncached()
+    if d is not None:
+        _REG_CACHE["d"], _REG_CACHE["t"] = d, time.time()
+    return d
 
 
 @with_db_retry
-def load_text_registry():
+def _load_text_registry_uncached():
     """لیست متن‌های پیش‌فرض بات (که خود bot.py موقع استارت تو جدول bot_registry می‌نویسه)."""
     conn = get_conn()
     c = conn.cursor()
@@ -1330,7 +1381,7 @@ def seller_api(method, path, payload=None, params=None):
     try:
         res = SESSION.request(method, SELLER_API_BASE + path,
                               headers={"Authorization": "Bearer " + SELLER_API_KEY},
-                              json=payload, params=params, timeout=20)
+                              json=payload, params=params, timeout=(4, 15))
         try:
             data = res.json()
         except Exception:
@@ -1692,7 +1743,7 @@ def apply_env_overrides(force=False):
     if not force and time.time() - _ENV_LAST["ts"] < 10:
         return
     _ENV_LAST["ts"] = time.time()
-    st = get_all_settings()
+    st = get_all_settings()   # (کش‌شده؛ فقط هر ~۱۰ ثانیه یه کوئری)
     g = globals()
     for skey, gname in _ENV_OVERRIDES:
         if gname not in g:      # مثلاً CONFIG_API پایین‌تر تعریف می‌شه؛ تا وقتی تعریف نشده رد می‌شیم
@@ -1734,6 +1785,30 @@ def _before_request():
 
 
 @app.after_request
+def _gzip_response(resp):
+    """فشرده‌سازی HTML/JSON/CSS: صفحه‌های بزرگ (مثل «همه‌ی متن‌ها») روی اینترنت کند خیلی سریع‌تر لود می‌شن."""
+    try:
+        if (resp.direct_passthrough or resp.status_code < 200 or resp.status_code >= 300
+                or "Content-Encoding" in resp.headers
+                or "gzip" not in request.headers.get("Accept-Encoding", "").lower()):
+            return resp
+        ctype = (resp.mimetype or "")
+        if not (ctype.startswith("text/") or ctype in ("application/json", "application/javascript")):
+            return resp
+        data = resp.get_data()
+        if len(data) < 1024:
+            return resp
+        import gzip
+        resp.set_data(gzip.compress(data, compresslevel=5))
+        resp.headers["Content-Encoding"] = "gzip"
+        resp.headers["Content-Length"] = str(len(resp.get_data()))
+        resp.headers.add("Vary", "Accept-Encoding")
+    except Exception as e:
+        print("⚠️ gzip:", e)
+    return resp
+
+
+@app.after_request
 def _security_headers(resp):
     resp.headers.setdefault("X-Frame-Options", "DENY")
     resp.headers.setdefault("X-Content-Type-Options", "nosniff")
@@ -1753,9 +1828,8 @@ BASE_HTML = """<!DOCTYPE html>
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
 <meta name="color-scheme" content="light dark">
 <title>پنل مدیریت SkyTunnel</title>
-<link rel="preconnect" href="https://fonts.googleapis.com">
-<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-<link href="https://fonts.googleapis.com/css2?family=Vazirmatn:wght@400;500;600;700;800&display=swap" rel="stylesheet">
+<link href="https://fonts.googleapis.com/css2?family=Vazirmatn:wght@400;500;600;700;800&display=swap" rel="stylesheet" media="print" onload="this.media='all'">
+<noscript><link href="https://fonts.googleapis.com/css2?family=Vazirmatn:wght@400;500;600;700;800&display=swap" rel="stylesheet"></noscript>
 <script>
   (function () {
     var t = null;
@@ -3498,6 +3572,11 @@ SETTING_HELP = {
     "gate_enabled": ("📢 عضویت اجباری کانال", "روشن: کاربر قبل از استفاده از ربات باید تو کانال‌های اجباری عضو باشه. خاموش: هیچ‌کس مجبور نیست. لیست کانال‌ها از صفحه‌ی «کانال‌ها و پست».", ""),
     "gate_fail_open": ("اگه چک عضویت جواب نداد، کاربر وارد بشه", "روشن: وقتی اکانت گیت وصل نیست یا چک عضویت خطا داد، کاربر وارد ربات می‌شه. خاموش (پیش‌فرض، امن‌تر): اگه چک جواب نداد فقط کاربرهای تأییدشده‌ی ۷ روز اخیر وارد می‌شن و کاربر جدید نه؛ هر ۳۰ دقیقه به ادمین هشدار می‌ره و بات خودش دوباره وصل شدن رو امتحان می‌کنه.", ""),
     "gate_cache_ttl": ("مدت اعتبار عضویتِ تاییدشده", "بعد از تأیید عضویت، تا این مدت دوباره چک نمی‌شه (حداقل 5).", "ثانیه"),
+    "gate_verified_days": ("اعتبار عضویتِ تأییدشده (روز)", "اگه اکانت گیت موقتاً قطع باشه، کاربرانی که تو این چند روز اخیر عضویتشون تأیید شده بدون چک وارد می‌شن.", "روز"),
+    "gate_botapi": ("چک با Bot API", "قبل از اکانت گیت، با getChatMember خودِ ربات هم عضویت چک می‌شه. ربات باید تو کانال ادمین باشه.", ""),
+    "gate_peruser": ("چک تک‌به‌تک روی اکانت گیت", "عضویت هر کاربر جدا از روی اکانت یوزربات پرسیده می‌شه.", ""),
+    "gate_deep_search": ("جستجوی عمیق", "وقتی لیست اعضا ناقص برمی‌گرده، با جستجوی نام دنبال کاربر می‌گرده (کندتر ولی دقیق‌تر).", ""),
+    "topup_max_pending": ("سقف درخواست شارژ معلق", "هر کاربر هم‌زمان حداکثر این‌قدر درخواست شارژ در حال بررسی می‌تونه داشته باشه؛ بیشتر از این، پیام «صبر کنید» می‌گیره.", "درخواست"),
     "gate_sync_interval": ("فاصله‌ی تازه‌سازی لیست اعضا", "هر چند ثانیه لیست اعضای کانال از سروش دوباره گرفته بشه. عدد کمتر = دقیق‌تر ولی فشار بیشتر روی API (حداقل 5).", "ثانیه"),
     "admin_id": ("آیدی عددی ادمین", "تیکت‌ها و رسیدهای شارژ برای این آیدی فرستاده می‌شه و این حساب از محدودیت‌ها مستثناست.", ""),
     "bot_username": ("یوزرنیم ربات (بدون @)", "برای ساخت لینک دعوت دوستان استفاده می‌شه.", ""),
@@ -3566,7 +3645,7 @@ SETTINGS_TABS = [
     ]),
     ("price", "💰 قیمت و پرداخت", [
         ("💵 قیمت هر گیگ", ["price_wireguard", "price_config", "price_both", "price_openvpn", "price_dns"]),
-        ("💳 کارت‌به‌کارت", ["card_number", "card_owner", "min_topup", "topup_max_amount", "topup_multiplier"]),
+        ("💳 کارت‌به‌کارت", ["card_number", "card_owner", "min_topup", "topup_max_amount", "topup_multiplier", "topup_max_pending"]),
         ("🪙 شارژ با رمزارز", ["min_topup_crypto", "crypto_auto_confirm", "crypto_max_shortfall_toman", "crypto_margin_percent",
                               "crypto_match_tolerance_percent", "crypto_round_max_over_percent"]),
         ("⚡ شارژ خودکار دونیتو", ["min_topup_donito", "donito_page_url", "donito_window_min", "donito_poll_sec"]),
@@ -3587,7 +3666,7 @@ SETTINGS_TABS = [
         ("🎫 پشتیبانی", ["ticket_max_open", "ticket_max_chars"]),
     ]),
     ("channel", "📢 کانال و عمومی", [
-        ("📢 عضویت اجباری", ["gate_enabled", "gate_fail_open", "gate_cache_ttl", "gate_sync_interval"]),
+        ("📢 عضویت اجباری", ["gate_enabled", "gate_fail_open", "gate_cache_ttl", "gate_sync_interval", "gate_verified_days", "gate_botapi", "gate_peruser", "gate_deep_search"]),
         ("🤖 مشخصات ربات", ["admin_id", "bot_username", "divider"]),
     ]),
     ("links", "🔗 لینک‌ها و دستورات", [
@@ -4792,6 +4871,12 @@ TEXTS_CSS_JS = """
   .chips { display: flex; gap: 6px; flex-wrap: wrap; margin: 4px 0 6px; }
   .chip { font-family: monospace; font-size: 12px; padding: 2px 9px; border-radius: 6px; background: var(--accent-dim); color: var(--accent); border: none; cursor: pointer; direction: ltr; }
   .txt-actions { margin-top: 6px; }
+  .gjumps { display: flex; flex-wrap: wrap; gap: 6px; margin: 4px 0 12px; }
+  .gjump { font-size: 12.5px; padding: 5px 11px; border-radius: 999px; background: var(--accent-dim); color: var(--accent); text-decoration: none; white-space: nowrap; }
+  .where { font-size: 12.5px; color: var(--muted); margin: 2px 0 4px; line-height: 1.7; }
+  .fmtbar { display: flex; gap: 6px; align-items: center; margin: 2px 0 6px; }
+  .fmtbar button { padding: 3px 14px; font-size: 14px; min-width: 40px; }
+  .fmtbar .hint { font-size: 12px; color: var(--muted); }
   .txt-actions button { padding: 4px 12px; font-size: 12px; }
   .savebar { position: sticky; bottom: var(--nav-h); z-index: 5; padding: 10px 0; background: linear-gradient(transparent, var(--bg) 35%); }
 </style>
@@ -4802,6 +4887,45 @@ TEXTS_CSS_JS = """
     var s = ta.selectionStart || 0, e = ta.selectionEnd || 0;
     ta.value = ta.value.slice(0, s) + ph + ta.value.slice(e);
     ta.focus(); ta.selectionStart = ta.selectionEnd = s + ph.length;
+  }
+  function wrapTag(btn, tag) {
+    var box = btn.closest('.txt');
+    var ta = box.querySelector('textarea');
+    var hint = box.querySelector('.fmtbar .hint');
+    var o = '<' + tag + '>', c = '</' + tag + '>';
+    var s = ta.selectionStart, e = ta.selectionEnd, v = ta.value;
+    if (s == null || s === e) { hint.textContent = 'اول بخشی از متن رو انتخاب کن، بعد دکمه رو بزن'; return; }
+    var sel = v.slice(s, e), ns, ne;
+    if (v.slice(s - o.length, s) === o && v.slice(e, e + c.length) === c) {
+      ta.value = v.slice(0, s - o.length) + sel + v.slice(e + c.length);
+      ns = s - o.length; ne = ns + sel.length;
+    } else if (sel.indexOf(o) === 0 && sel.slice(-c.length) === c) {
+      var inner = sel.slice(o.length, sel.length - c.length);
+      ta.value = v.slice(0, s) + inner + v.slice(e);
+      ns = s; ne = s + inner.length;
+    } else {
+      var lead = sel.match(/^\\s*/)[0], trail = sel.match(/\\s*$/)[0];
+      var core = sel.slice(lead.length, sel.length - trail.length);
+      if (!core) { hint.textContent = 'فقط فاصله انتخاب شده'; return; }
+      ta.value = v.slice(0, s) + lead + o + core + c + trail + v.slice(e);
+      ns = s + lead.length + o.length; ne = ns + core.length;
+    }
+    hint.textContent = '';
+    ta.focus(); ta.selectionStart = ns; ta.selectionEnd = ne;
+  }
+  document.addEventListener('DOMContentLoaded', function () {
+    document.querySelectorAll('.txt textarea').forEach(function (ta) {
+      var bar = document.createElement('div');
+      bar.className = 'fmtbar';
+      bar.innerHTML = '<button type="button" class="secondary" title="بولد" onpointerdown="event.preventDefault()" onclick="wrapTag(this,\\'b\\')"><b>B</b></button>' +
+        '<button type="button" class="secondary" title="قابل کپی" onpointerdown="event.preventDefault()" onclick="wrapTag(this,\\'code\\')"><code>&lt;/&gt;</code></button>' +
+        '<span class="hint"></span>';
+      ta.parentNode.insertBefore(bar, ta);
+    });
+  });
+  function openGrp(id) {
+    var d = document.getElementById(id);
+    if (d) { d.open = true; setTimeout(function () { d.scrollIntoView({behavior: 'smooth', block: 'start'}); }, 30); }
   }
   function resetTxt(btn) {
     var box = btn.closest('.txt');
@@ -4833,7 +4957,7 @@ _BUTTON_KEYS_EXACT = {"qty_continue", "ask_label_skip"}
 
 def is_button_key(key):
     """کلیدهایی که متن یه «دکمه» هستن (نه پیام)؛ برای فیلتر «فقط دکمه‌ها» تو صفحه‌ی متن‌ها."""
-    return key in _BUTTON_KEYS_EXACT or key.startswith(_BUTTON_KEY_PREFIXES)
+    return key in _BUTTON_KEYS_EXACT or key.startswith(_BUTTON_KEY_PREFIXES) or key.endswith("_btn")
 
 
 @app.route("/texts")
@@ -4865,6 +4989,7 @@ def texts_page():
     order = [g for g in registry.get("groups", []) if g in by_group] + [g for g in by_group if g not in registry.get("groups", [])]
 
     groups_html = ""
+    jump_html_list = []
     for g in order:
         boxes = ""
         for it in by_group[g]:
@@ -4886,16 +5011,20 @@ def texts_page():
                 field_html = f'<input type="text" name="t__{esc(setting)}" value="{esc(value)}" maxlength="64"{ph_attr}>'
             else:
                 field_html = f'<textarea name="t__{esc(setting)}" rows="{rows}"{ph_attr}>{esc(value)}</textarea>'
-            search = esc((key + " " + default + " " + value + " " + ref).lower())
+            where_html = f'<div class="where">📍 {esc(it["w"])}</div>' if it.get("w") else ""
+            search = esc((key + " " + it.get("w", "") + " " + default + " " + value + " " + ref).lower())
             boxes += f"""
             <div class="txt" data-default="{esc(default)}" data-search="{search}">
               <label>{badge}<code class="key">{esc(key)}</code></label>
+              {where_html}
               {chips_html}
               {field_html}
               {ref_html}
               <div class="txt-actions"><button type="button" class="secondary" onclick="resetTxt(this)">↩ پیش‌فرض</button></div>
             </div>"""
-        groups_html += f'<details class="grp"><summary><span>{g}</span><small>{len(by_group[g])} متن</small></summary>{boxes}</details>'
+        gid = f"g{len(jump_html_list)}"
+        jump_html_list.append(f'<a class="gjump" href="#{gid}" onclick="openGrp(\'{gid}\')">{g}</a>')
+        groups_html += f'<details class="grp" id="{gid}"><summary><span>{g}</span><small>{len(by_group[g])} متن</small></summary>{boxes}</details>'
 
     tab_fa = "btn" if lang == "fa" else "btn secondary"
     tab_en = "btn" if lang == "en" else "btn secondary"
@@ -4915,10 +5044,11 @@ def texts_page():
         <a class="{vt['buttons']}" href="{url_for('texts_page', lang=lang, view='buttons')}">🔘 فقط دکمه‌ها</a>
         <a class="{vt['messages']}" href="{url_for('texts_page', lang=lang, view='messages')}">💬 فقط پیام‌ها</a>
       </div>
+      <div class="gjumps">{"".join(jump_html_list)}</div>
       <input type="text" id="q" placeholder="🔎 جستجو در متن‌ها (کلید یا بخشی از متن)..." oninput="filterTexts()">
       <small class="muted" id="count"></small>
       <p class="muted" style="font-size:12.5px;margin:10px 0 0;">
-        هر متن را ویرایش و ذخیره کنید؛ همان لحظه (حداکثر ~۲۰ ثانیه) روی ربات اعمال می‌شود.
+        هر متن را ویرایش و ذخیره کنید؛ حداکثر چند ثانیه بعد روی ربات اعمال می‌شود. برای پررنگ‌کردن: بخشی از متن را انتخاب کنید و دکمه‌ی <b>B</b> را بزنید (دوباره بزنید تا برداشته شود).
         عبارت‌های داخل آکولاد مثل <code>{{wallet}}</code> جاهایی‌اند که ربات مقدار واقعی را می‌گذارد؛ اسمشان را عوض نکنید
         (با زدن روی هر دکمه‌ی آبی داخل متن درج می‌شود). کادر را خالی بگذارید یا «↩ پیش‌فرض» بزنید تا به متن اصلی برگردد.
         تگ‌های <code>&lt;b&gt;</code> و <code>&lt;code&gt;</code> برای پررنگ‌کردن و کپی‌شدن متن‌اند.
@@ -6629,4 +6759,8 @@ if __name__ == "__main__":
         print("⚠️ ensure_schema:", e)
     port = int(os.getenv("PORT", "8080"))
     start_keepalive(port)
-    app.run(host="0.0.0.0", port=port)
+    try:
+        from waitress import serve          # اگه نصب باشه: سرور تولیدی چندترده (خیلی سریع‌تر از سرور توسعه‌ی Flask)
+        serve(app, host="0.0.0.0", port=port, threads=16)
+    except ImportError:
+        app.run(host="0.0.0.0", port=port, threaded=True)
