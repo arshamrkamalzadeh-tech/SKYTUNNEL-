@@ -1561,6 +1561,20 @@ UI_TEXT['en'].update({
     'unl_week_plus_btn': '+7',
 })
 
+# پیام‌های کوتاه پایان مسیر (وقتی کاربر انصراف می‌زنه یا دکمه‌ی یه صفحه‌ی قدیمی رو می‌زنه).
+# به‌جای فرستادن دوباره‌ی پیام اولیه‌ی منو، همین پیام‌ها جای صفحه‌ی فعلی میان؛
+# از پنل (صفحه‌ی «متن‌های ربات» > «لغو و پایان مراحل») قابل تغییرن.
+UI_TEXT['fa'].update({
+    'flow_cancelled': '❌ لغو شد.\nهر وقت خواستید از منو دوباره شروع کنید.',
+    'flow_expired': 'ℹ️ این صفحه دیگه معتبر نیست.\nلطفاً از منو دوباره شروع کنید.',
+    'flow_home': '🏠 یکی از گزینه‌های منوی پایین رو انتخاب کنید.',
+})
+UI_TEXT['en'].update({
+    'flow_cancelled': '❌ Cancelled.\nStart again from the menu whenever you like.',
+    'flow_expired': 'ℹ️ This page is no longer valid.\nPlease start again from the menu.',
+    'flow_home': '🏠 Please choose an option from the menu below.',
+})
+
 
 def u(chat_id_or_lang, key, **kwargs):
     """متن ترجمه‌شده رو برمی‌گردونه؛ اولین آرگومان یا خودِ chat_id است یا مستقیم
@@ -1593,7 +1607,7 @@ def admin_add_channel_label():
 
 
 def cancel_kb(chat_id):
-    return {'inline_keyboard': [[{'text': u(chat_id, 'btn_cancel'), 'callback_data': 'menu'}]]}
+    return {'inline_keyboard': [[{'text': u(chat_id, 'btn_cancel'), 'callback_data': 'cancel'}]]}
 
 
 def get_ctype_label(chat_id, ctype):
@@ -3039,7 +3053,7 @@ def send_donito_topup_info(chat_id, amount):
     if page.lower().startswith(('http://', 'https://')):
         rows.append([{'text': u(chat_id, 'btn_donito_pay'), 'url': page}])
     rows.append([{'text': u(chat_id, 'btn_donito_check'), 'callback_data': 'donito_check_' + str(req_id)}])
-    rows.append([{'text': u(chat_id, 'btn_cancel'), 'callback_data': 'menu'}])
+    rows.append([{'text': u(chat_id, 'btn_cancel'), 'callback_data': 'cancel'}])
     send_message(chat_id, u(chat_id, 'topup_donito_info', amount=f'{pay:,}', amount_raw=str(pay), divider=DIVIDER,
                             minutes=str(donito_window_seconds() // 60)),
                  reply_markup={'inline_keyboard': rows})
@@ -4148,7 +4162,7 @@ def build_unl_screen(chat_id, st):
         [{'text': u(chat_id, 'unl_week_minus_btn'), 'callback_data': 'unl_days_dec7'},
          {'text': u(chat_id, 'unl_week_plus_btn'), 'callback_data': 'unl_days_inc7'}],
         [{'text': u(chat_id, 'qty_continue'), 'callback_data': 'unl_confirm'}],
-        [{'text': u(chat_id, 'btn_cancel'), 'callback_data': 'menu'}],
+        [{'text': u(chat_id, 'btn_cancel'), 'callback_data': 'cancel'}],
     ]}
     return text, kb
 
@@ -4200,7 +4214,7 @@ def action_unl_days(chat_id, devices):
     if not rows:
         send_message(chat_id, u(chat_id, 'unl_unavailable'))
         return
-    rows.append([{'text': '↩️', 'callback_data': 'buy_unl'}, {'text': u(chat_id, 'btn_cancel'), 'callback_data': 'menu'}])
+    rows.append([{'text': '↩️', 'callback_data': 'buy_unl'}, {'text': u(chat_id, 'btn_cancel'), 'callback_data': 'cancel'}])
     send_message(chat_id, u(chat_id, 'unl_pick_days', divider=DIVIDER, devices=devices, wallet=f'{get_wallet_db(chat_id):,}'),
                  reply_markup={'inline_keyboard': rows})
 
@@ -4209,7 +4223,7 @@ def action_proxy_menu(chat_id):
     mn, mx = proxy_limits()
     cur = u(chat_id, 'cur')
     rows = [[{'text': u(chat_id, 'proxy_gb_option_btn', gb=g, price=f'{proxy_price(g):,}', cur=cur), 'callback_data': 'proxy_gb_' + str(g)}] for g in proxy_gb_options()]
-    rows.append([{'text': u(chat_id, 'btn_cancel'), 'callback_data': 'menu'}])
+    rows.append([{'text': u(chat_id, 'btn_cancel'), 'callback_data': 'cancel'}])
     user_steps[str(chat_id)] = {'step': 'proxy_ask_gb'}
     send_message(chat_id, u(chat_id, 'proxy_pick_gb', divider=DIVIDER, min_gb=_fmt_gb(mn), max_gb=_fmt_gb(mx),
                             ppg=f'{proxy_price_per_gb():,}', wallet=f'{get_wallet_db(chat_id):,}'),
@@ -5040,7 +5054,7 @@ def get_updates(offset=None):
         return {'ok': False, 'result': []}
 
 
-def send_message(chat_id, text, parse_mode='HTML', reply_markup=None):
+def _raw_send_message(chat_id, text, parse_mode='HTML', reply_markup=None):
     url = BASE_URL + '/sendMessage'
     payload = {'chat_id': chat_id, 'text': text}
     if parse_mode:
@@ -5082,6 +5096,177 @@ def edit_message(chat_id, message_id, text, parse_mode='HTML', reply_markup=None
         return res.json()
     except Exception:
         return {'ok': False}
+
+
+# ---------------------------------------------------------------------------
+# «یک صفحه‌ی زنده» برای هر کاربر
+# قبلاً هر دکمه/دستور یک پیام جدید می‌ساخت (فقط برای خرید ۶ تا ۷ پیام). حالا:
+#  - وقتی کاربر یک دکمه‌ی شیشه‌ای می‌زنه، همون پیامی که دکمه روشه با
+#    editMessageText عوض می‌شه (نه پیام تازه).
+#  - وقتی کاربر از کیبورد پایین یا دستور (/buy ...) چیزی می‌خواد، صفحه‌ی قبلیِ ربات
+#    با deleteMessage پاک می‌شه و صفحه‌ی جدید جاش میاد.
+#  - پیام‌های نهایی (لینک کانفیگ، رسید و...) با final=True فرستاده می‌شن و هیچ‌وقت
+#    ویرایش/حذف نمی‌شن.
+#  - پیام‌های بین چت‌ها (مثلاً اعلان به ادمین) و پیام‌های پس‌زمینه دست‌نخورده می‌مونن.
+# اگه ویرایش/حذف شکست بخوره، ربات مثل قبل پیام جدید می‌فرسته؛ پس چیزی خراب نمی‌شه.
+# کلید خاموش‌کردن اضطراری: تنظیم inplace_ui = 0 تو جدول settings.
+# ---------------------------------------------------------------------------
+_UI = threading.local()
+_SCREENS = {}
+_SCREENS_LOCK = threading.Lock()
+_SCREENS_MAX = 20000
+
+
+def _ui_enabled():
+    try:
+        return str(get_setting('inplace_ui', '1')).strip() not in ('0', 'false', 'off', 'no')
+    except Exception:
+        return True
+
+
+def _ui_sig(text, markup):
+    try:
+        raw = json.dumps([text, markup], sort_keys=True, ensure_ascii=False, default=str)
+    except Exception:
+        raw = repr((text, markup))
+    return hashlib.md5(raw.encode('utf-8', 'ignore')).hexdigest()
+
+
+def _ui_get(chat_id):
+    with _SCREENS_LOCK:
+        return _SCREENS.get(str(chat_id))
+
+
+def _ui_set(chat_id, mid, sig):
+    with _SCREENS_LOCK:
+        if len(_SCREENS) > _SCREENS_MAX:
+            for k in list(_SCREENS.keys())[:_SCREENS_MAX // 4]:
+                _SCREENS.pop(k, None)
+        _SCREENS[str(chat_id)] = {'mid': mid, 'sig': sig}
+
+
+def _ui_untrack(chat_id):
+    with _SCREENS_LOCK:
+        _SCREENS.pop(str(chat_id), None)
+
+
+def _ui_is_inline(markup):
+    return isinstance(markup, dict) and 'inline_keyboard' in markup
+
+
+def _ui_mid(res):
+    try:
+        return int(res['result']['message_id'])
+    except Exception:
+        return None
+
+
+def drop_screen(chat_id):
+    """صفحه‌ی زنده‌ی قبلیِ این کاربر (اگه باشه) رو پاک می‌کنه."""
+    cur = _ui_get(chat_id)
+    if cur:
+        _ui_untrack(chat_id)
+        delete_message(chat_id, cur['mid'])
+
+
+def _ui_send(ctx, chat_id, text, parse_mode, reply_markup, transient, final):
+    inline = reply_markup is None or _ui_is_inline(reply_markup)
+    cur = _ui_get(chat_id)
+    sig = _ui_sig(text, reply_markup)
+
+    if ctx['kind'] == 'cb':
+        mid = ctx['mid']
+        can_edit = inline and cur is not None and cur['mid'] == mid and (not ctx['used'] or ctx['reuse'])
+        if can_edit:
+            ok = False
+            if cur['sig'] == sig:
+                ok = True                      # دقیقاً همین صفحه‌ست؛ نیازی به ویرایش نیست
+            else:
+                r = edit_message(chat_id, mid, text, parse_mode, reply_markup)
+                if isinstance(r, dict) and r.get('ok'):
+                    ok = True
+                elif 'not modified' in str((r or {}).get('description', '')).lower():
+                    ok = True
+            if ok:
+                ctx['used'] = True
+                ctx['reuse'] = bool(transient)
+                if final:
+                    _ui_untrack(chat_id)
+                else:
+                    _ui_set(chat_id, mid, sig)
+                return {'ok': True, 'result': {'message_id': mid}}
+            # ویرایش نشد (مثلاً HTML خراب): همون صفحه‌ی قدیمی پاک می‌شه و پیام تازه می‌ره
+            first_new = True
+            stale = mid
+        else:
+            first_new = not ctx['used']
+            stale = cur['mid'] if (cur and first_new) else None
+        if not inline:
+            # کیبورد معمولی (reply keyboard) با ویرایش قابل تنظیم نیست
+            if cur and first_new:
+                _ui_untrack(chat_id)
+                delete_message(chat_id, cur['mid'])
+            return _raw_send_message(chat_id, text, parse_mode, reply_markup)
+        res = _raw_send_message(chat_id, text, parse_mode, reply_markup)
+        if isinstance(res, dict) and res.get('ok'):
+            if stale is not None:
+                delete_message(chat_id, stale)
+            ctx['used'] = True
+            ctx['reuse'] = bool(transient)
+            nm = _ui_mid(res)
+            if final or reply_markup is None or nm is None:
+                _ui_untrack(chat_id) if (final or stale is not None) else None
+            else:
+                _ui_set(chat_id, nm, sig)
+        return res
+
+    # --- پیام متنی/دستور کاربر ---
+    if reply_markup is not None and inline:
+        res = _raw_send_message(chat_id, text, parse_mode, reply_markup)
+        if isinstance(res, dict) and res.get('ok'):
+            if cur:
+                delete_message(chat_id, cur['mid'])
+            nm = _ui_mid(res)
+            if nm is not None and not final:
+                _ui_set(chat_id, nm, sig)
+            else:
+                _ui_untrack(chat_id)
+        return res
+    res = _raw_send_message(chat_id, text, parse_mode, reply_markup)
+    try:
+        # کاربر جواب مرحله‌ی قبل رو تایپ کرده و مرحله عوض شده/تموم شده: دکمه‌ی انصرافِ پیام قبلی دیگه به‌درد نمی‌خوره
+        if cur and ctx.get('step0') and isinstance(res, dict) and res.get('ok') \
+                and (user_steps.get(str(chat_id)) or {}).get('step') != ctx['step0']:
+            _ui_untrack(chat_id)
+            delete_message(chat_id, cur['mid'])
+    except Exception:
+        pass
+    return res
+
+
+def send_message(chat_id, text, parse_mode='HTML', reply_markup=None, final=False, transient=False):
+    """final=True: پیام نهایی (لینک کانفیگ و...) که نباید بعداً ویرایش/حذف بشه.
+    transient=True: پیام موقت («در حال ساخت...») که پیام بعدی جاش رو می‌گیره."""
+    ctx = getattr(_UI, 'ctx', None)
+    if ctx is None or str(ctx['chat']) != str(chat_id) or not _ui_enabled():
+        return _raw_send_message(chat_id, text, parse_mode, reply_markup)
+    try:
+        return _ui_send(ctx, chat_id, text, parse_mode, reply_markup, transient, final)
+    except Exception as e:
+        print('⚠️ صفحه‌ی زنده (ui) خطا داد، پیام عادی فرستاده شد:', e)
+        return _raw_send_message(chat_id, text, parse_mode, reply_markup)
+
+
+def flow_end(chat_id, kind='cancel', text_key=None):
+    """پایان یک مسیر (انصراف / صفحه‌ی منقضی / بازگشت): به‌جای نشان‌دادن دوباره‌ی پیام اولیه‌ی
+    منو، یه پیام کوتاه جای صفحه‌ی فعلی میاد. پیام اولیه‌ی منو فقط با /start نشون داده می‌شه.
+    تو حالت اینلاین یه دکمه‌ی «منوی اصلی» هم زیرش هست تا کاربر گیر نکنه."""
+    user_steps[str(chat_id)] = {}
+    key = text_key or {'cancel': 'flow_cancelled', 'expired': 'flow_expired', 'home': 'flow_home'}.get(kind, 'flow_cancelled')
+    markup = None
+    if get_keyboard_style() == 'inline':
+        markup = {'inline_keyboard': [[{'text': u(chat_id, 'btn_back_menu'), 'callback_data': 'menu'}]]}
+    send_message(chat_id, u(chat_id, key), reply_markup=markup)
 
 
 def send_photo(chat_id, photo_id, caption=None, parse_mode='HTML', reply_markup=None):
@@ -5436,7 +5621,7 @@ def build_quantity_screen(chat_id, step_data):
                 {'text': u(chat_id, 'btn_qty_plus'), 'callback_data': 'qty_days_inc'},
             ],
             [{'text': u(chat_id, 'qty_continue'), 'callback_data': 'qty_confirm'}],
-            [{'text': u(chat_id, 'btn_cancel'), 'callback_data': 'menu'}],
+            [{'text': u(chat_id, 'btn_cancel'), 'callback_data': 'cancel'}],
         ]
     }
     return text, kb
@@ -5449,7 +5634,7 @@ def send_ask_label_prompt(chat_id):
         reply_markup={
             'inline_keyboard': [
                 [{'text': u(chat_id, 'ask_label_skip'), 'callback_data': 'skip_label'}],
-                [{'text': u(chat_id, 'btn_cancel'), 'callback_data': 'menu'}],
+                [{'text': u(chat_id, 'btn_cancel'), 'callback_data': 'cancel'}],
             ]
         }
     )
@@ -5928,7 +6113,7 @@ def start_crypto_topup(chat_id):
         user_steps[str(chat_id)] = {'step': 'choose_topup_coin'}
         send_message(chat_id, u(chat_id, 'topup_choose_coin'), reply_markup={'inline_keyboard': (
             [[{'text': c['label'], 'callback_data': 'tpc_' + c['id']}] for c in coins]
-            + [[{'text': u(chat_id, 'btn_cancel'), 'callback_data': 'menu'}]])})
+            + [[{'text': u(chat_id, 'btn_cancel'), 'callback_data': 'cancel'}]])})
 
 
 def handle_crypto_declared_amount(chat_id, step, text):
@@ -6033,7 +6218,7 @@ def show_topup_method_choice(chat_id):
         rows.append([{'text': u(chat_id, 'btn_topup_card'), 'callback_data': 'tpm_card'}])
     if crypto_enabled():
         rows.append([{'text': u(chat_id, 'btn_topup_crypto'), 'callback_data': 'tpm_crypto'}])
-    rows.append([{'text': u(chat_id, 'btn_cancel'), 'callback_data': 'menu'}])
+    rows.append([{'text': u(chat_id, 'btn_cancel'), 'callback_data': 'cancel'}])
     send_message(chat_id, u(chat_id, 'topup_choose_method_first'), reply_markup={'inline_keyboard': rows})
 
 
@@ -6054,7 +6239,7 @@ def show_coin_choice(chat_id, amount, coins):
     user_steps[str(chat_id)] = {'step': 'choose_topup_coin', 'amount': amount}
     send_message(chat_id, u(chat_id, 'topup_choose_coin'), reply_markup={'inline_keyboard': (
         [[{'text': c['label'], 'callback_data': 'tpc_' + c['id']}] for c in coins]
-        + [[{'text': u(chat_id, 'btn_cancel'), 'callback_data': 'menu'}]])})
+        + [[{'text': u(chat_id, 'btn_cancel'), 'callback_data': 'cancel'}]])})
 
 
 def proceed_after_topup_amount(chat_id, amount, method):
@@ -6201,7 +6386,7 @@ def _action_trial_impl(chat_id, confirmed=False, expected_price=None):
                                     trial_days=str(trial_days), price=paid_price, wallet=wallet),
                          reply_markup={'inline_keyboard': [[
                              {'text': u(chat_id, 'btn_trial_pay'), 'callback_data': 'trial_pay_yes'},
-                             {'text': u(chat_id, 'btn_cancel'), 'callback_data': 'menu'}]]})
+                             {'text': u(chat_id, 'btn_cancel'), 'callback_data': 'cancel'}]]})
             return
     charged = 0
     try:
@@ -6214,7 +6399,7 @@ def _action_trial_impl(chat_id, confirmed=False, expected_price=None):
                              reply_markup={'inline_keyboard': [[{'text': u(chat_id, 'btn_topup'), 'callback_data': 'menu_topup'}]]})
                 return
             charged = paid_price
-        send_message(chat_id, u(chat_id, 'trial_building') if lang == 'en' else get_bot_text('trial_building', DEFAULT_TRIAL_BUILDING))
+        send_message(chat_id, u(chat_id, 'trial_building') if lang == 'en' else get_bot_text('trial_building', DEFAULT_TRIAL_BUILDING), transient=True)
         proto = get_trial_proto()
         res, trial_label = None, None
         for attempt in range(5):
@@ -6243,7 +6428,7 @@ def _action_trial_impl(chat_id, confirmed=False, expected_price=None):
                     sub_url=str(res['sub_url']), divider=DIVIDER,
                     trial_gb='%g' % trial_gb, trial_days=str(trial_days),
                 )
-            send_message(chat_id, trial_text)
+            send_message(chat_id, trial_text, final=True)
         else:
             # فقط وقتی پنل صراحتاً بگه «این تست قبلاً گرفته شده» کاربر رو ثبت می‌کنیم.
             # استثناهای شبکه و خطاهای عمومی (مثل label_duplicate) کاربر رو «تست‌گرفته» نمی‌کنن.
@@ -7123,11 +7308,12 @@ _TEXT_GROUP_RULES = [
     (('account_', 'btn_account'), '👤 حساب من'),
     (('guide_', 'plat_', 'btn_guide'), '📲 اپ و دانلود'),
     (('lang_', 'btn_language'), '🌐 زبان'),
+    (('flow_',), '🧭 لغو و پایان مراحل'),
     (('welcome_', 'main_menu', 'kb_'), '🏠 منوی اصلی و خوش‌آمدگویی'),
     (('cur', 'unit_'), '🔢 واحدها'),
 ]
 _GROUP_DISPLAY_ORDER = [
-    '🔘 دکمه‌های منوی اصلی و نوع سرویس', '🏠 منوی اصلی و خوش‌آمدگویی', '🛒 صفحه‌ی اصلی خرید', '♾ پلن نامحدود', '📡 پروکسی تلگرام', '📦 بسته‌های آماده', '🛠 خرید دلخواه (حجم و مدت)', '🛍 خرید، فاکتور و سفارشات', '🗂 کانفیگ‌های من و مدیریت', '🗑 حذف کانفیگ',
+    '🔘 دکمه‌های منوی اصلی و نوع سرویس', '🏠 منوی اصلی و خوش‌آمدگویی', '🧭 لغو و پایان مراحل', '🛒 صفحه‌ی اصلی خرید', '♾ پلن نامحدود', '📡 پروکسی تلگرام', '📦 بسته‌های آماده', '🛠 خرید دلخواه (حجم و مدت)', '🛍 خرید، فاکتور و سفارشات', '🗂 کانفیگ‌های من و مدیریت', '🗑 حذف کانفیگ',
     '🧪 تست رایگان', '💠 شارژ کیف پول', '🎧 پشتیبانی', '👤 حساب من', '📲 اپ و دانلود', '🌐 زبان',
     '🏪 فروشندگی (پنل فروشنده)', '🎁 دعوت دوستان', '🔔 هشدار و یادآوری به کاربر', '📢 عضویت اجباری در کانال', '💱 مبدل و پرداخت رمزارز/دونیتو', '🛠 پیام‌های ادمین و سیستمی', '🔢 واحدها', '🔘 دکمه‌ها و سایر',
 ]
@@ -7150,6 +7336,9 @@ def _is_obsolete_seller_key(key):
 
 
 TEXT_WHERE = {
+    'flow_cancelled': '🧭 پیامی که بعد از زدن «انصراف» جای صفحه‌ی فعلی میاد (به‌جای نمایش دوباره‌ی پیام اولیه‌ی منو)',
+    'flow_expired': '🧭 وقتی کاربر دکمه‌ی یه صفحه‌ی قدیمی/منقضی‌شده رو می‌زنه',
+    'flow_home': '🧭 پیام «بازگشت به منو» تو حالت کیبورد پایین (دکمه‌ی 🏠 منوی اصلی)',
     'buy_hub_text': '🛍 صفحه‌ای که بعد از زدن «خرید کانفیگ» میاد (بالای دکمه‌های پلن نامحدود / پروکسی / بسته‌ها / خرید دلخواه)',
     'buy_menu_text': '🛠 فقط صفحه‌ی «خرید دلخواه (انتخاب حجم و مدت)»؛ صفحه‌ی اصلی خرید نیست (اون «buy_hub_text» ـه)',
     'plans_menu_text': '📦 صفحه‌ی «بسته‌های آماده»',
@@ -7757,7 +7946,7 @@ threading.Thread(target=config_alerts_watcher, daemon=True).start()
 print('✅ ربات با موفقیت اجرا شد.')
 last_update_id = 0
 
-def process_update(update):
+def _process_update_impl(update):
     """یک آپدیت تلگرام (پیام یا callback) رو پردازش می‌کنه. قبلاً این کد مستقیم
     داخل حلقه‌ی اصلی بود؛ یعنی وقتی برای یه کاربر یه کار کند (مثلاً ساخت
     کانفیگ روی پنل که چند ثانیه طول می‌کشه) در حال انجام بود، بات کلاً برای
@@ -7784,13 +7973,12 @@ def process_update(update):
             if _cb:
                 run_custom_button(chat_id, _cb)
             else:
-                main_menu(chat_id)
+                flow_end(chat_id, 'expired')
 
         elif data in ('setlang_fa', 'setlang_en'):
             new_lang = 'fa' if data == 'setlang_fa' else 'en'
             set_user_lang(chat_id, new_lang)
-            send_message(chat_id, u(new_lang, 'lang_changed'))
-            main_menu(chat_id)
+            main_menu(chat_id, note=u(new_lang, 'lang_changed'))
 
         elif data == 'reseller_activate':
             if _sync_seller_account(chat_id)[0]:
@@ -7937,7 +8125,7 @@ def process_update(update):
                             reply_markup={'inline_keyboard': [[{'text': u(chat_id, 'btn_topup'), 'callback_data': 'menu_topup'}]]}
                         )
                         return
-                    send_message(chat_id, u(chat_id, 'building_config'))
+                    send_message(chat_id, u(chat_id, 'building_config'), transient=True)
                     try:
                         if ctype == 'unlimited':
                             res = make_unlimited(s.get('devices') or 1, days, label,
@@ -7986,7 +8174,7 @@ def process_update(update):
                                 gb=gb, label=label, days=days, price=price,
                                 output_label=output_label, sub_url=res['sub_url'],
                             )
-                        send_message(chat_id, success_text, reply_markup=_kb)
+                        send_message(chat_id, success_text, reply_markup=_kb, final=True)
                         if price and price > 0:
                             process_referral_reward(chat_id, 'purchase', price)   # بعد از پیام موفقیت، تا خریدار معطل نشه
                     else:
@@ -8019,7 +8207,7 @@ def process_update(update):
                 # چون کیبورد (چه reply چه دکمه‌ی Menu تلگرام) خودش همیشه در
                 # دسترسه، نیازی به این پیام‌ِ اضافه نیست.
             else:
-                main_menu(chat_id)
+                flow_end(chat_id, 'expired')
 
         elif data == 'ask_discount_code':
             s = user_steps.get(str(chat_id), {})
@@ -8031,7 +8219,7 @@ def process_update(update):
                     reply_markup={'inline_keyboard': [[{'text': u(chat_id, 'btn_cancel'), 'callback_data': 'buy_discount_cancel'}]]}
                 )
             else:
-                main_menu(chat_id)
+                flow_end(chat_id, 'expired')
 
         elif data == 'buy_discount_cancel':
             s = user_steps.get(str(chat_id), {})
@@ -8039,11 +8227,19 @@ def process_update(update):
                 user_steps[str(chat_id)]['step'] = 'confirm_buy'
                 send_message(chat_id, build_purchase_invoice(chat_id, user_steps[str(chat_id)]), reply_markup=build_purchase_kb(chat_id))
             else:
-                main_menu(chat_id)
+                flow_end(chat_id, 'expired')
 
-        elif data == 'cancel_purchase' or data == 'menu':
+        elif data in ('cancel_purchase', 'cancel'):
+            flow_end(chat_id, 'cancel')
+
+        elif data == 'menu':
+            # دکمه‌ی صریح «منوی اصلی»: تو حالت اینلاین همون پیام به منو تبدیل می‌شه؛
+            # تو حالت کیبورد معمولی کیبورد پایین همیشه هست، پس فقط یه پیام کوتاه.
             user_steps[str(chat_id)] = {}
-            main_menu(chat_id)
+            if get_keyboard_style() == 'inline':
+                main_menu(chat_id)
+            else:
+                flow_end(chat_id, 'home')
 
         elif data == 'confdel_yes':
             s = user_steps.get(str(chat_id), {})
@@ -8064,8 +8260,7 @@ def process_update(update):
 
         elif data == 'confdel_no':
             user_steps[str(chat_id)] = {}
-            send_message(chat_id, u(chat_id, 'delete_cancelled'))
-            main_menu(chat_id)
+            flow_end(chat_id, 'cancel', 'delete_cancelled')
 
         # ---------------- مدیریت کانفیگ (تمدید/تغییر نام/توقف/ازسرگیری/تغییر لینک) ----------------
 
@@ -8199,7 +8394,7 @@ def process_update(update):
                 user_steps[str(chat_id)] = {}      # یک‌بار مصرف؛ دوبار زدن دکمه دوبار پول کم نمی‌کنه
                 action_trial(chat_id, confirmed=True, expected_price=_ts.get('price'))
             else:
-                main_menu(chat_id)
+                flow_end(chat_id, 'expired')
 
         elif data == 'extconfirm_yes':
             s = user_steps.get(str(chat_id), {})
@@ -8262,13 +8457,12 @@ def process_update(update):
 
         elif data == 'extconfirm_no':
             user_steps[str(chat_id)] = {}
-            send_message(chat_id, u(chat_id, 'ext_cancelled'))
-            main_menu(chat_id)
+            flow_end(chat_id, 'cancel', 'ext_cancelled')
 
         elif data in ('unl_dev_inc', 'unl_dev_dec', 'unl_days_inc', 'unl_days_dec', 'unl_days_inc7', 'unl_days_dec7'):
             _st = user_steps.get(str(chat_id), {})
             if _st.get('step') != 'pick_unl' or not unl_available():
-                main_menu(chat_id)
+                flow_end(chat_id, 'expired')
             else:
                 unl_adjust(_st, data)
                 _t, _k = build_unl_screen(chat_id, _st)
@@ -8383,7 +8577,7 @@ def process_update(update):
         elif data in ('qty_gb_inc', 'qty_gb_dec', 'qty_days_inc', 'qty_days_dec'):
             s = user_steps.get(str(chat_id), {})
             if s.get('step') != 'pick_quantity':
-                main_menu(chat_id)
+                flow_end(chat_id, 'expired')
             else:
                 if data == 'qty_gb_inc':
                     s['gb'] = min(s['gb'] + 1, get_buy_max_gb())
@@ -8402,7 +8596,7 @@ def process_update(update):
         elif data == 'qty_confirm':
             s = user_steps.get(str(chat_id), {})
             if s.get('step') != 'pick_quantity':
-                main_menu(chat_id)
+                flow_end(chat_id, 'expired')
             else:
                 ctype = s.get('type', 'both')
                 cfg_type = get_config_types().get(ctype, get_config_types()['both'])
@@ -8429,7 +8623,7 @@ def process_update(update):
                 }
                 send_message(chat_id, build_purchase_invoice(chat_id, user_steps[str(chat_id)]), reply_markup=build_purchase_kb(chat_id))
             else:
-                main_menu(chat_id)
+                flow_end(chat_id, 'expired')
 
 
 
@@ -8450,7 +8644,7 @@ def process_update(update):
         elif data in ('tpm_card', 'tpm_crypto', 'tpm_donito'):
             s_ = user_steps.get(str(chat_id), {})
             if s_.get('step') != 'choose_topup_method':
-                main_menu(chat_id)
+                flow_end(chat_id, 'expired')
             elif data == 'tpm_donito':
                 if donito_enabled():
                     ask_topup_amount_for(chat_id, 'donito')
@@ -8483,14 +8677,14 @@ def process_update(update):
             if _req and _req[1] == chat_id and _req[3] == 'pending':
                 donito_check_for_user_async(chat_id, _rid)
             else:
-                main_menu(chat_id)
+                flow_end(chat_id, 'expired')
 
         elif data.startswith('tpc_'):
             s_ = user_steps.get(str(chat_id), {})
             coins = get_crypto_coins() if crypto_enabled() else []
             coin = next((c for c in coins if 'tpc_' + c['id'] == data), None)
             if s_.get('step') != 'choose_topup_coin' or not coin:
-                main_menu(chat_id)
+                flow_end(chat_id, 'expired')
             else:
                 send_crypto_deposit_info(chat_id, coin)
 
@@ -8559,6 +8753,7 @@ def process_update(update):
         elif text == '/start' or text.startswith('/start '):
             add_user(chat_id)
             user_steps[str(chat_id)] = {}
+            drop_screen(chat_id)      # پیام اولیه‌ی منو فقط با /start؛ صفحه‌ی قبلی پاک می‌شه
             main_menu(chat_id)
             process_referral_reward(chat_id, 'join')
 
@@ -10475,6 +10670,30 @@ def _prefilter_update(update):
     except Exception as e:
         print('⚠️ prefilter:', e)
     return False, None
+
+
+def process_update(update):
+    """context «صفحه‌ی زنده» رو برای این آپدیت تنظیم می‌کنه و هندلر اصلی رو صدا می‌زنه."""
+    ctx = None
+    try:
+        if 'callback_query' in update:
+            _m = update['callback_query'].get('message') or {}
+            _cid = (_m.get('chat') or {}).get('id')
+            _mid = _m.get('message_id')
+            if _cid is not None and _mid is not None:
+                ctx = {'kind': 'cb', 'chat': _cid, 'mid': _mid, 'used': False, 'reuse': False}
+        elif 'message' in update:
+            _cid = (update['message'].get('chat') or {}).get('id')
+            if _cid is not None:
+                ctx = {'kind': 'msg', 'chat': _cid, 'mid': None, 'used': False, 'reuse': False,
+                       'step0': (user_steps.get(str(_cid)) or {}).get('step')}
+    except Exception:
+        ctx = None
+    _UI.ctx = ctx
+    try:
+        return _process_update_impl(update)
+    finally:
+        _UI.ctx = None
 
 
 def safe_process_update(update):
