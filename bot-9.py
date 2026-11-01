@@ -527,6 +527,17 @@ UI_TEXT = {
         'rotate_success': '🔄 لینک کانفیگ «{label}» تغییر کرد:\n<code>{sub_url}</code>',
         'rotate_success_no_url': '🔄 لینک تغییر کرد؛ برای دیدن لینک جدید، دوباره «کانفیگ‌های من» را بزنید.',
         'rotate_error': '❌ خطا در تغییر لینک. لطفاً بعداً دوباره تلاش کنید.',
+        'rotate_confirm': (
+            '⚠️ <b>تغییر لینک کانفیگ «{label}»</b>\n{divider}\n'
+            'با تغییر لینک، <b>لینک قبلی از کار می‌افتد</b> و باید لینک جدید را دوباره در برنامه‌ی خود وارد کنید.\n\n'
+            'مطمئنید می‌خواهید لینک عوض شود؟'
+        ),
+        'btn_rotate_yes': '✅ بله، لینک عوض شود',
+        'btn_cfg_delete': '🗑 حذف کانفیگ',
+        'qr_cooldown': (
+            '⏳ برای جلوگیری از سنگین‌شدن ربات، دریافت QR Code هر {minutes} دقیقه یک‌بار ممکن است.\n'
+            'حدود {wait} دقیقه‌ی دیگر دوباره تلاش کنید. (لینک اشتراک را می‌توانید از «کانفیگ‌های من» کپی کنید.)'
+        ),
         'myconfigs_empty': '📭 هنوز هیچ کانفیگی ثبت نکرده‌اید.',
         'delete_prompt': '🗑 شماره ردیف کانفیگ مورد نظر برای حذف را ارسال کنید:',
         'delete_empty': '📭 کانفیگی برای حذف وجود ندارد.',
@@ -827,6 +838,17 @@ UI_TEXT = {
         'rotate_success': '🔄 The link for config "{label}" was changed:\n<code>{sub_url}</code>',
         'rotate_success_no_url': '🔄 The link was changed; tap "My Configs" again to see the new link.',
         'rotate_error': '❌ Error changing the link. Please try again later.',
+        'rotate_confirm': (
+            '⚠️ <b>Change the link of "{label}"</b>\n{divider}\n'
+            'After the change, <b>the old link stops working</b> and you must enter the new link in your app again.\n\n'
+            'Are you sure?'
+        ),
+        'btn_rotate_yes': '✅ Yes, change the link',
+        'btn_cfg_delete': '🗑 Delete config',
+        'qr_cooldown': (
+            '⏳ To keep the bot fast, the QR Code can be requested once every {minutes} minutes.\n'
+            'Please try again in about {wait} min. (You can copy the link from "My Configs".)'
+        ),
         'myconfigs_empty': "📭 You haven't registered any configs yet.",
         'delete_prompt': '🗑 Send the row number of the config you want to delete:',
         'delete_empty': '📭 There are no configs to delete.',
@@ -4293,6 +4315,8 @@ def _send_extra_manage_panel(chat_id, cfg, note=None):
                  [{'text': u(chat_id, 'btn_qr'), 'callback_data': 'cfgqr_' + str(row_id)}],
                  [{'text': u(chat_id, 'btn_open_proxy'), 'url': str(cfg[1])}]]
         extra = u(chat_id, 'manage_volume', gb=_fmt_gb(cfg[3])) + '\n'
+    if is_feature_enabled('delete_config'):
+        rows.append([{'text': u(chat_id, 'btn_cfg_delete'), 'callback_data': 'cfgdel_' + str(row_id)}])
     rows.append([{'text': u(chat_id, 'btn_close'), 'callback_data': 'menu'}])
     text = (u(chat_id, 'manage_title') + '\n' + DIVIDER + '\n' + u(chat_id, 'manage_name', label=cfg[4]) + '\n' + extra +
             u(chat_id, 'extra_days_left', days=days_remaining(cfg[8])) + '\n' + status_line + '\n' + u(chat_id, 'manage_footer'))
@@ -4503,7 +4527,7 @@ def get_config_usage_gb(config_id):
 
 
 def delete_config_from_panel_strict(config_id):
-    """'ok' | 'gone' (روی پنل وجود نداره) | 'fail'. فقط با ok/gone اجازه‌ی حذف از دیتابیس و بازپرداخت داریم.
+    """'ok' | 'gone' (روی پنل وجود نداره) | 'disabled' (روی پنل غیرفعاله و حذف نمی‌شه) | 'fail'. فقط با ok/gone اجازه‌ی حذف از دیتابیس و بازپرداخت داریم.
     نکته‌ی مهم: پنل حذفِ کانفیگ «غیرفعال/متوقف» رو با خطای 400 not_active رد می‌کنه
     ('Config is already disabled'). پس در این حالت اول ازسرگیری و بعد حذف می‌کنیم.
     هر 2xx موفقیته؛ 404/410 یعنی قبلاً حذف شده؛ روی خطای شبکه/5xx/429 هم دوباره تلاش می‌کنه."""
@@ -4529,7 +4553,13 @@ def delete_config_from_panel_strict(config_id):
                     rr = resume_config_on_panel(config_id)
                     print('↩️ ازسرگیری کانفیگ قبل از حذف:', config_id, rr.get('success'), str(rr.get('error') or '')[:200])
                 except Exception as _re:
+                    rr = {'success': False, 'error': str(_re)}
                     print('⚠️ ازسرگیری قبل از حذف ناموفق:', _re)
+                if not rr.get('success') and 'resume_failed' in str(rr.get('error') or ''):
+                    # کانفیگ «متوقف» نیست بلکه روی پنل غیرفعال (disabled) شده و پنل حذفش رو نمی‌پذیره؛
+                    # دیگه کسی نمی‌تونه ازش استفاده کنه، پس از لیست کاربر پاک می‌شه (بدون تلاش بیشتر).
+                    print('ℹ️ کانفیگ روی پنل غیرفعال است و حذف‌پذیر نیست؛ فقط از ربات پاک می‌شود:', config_id)
+                    return 'disabled'
                 time.sleep(0.7)
                 continue
             if code >= 500 or code in (408, 425, 429):
@@ -6895,9 +6925,11 @@ def send_manage_panel(chat_id, cfg, note=None):
             [{'text': u(chat_id, 'btn_qr'), 'callback_data': 'cfgqr_' + str(row_id)}],
             [toggle_btn],
             [{'text': u(chat_id, 'btn_rotate'), 'callback_data': 'cfgrotate_' + str(row_id)}],
-            [{'text': u(chat_id, 'btn_close'), 'callback_data': 'menu'}],
         ]
     }
+    if is_feature_enabled('delete_config'):
+        manage_kb['inline_keyboard'].append([{'text': u(chat_id, 'btn_cfg_delete'), 'callback_data': 'cfgdel_' + str(row_id)}])
+    manage_kb['inline_keyboard'].append([{'text': u(chat_id, 'btn_close'), 'callback_data': 'menu'}])
     text = (
         u(chat_id, 'manage_title') + '\n' + DIVIDER + '\n' +
         u(chat_id, 'manage_name', label=cfg[4]) + '\n' +
@@ -6909,6 +6941,53 @@ def send_manage_panel(chat_id, cfg, note=None):
     if note:
         text = note + '\n' + DIVIDER + '\n' + text
     send_message(chat_id, text, reply_markup=manage_kb)
+
+
+def _delete_refund_preview(cfg):
+    """(refund, used_gb|None) برای صفحه‌ی تایید حذف؛ همون منطق حذف واقعی."""
+    try:
+        config_id, gb, price = cfg[2], float(cfg[3] or 0), int(cfg[6] or 0)
+        ctype = cfg[9] if len(cfg) > 9 else 'config'
+        if ctype == 'unlimited':
+            total = int(cfg[5] or 0)
+            if total > 0 and price > 0:
+                return max(0, min(int(price * (min(days_remaining(cfg[8]), total) / float(total)) * get_refund_ratio()), price)), 0.0
+            return 0, 0.0
+        used = get_config_usage_gb(config_id) if config_id else None
+        if used is None or gb <= 0 or price <= 0:
+            return 0, None
+        used = min(max(float(used), 0.0), gb)
+        return max(0, min(int((price - used * (price / gb)) * get_refund_ratio()), price)), used
+    except Exception as e:
+        print('⚠️ پیش‌نمایش بازپرداخت حذف ناموفق:', e)
+        return 0, None
+
+
+def send_delete_confirm(chat_id, cfg):
+    """صفحه‌ی تایید حذف کانفیگ (از دکمه‌ی «حذف کانفیگ» تو مدیریت کانفیگ)."""
+    refund, used = _delete_refund_preview(cfg)
+    usage_note = u(chat_id, 'delete_usage_unknown') if used is None else ''
+    confirm_text = u(
+        chat_id, 'delete_confirm_title', divider=DIVIDER, label=cfg[4], gb=cfg[3],
+        used_gb=f'{(used or 0):.2f}', price=cfg[6], refund=refund, usage_note=usage_note,
+    )
+    kb = {'inline_keyboard': [[
+        {'text': u(chat_id, 'btn_delete_yes'), 'callback_data': 'confdel_yes'},
+        {'text': u(chat_id, 'btn_cancel'), 'callback_data': 'confdel_no'},
+    ]]}
+    user_steps[str(chat_id)] = {'step': 'confirm_delete', 'row_id': cfg[0], 'refund': refund}
+    send_message(chat_id, confirm_text, reply_markup=kb)
+
+
+# محدودیت دریافت QR Code (هر کاربر): پیش‌فرض ۳۰ دقیقه، قابل تغییر با تنظیم qr_cooldown_minutes
+_qr_last_sent = {}
+
+
+def _qr_cooldown_minutes():
+    try:
+        return max(0, int(float(get_setting('qr_cooldown_minutes', '30') or 30)))
+    except Exception:
+        return 30
 
 
 def action_delete_config_start(chat_id):
@@ -7203,6 +7282,7 @@ def main_menu(chat_id, note=None):
         order = [k for k in order if k != 'referral']   # دکمه‌ی دعوت دوستان تا وقتی از پنل روشن نشده نمایش داده نمی‌شه
     # دکمه‌ای که قابلیتش از پنل خاموش شده کلاً از منو حذف می‌شه؛ با روشن‌کردن دوباره برمی‌گرده
     order = [k for k in order if k not in MENU_BUTTON_FEATURE or is_feature_enabled(MENU_BUTTON_FEATURE[k])]
+    order = [k for k in order if k != 'delete']   # دکمه‌ی حذف کانفیگ به «مدیریت کانفیگ» منتقل شد
     style = get_keyboard_style()
 
     # تلگرام کیبورد ثابت (reply keyboard) رو یه لایه‌ی جدا از دکمه‌های شیشه‌ای
@@ -7338,9 +7418,9 @@ _TEXT_GROUP_RULES = [
       'proto_unavailable', 'dns_unavailable', 'server_error', 'btn_buy', 'btn_sub_page', 'svc_',
       'btn_reorder', 'reorder_', 'recentorders', 'btn_recentorders', 'price_unit_suffix'), '🛍 خرید، فاکتور و سفارشات'),
     (('manage_', 'btn_manage', 'btn_extend', 'btn_rename', 'btn_qr', 'btn_pause', 'btn_resume', 'btn_rotate',
-      'btn_close', 'btn_confirm_pay', 'ext_', 'rename_', 'qr_', 'pause_', 'resume_', 'rotate_', 'myconfigs', 'config_not_found',
+      'btn_close', 'btn_confirm_pay', 'btn_rotate_yes', 'ext_', 'rename_', 'qr_', 'pause_', 'resume_', 'rotate_', 'myconfigs', 'config_not_found',
       'btn_myconfigs'), '🗂 کانفیگ‌های من و مدیریت'),
-    (('delete_', 'btn_delete'), '🗑 حذف کانفیگ'),
+    (('delete_', 'btn_delete', 'btn_cfg_delete'), '🗑 حذف کانفیگ'),
     (('trial_', 'btn_trial'), '🧪 تست رایگان'),
     (('topup_', 'btn_topup', 'number_only_error', 'crypto_'), '💠 شارژ کیف پول'),
     (('support_', 'btn_support'), '🎧 پشتیبانی'),
@@ -7882,7 +7962,7 @@ def config_alerts_watcher():
 # هیچ رمز/کلیدی تو user_steps نیست (رمز فروشنده فقط ارسال می‌شه و ذخیره نمی‌شه).
 # ---------------------------------------------------------------------------
 _STEPS_TTL = 6 * 3600
-_STEPS_NO_RESTORE = {'confirm_buy', 'ext_confirm', 'trial_pay_confirm', 'confirm_delete', 'buy_enter_discount', 'pick_quantity'}
+_STEPS_NO_RESTORE = {'confirm_buy', 'ext_confirm', 'trial_pay_confirm', 'confirm_delete', 'rotate_confirm', 'buy_enter_discount', 'pick_quantity'}
 _steps_saved = {}
 
 
@@ -8373,14 +8453,22 @@ def _process_update_impl(update):
             elif not QRCODE_AVAILABLE:
                 send_message(chat_id, u(chat_id, 'qr_not_available'))
             else:
-                try:
-                    qr_buf = generate_qr_png_bytes(str(cfg[1]))
-                    send_photo_bytes(
-                        chat_id, qr_buf, filename='qr_' + str(row_id) + '.png',
-                        caption=u(chat_id, 'qr_caption', label=cfg[4], divider=DIVIDER, sub_url=cfg[1])
-                    )
-                except Exception:
-                    send_message(chat_id, u(chat_id, 'qr_error'))
+                _qr_cd = _qr_cooldown_minutes() * 60
+                _qr_left = _qr_cd - (time.time() - _qr_last_sent.get(str(chat_id), 0.0))
+                if _qr_cd > 0 and _qr_left > 0 and str(chat_id) != str(ADMIN_ID):
+                    send_message(chat_id, u(chat_id, 'qr_cooldown', minutes=_qr_cooldown_minutes(),
+                                            wait=max(1, int(math.ceil(_qr_left / 60.0)))))
+                else:
+                    _qr_last_sent[str(chat_id)] = time.time()     # قبل از ساخت ثبت می‌شه تا کلیک‌های پشت‌سرهم هم‌زمان رد نشن
+                    try:
+                        qr_buf = generate_qr_png_bytes(str(cfg[1]))
+                        send_photo_bytes(
+                            chat_id, qr_buf, filename='qr_' + str(row_id) + '.png',
+                            caption=u(chat_id, 'qr_caption', label=cfg[4], divider=DIVIDER, sub_url=cfg[1])
+                        )
+                    except Exception:
+                        _qr_last_sent.pop(str(chat_id), None)      # ساخت نشد؛ محدودیت اعمال نشه
+                        send_message(chat_id, u(chat_id, 'qr_error'))
 
         elif data.startswith('cfgpause_'):
             row_id = _cb_int(data, 1, 1)
@@ -8410,10 +8498,38 @@ def _process_update_impl(update):
                 else:
                     send_message(chat_id, u(chat_id, 'resume_error'))
 
-        elif data.startswith('cfgrotate_'):
+        elif data.startswith('cfgdel_'):
+            row_id = _cb_int(data, 1, 1)
+            cfg = get_config_row(chat_id, row_id)
+            if not is_feature_enabled('delete_config'):
+                send_message(chat_id, u(chat_id, 'disabled_feature'))
+            elif not cfg:
+                send_message(chat_id, u(chat_id, 'config_not_found'))
+            else:
+                send_delete_confirm(chat_id, cfg)
+
+        elif data.startswith('cfgrotate_') and not data.startswith('cfgrotate_yes_'):
+            # مرحله‌ی تایید نهایی قبل از تغییر لینک (لینک قبلی از کار می‌افتد)
             row_id = _cb_int(data, 1, 1)
             cfg = get_config_row(chat_id, row_id)
             if not cfg:
+                send_message(chat_id, u(chat_id, 'config_not_found'))
+            else:
+                user_steps[str(chat_id)] = {'step': 'rotate_confirm', 'row_id': row_id}
+                send_message(chat_id, u(chat_id, 'rotate_confirm', label=cfg[4], divider=DIVIDER),
+                             reply_markup={'inline_keyboard': [[
+                                 {'text': u(chat_id, 'btn_rotate_yes'), 'callback_data': 'cfgrotate_yes_' + str(row_id)},
+                                 {'text': u(chat_id, 'btn_cancel'), 'callback_data': 'managecfg_' + str(row_id)},
+                             ]]})
+
+        elif data.startswith('cfgrotate_yes_'):
+            row_id = _cb_int(data, 2)
+            _rs = user_steps.get(str(chat_id), {})
+            user_steps[str(chat_id)] = {}          # یک‌بار مصرف؛ دکمه‌ی قدیمی یا دوبار زدن، لینک رو دوباره عوض نمی‌کنه
+            cfg = get_config_row(chat_id, row_id)
+            if _rs.get('step') != 'rotate_confirm' or _rs.get('row_id') != row_id:
+                flow_end(chat_id, 'expired')
+            elif not cfg:
                 send_message(chat_id, u(chat_id, 'config_not_found'))
             else:
                 res = rotate_link_config_on_panel(cfg[2])
