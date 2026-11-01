@@ -1568,11 +1568,13 @@ UI_TEXT['fa'].update({
     'flow_cancelled': '❌ لغو شد.\nهر وقت خواستید از منو دوباره شروع کنید.',
     'flow_expired': 'ℹ️ این صفحه دیگه معتبر نیست.\nلطفاً از منو دوباره شروع کنید.',
     'flow_home': '🏠 یکی از گزینه‌های منوی پایین رو انتخاب کنید.',
+    'kb_placeholder': 'یکی از گزینه‌ها رو انتخاب کنید 👇',
 })
 UI_TEXT['en'].update({
     'flow_cancelled': '❌ Cancelled.\nStart again from the menu whenever you like.',
     'flow_expired': 'ℹ️ This page is no longer valid.\nPlease start again from the menu.',
     'flow_home': '🏠 Please choose an option from the menu below.',
+    'kb_placeholder': 'Choose an option 👇',
 })
 
 
@@ -5200,7 +5202,7 @@ def _ui_send(ctx, chat_id, text, parse_mode, reply_markup, transient, final):
             stale = mid
         else:
             first_new = not ctx['used']
-            stale = cur['mid'] if (cur and first_new) else None
+            stale = cur['mid'] if (cur and first_new and reply_markup is not None and not final) else None
         if not inline:
             # کیبورد معمولی (reply keyboard) با ویرایش قابل تنظیم نیست
             if cur and first_new:
@@ -5224,7 +5226,7 @@ def _ui_send(ctx, chat_id, text, parse_mode, reply_markup, transient, final):
     if reply_markup is not None and inline:
         res = _raw_send_message(chat_id, text, parse_mode, reply_markup)
         if isinstance(res, dict) and res.get('ok'):
-            if cur:
+            if cur and not final:
                 delete_message(chat_id, cur['mid'])
             nm = _ui_mid(res)
             if nm is not None and not final:
@@ -7199,6 +7201,13 @@ def main_menu(chat_id, note=None):
             'keyboard': [[{'text': labels[k]} for k in row] for row in _chunk_pairs(order)],
             'resize_keyboard': True
         }
+        # متن محوِ کادر تایپ (input_field_placeholder، طبق مستندات سروش ۱ تا ۶۴ کاراکتر)
+        try:
+            _ph = str(u(chat_id, 'kb_placeholder') or '').strip()[:64]
+            if _ph:
+                keyboard['input_field_placeholder'] = _ph
+        except Exception:
+            pass
 
     # دکمه‌های سفارشی ادمین (از پنل) — بعد از دکمه‌های اصلی
     try:
@@ -7214,8 +7223,10 @@ def main_menu(chat_id, note=None):
     # دکمه‌ی مخصوص ادمین (برای بقیه‌ی کاربرها هیچ‌وقت نمایش داده نمی‌شه)
     if chat_id == ADMIN_ID:
         if style == 'inline':
+            keyboard['inline_keyboard'].append([{'text': ADMIN_PANEL_LABEL, 'callback_data': 'admin_panel'}])
             keyboard['inline_keyboard'].append([{'text': admin_add_channel_label(), 'callback_data': 'admin_channels'}])
         else:
+            keyboard['keyboard'].append([{'text': ADMIN_PANEL_LABEL}])
             keyboard['keyboard'].append([{'text': admin_add_channel_label()}])
 
     ct = get_config_types()
@@ -7339,6 +7350,7 @@ TEXT_WHERE = {
     'flow_cancelled': '🧭 پیامی که بعد از زدن «انصراف» جای صفحه‌ی فعلی میاد (به‌جای نمایش دوباره‌ی پیام اولیه‌ی منو)',
     'flow_expired': '🧭 وقتی کاربر دکمه‌ی یه صفحه‌ی قدیمی/منقضی‌شده رو می‌زنه',
     'flow_home': '🧭 پیام «بازگشت به منو» تو حالت کیبورد پایین (دکمه‌ی 🏠 منوی اصلی)',
+    'kb_placeholder': '⌨️ متن محوِ داخل کادر تایپ (به‌جای «پیامت را بنویس») وقتی کیبورد پایین فعاله؛ حداکثر ۶۴ کاراکتر. بعد از تغییر، برای هر کاربر با /start بعدی اعمال می‌شه',
     'buy_hub_text': '🛍 صفحه‌ای که بعد از زدن «خرید کانفیگ» میاد (بالای دکمه‌های پلن نامحدود / پروکسی / بسته‌ها / خرید دلخواه)',
     'buy_menu_text': '🛠 فقط صفحه‌ی «خرید دلخواه (انتخاب حجم و مدت)»؛ صفحه‌ی اصلی خرید نیست (اون «buy_hub_text» ـه)',
     'plans_menu_text': '📦 صفحه‌ی «بسته‌های آماده»',
@@ -8700,6 +8712,9 @@ def _process_update_impl(update):
             user_steps[str(chat_id)] = {}
             admin_channels_panel(chat_id)
 
+        elif chat_id == ADMIN_ID and data.startswith('admin_') and not data.startswith('admin_ch_') and admin_callback(chat_id, data):
+            pass
+
         elif data == 'admin_ch_add' and chat_id == ADMIN_ID:
             admin_add_channel_ask(chat_id)
 
@@ -8750,6 +8765,9 @@ def _process_update_impl(update):
             user_steps[str(chat_id)] = {}
             admin_channels_panel(chat_id)
 
+        elif chat_id == ADMIN_ID and text in (ADMIN_PANEL_LABEL, '/admin'):
+            admin_panel_home(chat_id)
+
         elif text == '/start' or text.startswith('/start '):
             add_user(chat_id)
             user_steps[str(chat_id)] = {}
@@ -8767,6 +8785,12 @@ def _process_update_impl(update):
 
         elif step.get('step') == 'admin_add_channel' and chat_id == ADMIN_ID:
             admin_add_channel_submit(chat_id, text)
+
+        elif step.get('step') == 'admin_user_lookup' and chat_id == ADMIN_ID:
+            admin_lookup_submit(chat_id, text)
+
+        elif step.get('step') == 'admin_wallet_amount' and chat_id == ADMIN_ID:
+            admin_wallet_submit(chat_id, text, step)
 
         elif step.get('step') == 'ask_label':
             label = clean_label(text) or get_next_user_label()
@@ -10290,6 +10314,298 @@ async def g_validate_channel(client, link):
     _G['refreshed'][link] = time.time()
     title = getattr(ch, 'title', None) or getattr(ch, 'username', None) or link
     return str(title), len(ids)
+
+
+# ---------------------------------------------------------------------------
+# پنل ادمین داخل بات (فقط ADMIN_ID)
+# کارهای ساده بدون رفتن به وب‌پنل: آمار، جستجوی کاربر، افزایش/کاهش موجودی،
+# مسدود/آزاد کردن، ریست تست رایگان و لاگ تغییر موجودی.
+# با دکمه‌ی «🛠 پنل ادمین» تو منو یا دستور /admin باز می‌شه. همه‌ی صفحه‌ها درجا ویرایش می‌شن.
+# ---------------------------------------------------------------------------
+ADMIN_PANEL_LABEL = '🛠 پنل ادمین'
+
+
+def _adm_back_row():
+    return [{'text': '🔙 پنل ادمین', 'callback_data': 'admin_panel'}]
+
+
+def _adm_toman(n):
+    try:
+        return f'{int(n or 0):,}'
+    except Exception:
+        return str(n)
+
+
+def admin_panel_home(chat_id, note=None):
+    user_steps[str(chat_id)] = {}
+    text = (note + '\n\n' if note else '') + '🛠 پنل ادمین\n' + DIVIDER + '\nیکی از کارها رو انتخاب کن:'
+    rows = [
+        [{'text': '📊 آمار', 'callback_data': 'admin_stats'},
+         {'text': '👤 جستجوی کاربر', 'callback_data': 'admin_find'}],
+        [{'text': '🧾 آخرین تغییرات موجودی', 'callback_data': 'admin_recent'}],
+        [{'text': '📢 کانال‌های عضویت اجباری', 'callback_data': 'admin_channels'}],
+    ]
+    send_message(chat_id, text, parse_mode=None, reply_markup={'inline_keyboard': rows})
+
+
+@with_db_retry
+def _admin_stats_db():
+    conn = get_conn()
+    c = conn.cursor()
+
+    def one(q, args=()):
+        try:
+            c.execute(q, args)
+            r = c.fetchone()
+            return r[0] if r and r[0] is not None else 0
+        except Exception as e:
+            print('⚠️ آمار ادمین (یک مورد):', e)
+            return 0
+
+    now = datetime.now()
+    s = {
+        'users': one('SELECT COUNT(*) FROM users'),
+        'today': one("SELECT COUNT(*) FROM users WHERE joined_at LIKE ?", (now.strftime('%Y-%m-%d') + '%',)),
+        'week': one("SELECT COUNT(*) FROM users WHERE joined_at >= ?", ((now - timedelta(days=7)).isoformat(),)),
+        'banned': one('SELECT COUNT(*) FROM users WHERE banned=1'),
+        'wallet': one('SELECT SUM(wallet) FROM users'),
+        'configs': one('SELECT COUNT(*) FROM user_configs'),
+        'active': one("SELECT COUNT(*) FROM user_configs WHERE status='active'"),
+        'gb': one('SELECT SUM(gb) FROM user_configs'),
+        'revenue': one('SELECT SUM(price) FROM user_configs'),
+        'tickets': one("SELECT COUNT(*) FROM tickets WHERE status='open'"),
+        'topups': one("SELECT COUNT(*) FROM topup_requests WHERE status='pending'"),
+    }
+    conn.close()
+    return s
+
+
+def admin_stats(chat_id):
+    s = _admin_stats_db()
+    text = (
+        '📊 آمار بات\n' + DIVIDER + '\n'
+        f"👥 کل کاربران: {s['users']:,}\n"
+        f"🆕 امروز: {s['today']:,}  |  ۷ روز اخیر: {s['week']:,}\n"
+        f"🚫 مسدودشده: {s['banned']:,}\n"
+        f"💰 مجموع موجودی کیف‌پول‌ها: {_adm_toman(s['wallet'])} تومان\n"
+        f"📦 کانفیگ‌ها: {s['configs']:,} (فعال: {s['active']:,})\n"
+        f"📶 مجموع حجم فروخته‌شده: {float(s['gb'] or 0):,.1f} گیگ\n"
+        f"💵 مجموع فروش: {_adm_toman(s['revenue'])} تومان\n"
+        f"🎫 تیکت باز: {s['tickets']:,}\n"
+        f"⏳ شارژ در انتظار تایید: {s['topups']:,}"
+    )
+    send_message(chat_id, text, parse_mode=None, reply_markup={'inline_keyboard': [
+        [{'text': '🔄 بروزرسانی', 'callback_data': 'admin_stats'}], _adm_back_row()]})
+
+
+def admin_find_ask(chat_id):
+    user_steps[str(chat_id)] = {'step': 'admin_user_lookup'}
+    send_message(chat_id, '👤 آیدی عددی یا @یوزرنیم کاربر رو بفرست:', parse_mode=None,
+                 reply_markup={'inline_keyboard': [_adm_back_row()]})
+
+
+@with_db_retry
+def _admin_user_row(q):
+    q = str(q).strip().translate(_PERSIAN_DIGITS)
+    conn = get_conn()
+    c = conn.cursor()
+    cols = 'user_id, username, first_name, wallet, banned, joined_at'
+    if q.isdigit():
+        c.execute(f'SELECT {cols} FROM users WHERE user_id=?', (int(q),))
+    else:
+        c.execute(f'SELECT {cols} FROM users WHERE LOWER(username)=?', (q.lstrip('@').lower(),))
+    row = c.fetchone()
+    conn.close()
+    return row
+
+
+@with_db_retry
+def _admin_user_extra(uid):
+    conn = get_conn()
+    c = conn.cursor()
+    n_cfg, trial = 0, False
+    try:
+        c.execute('SELECT COUNT(*) FROM user_configs WHERE user_id=?', (uid,))
+        n_cfg = (c.fetchone() or [0])[0] or 0
+    except Exception:
+        pass
+    try:
+        c.execute('SELECT 1 FROM free_trials WHERE user_id=?', (uid,))
+        trial = c.fetchone() is not None
+    except Exception:
+        pass
+    conn.close()
+    return n_cfg, trial
+
+
+def admin_user_card(chat_id, uid, note=None):
+    row = _admin_user_row(str(uid))
+    if not row:
+        send_message(chat_id, '⚠️ کاربر پیدا نشد.', parse_mode=None,
+                     reply_markup={'inline_keyboard': [_adm_back_row()]})
+        return
+    uid, username, first_name, wallet, banned, joined = row
+    n_cfg, trial = _admin_user_extra(uid)
+    text = (note + '\n\n' if note else '') + (
+        '👤 اطلاعات کاربر\n' + DIVIDER + '\n'
+        f'🆔 آیدی: {uid}\n'
+        f"📛 نام: {first_name or '—'}\n"
+        f"🔗 یوزرنیم: {('@' + username) if username else '—'}\n"
+        f'💰 موجودی: {_adm_toman(wallet)} تومان\n'
+        f'📦 تعداد کانفیگ: {n_cfg}\n'
+        f"🧪 تست رایگان: {'گرفته' if trial else 'نگرفته'}\n"
+        f"🚫 وضعیت: {'مسدود' if banned else 'عادی'}\n"
+        f"📅 عضویت: {str(joined or '—')[:10]}"
+    )
+    rows = [
+        [{'text': '➕ افزایش موجودی', 'callback_data': f'admin_w_add_{uid}'},
+         {'text': '➖ کاهش موجودی', 'callback_data': f'admin_w_sub_{uid}'}],
+        [({'text': '✅ آزاد کردن', 'callback_data': f'admin_unban_{uid}'} if banned
+          else {'text': '🚫 مسدود کردن', 'callback_data': f'admin_ban_{uid}'}),
+         {'text': '🧾 تغییرات موجودی', 'callback_data': f'admin_ulog_{uid}'}],
+    ]
+    if trial:
+        rows.append([{'text': '🧪 ریست تست رایگان', 'callback_data': f'admin_trial_{uid}'}])
+    rows.append(_adm_back_row())
+    send_message(chat_id, text, parse_mode=None, reply_markup={'inline_keyboard': rows})
+
+
+def admin_wallet_ask(chat_id, uid, sign):
+    row = _admin_user_row(str(uid))
+    if not row:
+        admin_user_card(chat_id, uid)
+        return
+    user_steps[str(chat_id)] = {'step': 'admin_wallet_amount', 'uid': int(uid), 'sign': 1 if sign > 0 else -1}
+    verb = 'افزایش' if sign > 0 else 'کاهش'
+    send_message(chat_id, f'💰 موجودی فعلی کاربر {uid}: {_adm_toman(row[3])} تومان\n'
+                          f'مبلغ {verb} رو به تومان بفرست (فقط عدد):', parse_mode=None,
+                 reply_markup={'inline_keyboard': [[{'text': '❌ انصراف', 'callback_data': f'admin_u_{uid}'}]]})
+
+
+def admin_wallet_submit(chat_id, text, step):
+    uid = int(step.get('uid'))
+    raw = str(text or '').translate(_PERSIAN_DIGITS)
+    for ch in (',', '٬', ' ', '،'):
+        raw = raw.replace(ch, '')
+    if not raw.isdigit() or not (0 < int(raw) <= 10 ** 10):
+        send_message(chat_id, '⚠️ فقط یه عدد مثبت بفرست (مثلاً 50000).', parse_mode=None)
+        return
+    amount = int(raw)
+    user_steps[str(chat_id)] = {}
+    if step.get('sign', 1) > 0:
+        update_wallet_db(uid, amount, 'admin_bot_adjust')
+        note = f'✅ {amount:,} تومان به موجودی کاربر اضافه شد.'
+    else:
+        if try_deduct_wallet_db(uid, amount, 'admin_bot_adjust'):
+            note = f'✅ {amount:,} تومان از موجودی کاربر کم شد.'
+        else:
+            note = f'⚠️ موجودی کاربر کمتر از {amount:,} تومانه؛ چیزی کم نشد.'
+    admin_user_card(chat_id, uid, note=note)
+
+
+@with_db_retry
+def _admin_set_ban(uid, banned):
+    conn = get_conn()
+    c = conn.cursor()
+    c.execute('UPDATE users SET banned=?, banned_until=0 WHERE user_id=?', (1 if banned else 0, uid))
+    conn.commit()
+    conn.close()
+    _ban_cache.pop(uid, None)
+
+
+@with_db_retry
+def _admin_reset_trial(uid):
+    conn = get_conn()
+    c = conn.cursor()
+    c.execute('DELETE FROM free_trials WHERE user_id=?', (uid,))
+    conn.commit()
+    conn.close()
+
+
+@with_db_retry
+def _admin_wallet_log(uid=None, limit=10):
+    conn = get_conn()
+    c = conn.cursor()
+    if uid is None:
+        c.execute('SELECT user_id, delta, balance_after, reason, created_at FROM wallet_log ORDER BY id DESC LIMIT ?', (limit,))
+    else:
+        c.execute('SELECT user_id, delta, balance_after, reason, created_at FROM wallet_log WHERE user_id=? ORDER BY id DESC LIMIT ?', (uid, limit))
+    rows = c.fetchall()
+    conn.close()
+    return rows
+
+
+def admin_wallet_log(chat_id, uid=None):
+    try:
+        rows = _admin_wallet_log(uid)
+    except Exception as e:
+        print('⚠️ خوندن wallet_log ناموفق:', e)
+        rows = []
+    title = '🧾 آخرین تغییرات موجودی' + (f' کاربر {uid}' if uid else '')
+    if not rows:
+        body = 'هنوز چیزی ثبت نشده.'
+    else:
+        lines = []
+        for r_uid, delta, after, reason, ts in rows:
+            sign = '+' if (delta or 0) >= 0 else '−'
+            who = '' if uid else f'{r_uid} | '
+            lines.append(f"{str(ts or '')[5:16].replace('T', ' ')} | {who}{sign}{abs(int(delta or 0)):,} ← {_adm_toman(after)} | {reason or '—'}")
+        body = '\n'.join(lines)
+    back = [{'text': '🔙 کاربر', 'callback_data': f'admin_u_{uid}'}] if uid else _adm_back_row()
+    send_message(chat_id, title + '\n' + DIVIDER + '\n' + body, parse_mode=None,
+                 reply_markup={'inline_keyboard': [back]})
+
+
+def admin_callback(chat_id, data):
+    """True یعنی این callback مال پنل ادمین بود و هندل شد."""
+    if chat_id != ADMIN_ID:
+        return False
+    try:
+        if data == 'admin_panel':
+            admin_panel_home(chat_id)
+        elif data == 'admin_stats':
+            admin_stats(chat_id)
+        elif data == 'admin_find':
+            admin_find_ask(chat_id)
+        elif data == 'admin_recent':
+            admin_wallet_log(chat_id)
+        elif data.startswith('admin_u_'):
+            user_steps[str(chat_id)] = {}
+            admin_user_card(chat_id, int(data[len('admin_u_'):]))
+        elif data.startswith('admin_w_add_'):
+            admin_wallet_ask(chat_id, int(data[len('admin_w_add_'):]), 1)
+        elif data.startswith('admin_w_sub_'):
+            admin_wallet_ask(chat_id, int(data[len('admin_w_sub_'):]), -1)
+        elif data.startswith('admin_ban_') or data.startswith('admin_unban_'):
+            ban = data.startswith('admin_ban_')
+            uid = int(data.split('_')[-1])
+            if ban and uid == ADMIN_ID:
+                admin_user_card(chat_id, uid, note='⚠️ ادمین رو نمی‌شه مسدود کرد.')
+            else:
+                _admin_set_ban(uid, ban)
+                admin_user_card(chat_id, uid, note='🚫 کاربر مسدود شد.' if ban else '✅ کاربر آزاد شد.')
+        elif data.startswith('admin_trial_'):
+            uid = int(data[len('admin_trial_'):])
+            _admin_reset_trial(uid)
+            admin_user_card(chat_id, uid, note='🧪 تست رایگان ریست شد؛ کاربر دوباره می‌تونه تست بگیره.')
+        elif data.startswith('admin_ulog_'):
+            admin_wallet_log(chat_id, int(data[len('admin_ulog_'):]))
+        else:
+            return False
+    except Exception as e:
+        print('⚠️ خطا تو پنل ادمین:', e)
+        send_message(chat_id, '⚠️ خطایی پیش اومد؛ دوباره تلاش کن.', parse_mode=None,
+                     reply_markup={'inline_keyboard': [_adm_back_row()]})
+    return True
+
+
+def admin_lookup_submit(chat_id, text):
+    row = _admin_user_row(text)
+    if not row:
+        send_message(chat_id, '⚠️ کاربری با این مشخصات پیدا نشد. دوباره بفرست (آیدی عددی یا @یوزرنیم).', parse_mode=None)
+        return
+    user_steps[str(chat_id)] = {}
+    admin_user_card(chat_id, row[0])
 
 
 def admin_channels_panel(chat_id, note=None):
