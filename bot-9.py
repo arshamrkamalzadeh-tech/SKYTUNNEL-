@@ -3082,7 +3082,7 @@ def send_donito_topup_info(chat_id, amount):
     rows.append([{'text': u(chat_id, 'btn_cancel'), 'callback_data': 'cancel'}])
     send_message(chat_id, u(chat_id, 'topup_donito_info', amount=f'{pay:,}', amount_raw=str(pay), divider=DIVIDER,
                             minutes=str(donito_window_seconds() // 60)),
-                 reply_markup={'inline_keyboard': rows})
+                 reply_markup={'inline_keyboard': _tidy_rows(rows)})
 
 
 def donito_check_for_user_async(chat_id, req_id):
@@ -4242,7 +4242,7 @@ def action_unl_days(chat_id, devices):
         return
     rows.append([{'text': '↩️', 'callback_data': 'buy_unl'}, {'text': u(chat_id, 'btn_cancel'), 'callback_data': 'cancel'}])
     send_message(chat_id, u(chat_id, 'unl_pick_days', divider=DIVIDER, devices=devices, wallet=f'{get_wallet_db(chat_id):,}'),
-                 reply_markup={'inline_keyboard': rows})
+                 reply_markup={'inline_keyboard': _tidy_rows(rows)})
 
 
 def action_proxy_menu(chat_id):
@@ -4253,7 +4253,7 @@ def action_proxy_menu(chat_id):
     user_steps[str(chat_id)] = {'step': 'proxy_ask_gb'}
     send_message(chat_id, u(chat_id, 'proxy_pick_gb', divider=DIVIDER, min_gb=_fmt_gb(mn), max_gb=_fmt_gb(mx),
                             ppg=f'{proxy_price_per_gb():,}', wallet=f'{get_wallet_db(chat_id):,}'),
-                 reply_markup={'inline_keyboard': rows})
+                 reply_markup={'inline_keyboard': _tidy_rows(rows)})
 
 
 def proxy_go_label(chat_id, gb):
@@ -4303,20 +4303,23 @@ def _send_extra_manage_panel(chat_id, cfg, note=None):
         else:
             toggle = {'text': u(chat_id, 'btn_pause'), 'callback_data': 'cfgpause_' + str(row_id)}
             status_line = u(chat_id, 'manage_status_active')
-        rows += [[{'text': u(chat_id, 'btn_unl_rebuy'), 'callback_data': 'buy_unl'}],
-                 [{'text': u(chat_id, 'btn_rename'), 'callback_data': 'cfgrename_' + str(row_id)}],
-                 [{'text': u(chat_id, 'btn_qr'), 'callback_data': 'cfgqr_' + str(row_id)}],
-                 [toggle],
-                 [{'text': u(chat_id, 'btn_rotate'), 'callback_data': 'cfgrotate_' + str(row_id)}]]
+        rows += _pair_buttons([{'text': u(chat_id, 'btn_unl_rebuy'), 'callback_data': 'buy_unl'},
+                               {'text': u(chat_id, 'btn_rename'), 'callback_data': 'cfgrename_' + str(row_id)},
+                               {'text': u(chat_id, 'btn_qr'), 'callback_data': 'cfgqr_' + str(row_id)},
+                               toggle,
+                               {'text': u(chat_id, 'btn_rotate'), 'callback_data': 'cfgrotate_' + str(row_id)}])
         extra = ''
     else:
         status_line = u(chat_id, 'manage_status_active')
-        rows += [[{'text': u(chat_id, 'btn_extend'), 'callback_data': 'cfgext_' + str(row_id)}],
-                 [{'text': u(chat_id, 'btn_qr'), 'callback_data': 'cfgqr_' + str(row_id)}],
-                 [{'text': u(chat_id, 'btn_open_proxy'), 'url': str(cfg[1])}]]
+        rows += _pair_buttons([{'text': u(chat_id, 'btn_extend'), 'callback_data': 'cfgext_' + str(row_id)},
+                               {'text': u(chat_id, 'btn_qr'), 'callback_data': 'cfgqr_' + str(row_id)},
+                               {'text': u(chat_id, 'btn_open_proxy'), 'url': str(cfg[1])}])
         extra = u(chat_id, 'manage_volume', gb=_fmt_gb(cfg[3])) + '\n'
     if is_feature_enabled('delete_config'):
-        rows.append([{'text': u(chat_id, 'btn_cfg_delete'), 'callback_data': 'cfgdel_' + str(row_id)}])
+        if rows and len(rows[-1]) == 1:
+            rows[-1].append({'text': u(chat_id, 'btn_cfg_delete'), 'callback_data': 'cfgdel_' + str(row_id)})   # کنار دکمه‌ی تنها
+        else:
+            rows.append([{'text': u(chat_id, 'btn_cfg_delete'), 'callback_data': 'cfgdel_' + str(row_id)}])
     rows.append([{'text': u(chat_id, 'btn_close'), 'callback_data': 'menu'}])
     text = (u(chat_id, 'manage_title') + '\n' + DIVIDER + '\n' + u(chat_id, 'manage_name', label=cfg[4]) + '\n' + extra +
             u(chat_id, 'extra_days_left', days=days_remaining(cfg[8])) + '\n' + status_line + '\n' + u(chat_id, 'manage_footer'))
@@ -5693,8 +5696,8 @@ def send_ask_label_prompt(chat_id):
         u(chat_id, 'ask_label_prompt'),
         reply_markup={
             'inline_keyboard': [
-                [{'text': u(chat_id, 'ask_label_skip'), 'callback_data': 'skip_label'}],
-                [{'text': u(chat_id, 'btn_cancel'), 'callback_data': 'cancel'}],
+                [{'text': u(chat_id, 'ask_label_skip'), 'callback_data': 'skip_label'},
+                 {'text': u(chat_id, 'btn_cancel'), 'callback_data': 'cancel'}],
             ]
         }
     )
@@ -5837,7 +5840,7 @@ def buy_layout(chat_id):
 
 
 def _buy_rows(chat_id, keys):
-    return [[{'text': buy_item_label(chat_id, k), 'callback_data': _BUY_CB[k]}] for k in keys]
+    return _tidy_rows([[{'text': buy_item_label(chat_id, k), 'callback_data': _BUY_CB[k]}] for k in keys])
 
 
 def _open_buy_item(chat_id, k):
@@ -5882,7 +5885,7 @@ def action_plans_menu(chat_id):
     if len(layout['hub']) > 1:
         rows.append([{'text': u(chat_id, 'btn_back_buy'), 'callback_data': 'buy_hub'}])
     send_message(chat_id, u(chat_id, 'plans_menu_text', divider=DIVIDER, wallet=f'{get_wallet_db(chat_id):,}'),
-                 reply_markup={'inline_keyboard': rows})
+                 reply_markup={'inline_keyboard': _tidy_rows(rows)})
 
 
 def _action_buy_custom_menu(chat_id):
@@ -5901,13 +5904,10 @@ def _action_buy_custom_menu(chat_id):
     # اینجا قیمت رو بدون تگ <b> می‌چسبونیم.
     unit_suffix = u(chat_id, 'price_unit_suffix')
     type_kb = {
-        'inline_keyboard': [
-            [{
-                'text': f"{get_ctype_label(chat_id, k)}: {ct[k]['price_per_gb']:,}{unit_suffix}",
-                'callback_data': 'buytype_' + k,
-            }]
-            for k in order
-        ]
+        'inline_keyboard': _pair_buttons([{
+            'text': f"{get_ctype_label(chat_id, k)}: {ct[k]['price_per_gb']:,}{unit_suffix}",
+            'callback_data': 'buytype_' + k,
+        } for k in order])
     }
     if get_user_lang(chat_id) == 'en':
         text = u(
@@ -6171,7 +6171,7 @@ def start_crypto_topup(chat_id):
         send_crypto_deposit_info(chat_id, coins[0])
     else:
         user_steps[str(chat_id)] = {'step': 'choose_topup_coin'}
-        send_message(chat_id, u(chat_id, 'topup_choose_coin'), reply_markup={'inline_keyboard': (
+        send_message(chat_id, u(chat_id, 'topup_choose_coin'), reply_markup={'inline_keyboard': _tidy_rows(
             [[{'text': c['label'], 'callback_data': 'tpc_' + c['id']}] for c in coins]
             + [[{'text': u(chat_id, 'btn_cancel'), 'callback_data': 'cancel'}]])})
 
@@ -6279,7 +6279,7 @@ def show_topup_method_choice(chat_id):
     if crypto_enabled():
         rows.append([{'text': u(chat_id, 'btn_topup_crypto'), 'callback_data': 'tpm_crypto'}])
     rows.append([{'text': u(chat_id, 'btn_cancel'), 'callback_data': 'cancel'}])
-    send_message(chat_id, u(chat_id, 'topup_choose_method_first'), reply_markup={'inline_keyboard': rows})
+    send_message(chat_id, u(chat_id, 'topup_choose_method_first'), reply_markup={'inline_keyboard': _tidy_rows(rows)})
 
 
 def ask_topup_amount_for(chat_id, method):
@@ -6297,7 +6297,7 @@ def show_coin_choice(chat_id, amount, coins):
         send_crypto_topup_info(chat_id, amount, coins[0])
         return
     user_steps[str(chat_id)] = {'step': 'choose_topup_coin', 'amount': amount}
-    send_message(chat_id, u(chat_id, 'topup_choose_coin'), reply_markup={'inline_keyboard': (
+    send_message(chat_id, u(chat_id, 'topup_choose_coin'), reply_markup={'inline_keyboard': _tidy_rows(
         [[{'text': c['label'], 'callback_data': 'tpc_' + c['id']}] for c in coins]
         + [[{'text': u(chat_id, 'btn_cancel'), 'callback_data': 'cancel'}]])})
 
@@ -6793,7 +6793,7 @@ def _action_guide(chat_id):
     """دکمه‌ی «دانلود برنامه»: برای هر سیستم‌عامل یه دکمه‌ی لینک‌دار می‌فرسته. اگه
     پیام‌رسان دکمه‌ی url رو قبول نکرد، همون لینک‌ها به‌صورت متن ساده فرستاده می‌شن."""
     rows = [[{'text': u(chat_id, 'plat_' + key), 'url': url}] for key, url in get_app_links()]
-    res = send_message(chat_id, u(chat_id, 'guide_text', divider=DIVIDER), reply_markup={'inline_keyboard': rows})
+    res = send_message(chat_id, u(chat_id, 'guide_text', divider=DIVIDER), reply_markup={'inline_keyboard': _tidy_rows(rows)})
     if not (isinstance(res, dict) and res.get('ok')):
         lines = [u(chat_id, 'guide_fallback_title'), DIVIDER]
         for key, url in get_app_links():
@@ -6848,6 +6848,31 @@ def days_remaining(expires_at):
     return math.ceil(diff / 86400)
 
 
+def _pair_buttons(buttons):
+    """لیست دکمه‌ها رو دوتا‌دوتا کنار هم می‌چینه (آخری اگه تک موند، تنها می‌ره)."""
+    return [buttons[i:i + 2] for i in range(0, len(buttons), 2)]
+
+
+def _tidy_rows(rows):
+    """ردیف‌های تک‌دکمه‌ای پشت‌سرهم رو دوتا‌دوتا کنار هم می‌چینه؛ ردیف‌هایی که از قبل چند دکمه دارن دست نمی‌خورن."""
+    out, pending = [], None
+    for r in rows:
+        if len(r) == 1:
+            if pending is None:
+                pending = r[0]
+            else:
+                out.append([pending, r[0]])
+                pending = None
+        else:
+            if pending is not None:
+                out.append([pending])
+                pending = None
+            out.append(r)
+    if pending is not None:
+        out.append([pending])
+    return out
+
+
 def action_my_configs(chat_id):
     configs = get_user_configs(chat_id)
     if not configs:
@@ -6899,6 +6924,7 @@ def action_my_configs(chat_id):
             'text': u(chat_id, 'btn_manage_config', idx=i, label=btn_label),
             'callback_data': 'managecfg_' + str(cfg[0])
         }])
+    manage_rows = _pair_buttons([r[0] for r in manage_rows])      # دکمه‌های مدیریت دوتا‌دوتا کنار هم
     send_message(chat_id, txt, reply_markup={'inline_keyboard': manage_rows})
 
 
@@ -6918,17 +6944,16 @@ def send_manage_panel(chat_id, cfg, note=None):
         toggle_btn = {'text': u(chat_id, 'btn_pause'), 'callback_data': 'cfgpause_' + str(row_id)}
         status_line = u(chat_id, 'manage_status_active')
 
-    manage_kb = {
-        'inline_keyboard': [
-            [{'text': u(chat_id, 'btn_extend'), 'callback_data': 'cfgext_' + str(row_id)}],
-            [{'text': u(chat_id, 'btn_rename'), 'callback_data': 'cfgrename_' + str(row_id)}],
-            [{'text': u(chat_id, 'btn_qr'), 'callback_data': 'cfgqr_' + str(row_id)}],
-            [toggle_btn],
-            [{'text': u(chat_id, 'btn_rotate'), 'callback_data': 'cfgrotate_' + str(row_id)}],
-        ]
-    }
+    _btns = [
+        {'text': u(chat_id, 'btn_extend'), 'callback_data': 'cfgext_' + str(row_id)},
+        {'text': u(chat_id, 'btn_rename'), 'callback_data': 'cfgrename_' + str(row_id)},
+        {'text': u(chat_id, 'btn_qr'), 'callback_data': 'cfgqr_' + str(row_id)},
+        toggle_btn,
+        {'text': u(chat_id, 'btn_rotate'), 'callback_data': 'cfgrotate_' + str(row_id)},
+    ]
     if is_feature_enabled('delete_config'):
-        manage_kb['inline_keyboard'].append([{'text': u(chat_id, 'btn_cfg_delete'), 'callback_data': 'cfgdel_' + str(row_id)}])
+        _btns.append({'text': u(chat_id, 'btn_cfg_delete'), 'callback_data': 'cfgdel_' + str(row_id)})
+    manage_kb = {'inline_keyboard': _pair_buttons(_btns)}      # دوتا‌دوتا کنار هم
     manage_kb['inline_keyboard'].append([{'text': u(chat_id, 'btn_close'), 'callback_data': 'menu'}])
     text = (
         u(chat_id, 'manage_title') + '\n' + DIVIDER + '\n' +
@@ -7047,7 +7072,7 @@ def _action_recent_orders(chat_id):
             ctype_label=get_ctype_label(chat_id, ctype or 'both'), price=price or 0,
         ) + '\n\n'
         rows.append([{'text': u(chat_id, 'btn_reorder', idx=i), 'callback_data': 'reord_' + str(oid)}])
-    send_message(chat_id, txt, reply_markup={'inline_keyboard': rows})
+    send_message(chat_id, txt, reply_markup={'inline_keyboard': _tidy_rows(rows)})
 
 
 def action_language_menu(chat_id):
@@ -7261,7 +7286,7 @@ def run_custom_button(chat_id, it):
     if url.lower().startswith(('http://', 'https://')):
         rows.append([{'text': str(it.get('url_label') or '').strip() or u(chat_id, 'btn_open_link'), 'url': url}])
     rows.append([{'text': u(chat_id, 'btn_back_menu'), 'callback_data': 'menu'}])
-    markup = {'inline_keyboard': rows}
+    markup = {'inline_keyboard': _tidy_rows(rows)}
     res = send_message(chat_id, text, reply_markup=markup)
     if not (isinstance(res, dict) and res.get('ok')):
         # HTML خراب بود؟ همون متن رو ساده بفرست
@@ -7332,10 +7357,8 @@ def main_menu(chat_id, note=None):
     if chat_id == ADMIN_ID:
         if style == 'inline':
             keyboard['inline_keyboard'].append([{'text': ADMIN_PANEL_LABEL, 'callback_data': 'admin_panel'}])
-            keyboard['inline_keyboard'].append([{'text': admin_add_channel_label(), 'callback_data': 'admin_channels'}])
         else:
             keyboard['keyboard'].append([{'text': ADMIN_PANEL_LABEL}])
-            keyboard['keyboard'].append([{'text': admin_add_channel_label()}])
 
     ct = get_config_types()
     if get_user_lang(chat_id) == 'en':
@@ -7883,8 +7906,7 @@ def _alert_send(uid, row_id, key, **kw):
     except Exception:
         pass
     kb = {'inline_keyboard': [
-        [_renew],
-        [{'text': u(uid, 'btn_alert_manage'), 'callback_data': 'managecfg_' + str(row_id)}]]}
+        [_renew, {'text': u(uid, 'btn_alert_manage'), 'callback_data': 'managecfg_' + str(row_id)}]]}
     try:
         send_message(uid, u(uid, key, divider=DIVIDER, **kw), reply_markup=kb)
     except Exception as e:
@@ -10203,7 +10225,7 @@ def join_keyboard(chat_id, links=None):
             label += f' @{nm}' if isinstance(nm, str) else f' {i}'
         rows.append([{'text': label, 'url': lk}])
     rows.append([{'text': u(chat_id, 'btn_joined'), 'callback_data': 'check_join'}])
-    return {'inline_keyboard': rows}
+    return {'inline_keyboard': _tidy_rows(rows)}
 
 
 # ---------------------------------------------------------------------------
@@ -10494,7 +10516,7 @@ def admin_panel_home(chat_id, note=None):
         [{'text': '🧾 آخرین تغییرات موجودی', 'callback_data': 'admin_recent'}],
         [{'text': '📢 کانال‌های عضویت اجباری', 'callback_data': 'admin_channels'}],
     ]
-    send_message(chat_id, text, parse_mode=None, reply_markup={'inline_keyboard': rows})
+    send_message(chat_id, text, parse_mode=None, reply_markup={'inline_keyboard': _tidy_rows(rows)})
 
 
 @with_db_retry
@@ -10616,7 +10638,7 @@ def admin_user_card(chat_id, uid, note=None):
     if trial:
         rows.append([{'text': '🧪 ریست تست رایگان', 'callback_data': f'admin_trial_{uid}'}])
     rows.append(_adm_back_row())
-    send_message(chat_id, text, parse_mode=None, reply_markup={'inline_keyboard': rows})
+    send_message(chat_id, text, parse_mode=None, reply_markup={'inline_keyboard': _tidy_rows(rows)})
 
 
 def admin_wallet_ask(chat_id, uid, sign):
@@ -10777,7 +10799,7 @@ def admin_channels_panel(chat_id, note=None):
         nm = _g_parse_channel(lk)
         rows.append([{'text': u('fa', 'admin_btn_channel_del', i=i, name=(f' (@{nm})' if isinstance(nm, str) else '')),
                       'callback_data': 'admin_ch_del_' + _ch_hash(lk)}])
-    send_message(chat_id, text, parse_mode=None, reply_markup={'inline_keyboard': rows})
+    send_message(chat_id, text, parse_mode=None, reply_markup={'inline_keyboard': _tidy_rows(rows)})
 
 
 def admin_add_channel_ask(chat_id):
