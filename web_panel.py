@@ -1569,12 +1569,14 @@ def get_bot_info():
     return data
 
 
-def send_telegram_message(chat_id, text):
+def send_telegram_message(chat_id, text, reply_markup=None):
     if not BOT_TOKEN:
         return False
     try:
-        res = SESSION.post(BASE_URL + "/sendMessage",
-                           json={"chat_id": chat_id, "text": text, "parse_mode": "HTML"}, timeout=15)
+        payload = {"chat_id": chat_id, "text": text, "parse_mode": "HTML"}
+        if reply_markup:
+            payload["reply_markup"] = reply_markup
+        res = SESSION.post(BASE_URL + "/sendMessage", json=payload, timeout=15)
         return res.json().get("ok", False)
     except Exception:
         return False
@@ -5577,8 +5579,16 @@ def get_cfg_row(user_id, rid):
     return rows[0] if rows else None
 
 
-def _notify(user_id, text):
-    return send_telegram_message(user_id, text)
+def _notify(user_id, text, reply_markup=None):
+    return send_telegram_message(user_id, text, reply_markup)
+
+
+def _sub_page_kb(url):
+    """دکمه‌ی «صفحه اشتراک🌐» زیر پیام؛ فقط اگه لینک http(s) باشه."""
+    url = str(url or "").strip()
+    if url.lower().startswith(("http://", "https://")):
+        return {"inline_keyboard": [[{"text": "صفحه اشتراک🌐", "url": url}]]}
+    return None
 
 
 @app.route("/users/<int:user_id>/configs")
@@ -5686,7 +5696,7 @@ def user_config_create(user_id):
     cfg_call("PUT", "/note", cid, {"note": "ساخته‌شده از پنل وب (هدیه/دستی)"})
     flash(f"کانفیگ «{label}» ساخته شد.")
     if request.form.get("notify") == "1":
-        sent = _notify(user_id, f"🎁 <b>یک کانفیگ برای شما ساخته شد</b>\n📶 {gb:g} گیگ — ⏳ {days} روز\n🔗 <code>{esc(sub_url)}</code>")
+        sent = _notify(user_id, f"🎁 <b>یک کانفیگ برای شما ساخته شد</b>\n📶 {gb:g} گیگ — ⏳ {days} روز\n🔗 <code>{esc(sub_url)}</code>", _sub_page_kb(sub_url))
         flash("لینک برای کاربر ارسال شد." if sent else "⚠️ ارسال پیام به کاربر ناموفق بود.")
     return back
 
@@ -5750,7 +5760,7 @@ def user_config_action(user_id, rid, action):
             db_run("UPDATE user_configs SET sub_url=? WHERE id=?", (new_url, rid))
             flash("لینک تغییر کرد.")
             if notify:
-                _notify(user_id, f"🔄 لینک کانفیگ «{esc(label)}» تغییر کرد:\n<code>{esc(new_url)}</code>")
+                _notify(user_id, f"🔄 لینک کانفیگ «{esc(label)}» تغییر کرد:\n<code>{esc(new_url)}</code>", _sub_page_kb(new_url))
         else:
             flash("لینک تغییر کرد ولی پنل لینک جدید رو برنگردوند.")
     elif action == "delete":

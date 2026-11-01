@@ -1455,6 +1455,7 @@ UI_TEXT['fa'].update({
     'svc_proxy': '📡 پروکسی تلگرام',
     'btn_unl_rebuy': '🔁 خرید پلن نامحدود جدید',
     'btn_open_proxy': '📡 اتصال به پروکسی',
+    'btn_sub_page': 'صفحه اشتراک🌐',
     'unl_unavailable': '⚠️ فروش پلن نامحدود الان در دسترس نیست. کمی بعد دوباره تلاش کنید.',
     'proxy_unavailable': '⚠️ فروش پروکسی تلگرام الان در دسترس نیست. کمی بعد دوباره تلاش کنید.',
     'unl_pick_devices': '♾ <b>پلن نامحدود</b>\n{divider}\nتعداد دستگاه هم‌زمان رو انتخاب کنید:\n\n💳 موجودی فعلی: <b>{wallet}</b> تومان',
@@ -1485,6 +1486,7 @@ UI_TEXT['en'].update({
     'svc_proxy': '📡 Telegram proxy',
     'btn_unl_rebuy': '🔁 Buy a new unlimited plan',
     'btn_open_proxy': '📡 Connect to proxy',
+    'btn_sub_page': 'Subscription page🌐',
     'unl_unavailable': '⚠️ Unlimited plans are not available right now. Please try again later.',
     'proxy_unavailable': '⚠️ Telegram proxy is not available right now. Please try again later.',
     'unl_pick_devices': '♾ <b>Unlimited plan</b>\n{divider}\nChoose the number of simultaneous devices:\n\n💳 Balance: <b>{wallet}</b>',
@@ -4501,19 +4503,34 @@ def get_config_usage_gb(config_id):
 
 
 def delete_config_from_panel_strict(config_id):
-    """'ok' | 'gone' (روی پنل وجود نداره) | 'fail'. فقط با ok/gone اجازه‌ی حذف از دیتابیس و بازپرداخت داریم."""
+    """'ok' | 'gone' (روی پنل وجود نداره) | 'fail'. فقط با ok/gone اجازه‌ی حذف از دیتابیس و بازپرداخت داریم.
+    هر 2xx موفقیته؛ 404/410 یعنی قبلاً حذف شده؛ روی خطای شبکه/5xx/429 یک بار دیگه تلاش می‌کنه؛
+    و علت دقیق شکست (کد و متن پاسخ پنل) تو لاگ چاپ می‌شه."""
     if not config_id:
         return 'ok'
-    try:
-        res = SESSION.delete(_cfg_url(config_id),
-                             headers={'Authorization': 'Bearer ' + CONFIG_KEY}, timeout=(PANEL_CONNECT_TIMEOUT, 10))
-        if res.status_code in (200, 201, 204):
-            return 'ok'
-        if res.status_code == 404:
-            return 'gone'
-        return 'fail'
-    except Exception:
-        return 'fail'
+    for attempt in (1, 2):
+        try:
+            res = SESSION.delete(_cfg_url(config_id),
+                                 headers={'Authorization': 'Bearer ' + CONFIG_KEY}, timeout=(PANEL_CONNECT_TIMEOUT, 12))
+            code = res.status_code
+            if 200 <= code < 300:
+                return 'ok'
+            body = (res.text or '')[:300]
+            if code in (404, 410) or (code in (400, 409) and any(
+                    k in body.lower() for k in ('not found', 'not_found', 'already deleted', 'does not exist', 'no such'))):
+                return 'gone'
+            print('⚠️ حذف کانفیگ از پنل رد شد (تلاش %d) config_id=%s کد=%s پاسخ=%s' % (attempt, config_id, code, body))
+            if attempt == 1 and (code >= 500 or code in (408, 425, 429)):
+                time.sleep(1.5)
+                continue
+            return 'fail'
+        except Exception as e:
+            print('⚠️ استثنا در حذف کانفیگ از پنل (تلاش %d) config_id=%s: %s' % (attempt, config_id, e))
+            if attempt == 1:
+                time.sleep(1.5)
+                continue
+            return 'fail'
+    return 'fail'
 
 
 @with_db_retry
@@ -4557,6 +4574,14 @@ def delete_config_with_refund(chat_id, row_id):
         refund = int((price - used_gb * (price / gb)) * get_refund_ratio())
         refund = max(0, min(refund, int(price)))
     st = delete_config_from_panel_strict(config_id)
+    if st == 'fail' and paused_now:
+        # شاید پنل حذفِ کانفیگ متوقف‌شده رو نمی‌پذیره: ازسرگیری و یه تلاش دوباره
+        try:
+            resume_config_on_panel(config_id)
+            paused_now = False
+        except Exception:
+            pass
+        st = delete_config_from_panel_strict(config_id)
     if st == 'fail':
         if paused_now:
             try:
@@ -7307,7 +7332,7 @@ _TEXT_GROUP_RULES = [
     (('admin_', 'config_note', 'no_username', 'disabled_feature', 'banned_', 'btn_back_menu', 'btn_open_link'), '🛠 پیام‌های ادمین و سیستمی'),
     (('invoice_', 'btn_confirm_purchase', 'btn_cancel_purchase', 'btn_apply_discount',
       'discount_', 'building_config', 'insufficient_balance', 'purchase_success', 'output_label',
-      'proto_unavailable', 'dns_unavailable', 'server_error', 'btn_buy', 'svc_',
+      'proto_unavailable', 'dns_unavailable', 'server_error', 'btn_buy', 'btn_sub_page', 'svc_',
       'btn_reorder', 'reorder_', 'recentorders', 'btn_recentorders', 'price_unit_suffix'), '🛍 خرید، فاکتور و سفارشات'),
     (('manage_', 'btn_manage', 'btn_extend', 'btn_rename', 'btn_qr', 'btn_pause', 'btn_resume', 'btn_rotate',
       'btn_close', 'btn_confirm_pay', 'ext_', 'rename_', 'qr_', 'pause_', 'resume_', 'rotate_', 'myconfigs', 'config_not_found',
@@ -7391,6 +7416,7 @@ TEXT_WHERE = {
     'unl_week_plus_btn': '♾ دکمه‌ی اضافه‌کردن یک هفته',
     'btn_unl_rebuy': '♾ دکمه‌ی خرید دوباره تو کارت کانفیگ نامحدود',
     'btn_open_proxy': '📡 دکمه‌ی اتصال به پروکسی',
+    'btn_sub_page': '🌐 دکمه‌ی صفحه اشتراک زیر پیام ساخت کانفیگ',
     'btn_back_buy': '🛒 دکمه‌ی برگشت به صفحه‌ی اصلی خرید',
     'unl_card': '♾ کارت اطلاعات کانفیگ نامحدود تو «کانفیگ‌های من»',
     'proxy_card': '📡 کارت اطلاعات پروکسی تو «کانفیگ‌های من»',
@@ -8186,6 +8212,10 @@ def _process_update_impl(update):
                                 gb=gb, label=label, days=days, price=price,
                                 output_label=output_label, sub_url=res['sub_url'],
                             )
+                            # دکمه‌ی «صفحه اشتراک» زیر پیام: لینک سابسکریپشن با یه تپ باز می‌شه
+                            _su = str(res.get('sub_url') or '').strip()
+                            if _su.lower().startswith(('http://', 'https://')):
+                                _kb = {'inline_keyboard': [[{'text': u(chat_id, 'btn_sub_page'), 'url': _su}]]}
                         send_message(chat_id, success_text, reply_markup=_kb, final=True)
                         if price and price > 0:
                             process_referral_reward(chat_id, 'purchase', price)   # بعد از پیام موفقیت، تا خریدار معطل نشه
