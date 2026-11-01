@@ -4504,11 +4504,13 @@ def get_config_usage_gb(config_id):
 
 def delete_config_from_panel_strict(config_id):
     """'ok' | 'gone' (روی پنل وجود نداره) | 'fail'. فقط با ok/gone اجازه‌ی حذف از دیتابیس و بازپرداخت داریم.
-    هر 2xx موفقیته؛ 404/410 یعنی قبلاً حذف شده؛ روی خطای شبکه/5xx/429 یک بار دیگه تلاش می‌کنه؛
-    و علت دقیق شکست (کد و متن پاسخ پنل) تو لاگ چاپ می‌شه."""
+    نکته‌ی مهم: پنل حذفِ کانفیگ «غیرفعال/متوقف» رو با خطای 400 not_active رد می‌کنه
+    ('Config is already disabled'). پس در این حالت اول ازسرگیری و بعد حذف می‌کنیم.
+    هر 2xx موفقیته؛ 404/410 یعنی قبلاً حذف شده؛ روی خطای شبکه/5xx/429 هم دوباره تلاش می‌کنه."""
     if not config_id:
         return 'ok'
-    for attempt in (1, 2):
+    resumed = False
+    for attempt in (1, 2, 3):
         try:
             res = SESSION.delete(_cfg_url(config_id),
                                  headers={'Authorization': 'Bearer ' + CONFIG_KEY}, timeout=(PANEL_CONNECT_TIMEOUT, 12))
@@ -4516,20 +4518,27 @@ def delete_config_from_panel_strict(config_id):
             if 200 <= code < 300:
                 return 'ok'
             body = (res.text or '')[:300]
+            low = body.lower()
             if code in (404, 410) or (code in (400, 409) and any(
-                    k in body.lower() for k in ('not found', 'not_found', 'already deleted', 'does not exist', 'no such'))):
+                    k in low for k in ('not found', 'not_found', 'already deleted', 'does not exist', 'no such'))):
                 return 'gone'
             print('⚠️ حذف کانفیگ از پنل رد شد (تلاش %d) config_id=%s کد=%s پاسخ=%s' % (attempt, config_id, code, body))
-            if attempt == 1 and (code >= 500 or code in (408, 425, 429)):
+            if code in (400, 409) and ('not_active' in low or 'already disabled' in low) and not resumed:
+                resumed = True
+                try:
+                    rr = resume_config_on_panel(config_id)
+                    print('↩️ ازسرگیری کانفیگ قبل از حذف:', config_id, rr.get('success'), str(rr.get('error') or '')[:200])
+                except Exception as _re:
+                    print('⚠️ ازسرگیری قبل از حذف ناموفق:', _re)
+                time.sleep(0.7)
+                continue
+            if code >= 500 or code in (408, 425, 429):
                 time.sleep(1.5)
                 continue
             return 'fail'
         except Exception as e:
             print('⚠️ استثنا در حذف کانفیگ از پنل (تلاش %d) config_id=%s: %s' % (attempt, config_id, e))
-            if attempt == 1:
-                time.sleep(1.5)
-                continue
-            return 'fail'
+            time.sleep(1.5)
     return 'fail'
 
 
@@ -4560,13 +4569,7 @@ def delete_config_with_refund(chat_id, row_id):
     if len(cfg) > 9 and cfg[9] in EXTRA_TYPES:
         return _delete_extra_with_refund(chat_id, row_id, cfg)
     config_id, gb, price = cfg[2], cfg[3], (cfg[6] or 0)
-    was_paused = len(cfg) > 10 and cfg[10] == 'paused'
-    paused_now = False
-    if config_id and not was_paused:
-        try:      # اول قطعش می‌کنیم تا بین خوندن مصرف و حذف، ترافیک مصرف نشه
-            paused_now = bool(pause_config_on_panel(config_id).get('success'))
-        except Exception:
-            paused_now = False
+    paused_now = False      # قبلاً قبل از حذف متوقف می‌شد، ولی پنل حذفِ کانفیگ غیرفعال رو رد می‌کنه (not_active)
     refund = 0
     used_gb = get_config_usage_gb(config_id) if config_id else None
     if used_gb is not None and gb and price:
