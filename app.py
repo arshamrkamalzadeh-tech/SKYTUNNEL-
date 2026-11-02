@@ -24,6 +24,10 @@ def find_bot():
 def start_proc(filename, extra_env=None):
     print(f"در حال اجرای {filename} ...", flush=True)
     env = dict(os.environ, PYTHONUNBUFFERED="1")
+    # کاهش مصرف رم: تعداد arena های حافظه‌ی glibc رو محدود می‌کنه و حافظه‌ی آزادشده زودتر به
+    # سیستم‌عامل برمی‌گرده. اگه همین متغیرها رو تو Railway Variables بذاری، همون اعمال می‌شه.
+    env.setdefault("MALLOC_ARENA_MAX", "2")
+    env.setdefault("MALLOC_TRIM_THRESHOLD_", "131072")
     env.update(extra_env or {})
     return subprocess.Popen([sys.executable, os.path.join(HERE, filename)], cwd=HERE, env=env)
 

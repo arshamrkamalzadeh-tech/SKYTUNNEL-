@@ -474,7 +474,7 @@ UI_TEXT = {
             '🔗 <code>{sub_url}</code>'
         ),
         'myconfigs_usage_unknown': '📊 مصرف این کانفیگ در حال حاضر از پنل قابل بررسی نیست.',
-        'btn_manage_config': '⚙️ مدیریت #{idx} — {label}',
+        'btn_manage_config': '⚙️ #{idx} {label}',
         'manage_title': '⚙️ <b>مدیریت کانفیگ</b>',
         'manage_name': '🏷 نام: <b>{label}</b>',
         'manage_volume': '📶 حجم: <b>{gb}</b> گیگابایت',
@@ -733,7 +733,7 @@ UI_TEXT = {
         'invoice_footer': 'Tap "✅ Confirm" to pay, or apply a discount code first if you have one.',
         'btn_confirm_purchase': '✅ Confirm',
         'btn_cancel_purchase': '❌ Cancel Purchase',
-        'btn_apply_discount': '🎟 Apply Discount Code',
+        'btn_apply_discount': '🎟 Discount code',
         'discount_ask_prompt': '🎟 Please send the discount code:',
         'discount_invalid': '❌ Invalid discount code.',
         'discount_inactive': '⛔ This discount code has been deactivated.',
@@ -785,7 +785,7 @@ UI_TEXT = {
             '🔗 <code>{sub_url}</code>'
         ),
         'myconfigs_usage_unknown': "📊 This config's usage can't be checked from the panel right now.",
-        'btn_manage_config': '⚙️ Manage #{idx} — {label}',
+        'btn_manage_config': '⚙️ #{idx} {label}',
         'manage_title': '⚙️ <b>Manage Config</b>',
         'manage_name': '🏷 Name: <b>{label}</b>',
         'manage_volume': '📶 Volume: <b>{gb}</b> GB',
@@ -843,7 +843,7 @@ UI_TEXT = {
             'After the change, <b>the old link stops working</b> and you must enter the new link in your app again.\n\n'
             'Are you sure?'
         ),
-        'btn_rotate_yes': '✅ Yes, change the link',
+        'btn_rotate_yes': '✅ Yes, change link',
         'btn_cfg_delete': '🗑 Delete config',
         'qr_cooldown': (
             '⏳ To keep the bot fast, the QR Code can be requested once every {minutes} minutes.\n'
@@ -891,7 +891,7 @@ UI_TEXT = {
             'Do you confirm?'
         ),
         'trial_paid_refunded': '↩️ The trial could not be created; <b>{price:,}</b> Toman was returned to your wallet.',
-        'btn_trial_pay': '✅ Confirm & get trial',
+        'btn_trial_pay': '✅ Confirm trial',
         'topup_prompt': '💠 Enter the amount (in Toman) you want to top up your wallet with.\nMinimum top-up amount: <b>{min_topup}</b> Toman',
         'topup_card_info': (
             '💳 <b>Payment Info</b>\n{divider}\n'
@@ -969,8 +969,8 @@ UI_TEXT['fa'].update({
 UI_TEXT['fa'].update({
     'topup_choose_method': '💠 مبلغ شارژ: <b>{amount}</b> تومان\nروش پرداخت رو انتخاب کنید:',
     'btn_topup_card': '💳 کارت به کارت',
-    'btn_topup_donito': '⚡️ پرداخت ریالی (خودکار)',
-    'btn_donito_check': '✅ پرداخت کردم، بررسی کن',
+    'btn_topup_donito': '⚡️ پرداخت ریالی',
+    'btn_donito_check': '✅ پرداخت کردم',
     'btn_donito_pay': '🔗 پرداخت در دونیتو',
     'topup_donito_info': (
         '⚡️ <b>پرداخت ریالی خودکار</b>\n{divider}\n'
@@ -1034,7 +1034,7 @@ UI_TEXT['fa'].update({
 UI_TEXT['en'].update({
     'topup_choose_method': '💠 Top-up amount: <b>{amount}</b> Toman\nChoose a payment method:',
     'btn_topup_card': '💳 Card to card',
-    'btn_topup_donito': '⚡️ Pay in Toman (automatic)',
+    'btn_topup_donito': '⚡️ Pay in Toman',
     'btn_donito_check': '✅ I paid, check now',
     'btn_donito_pay': '🔗 Pay on Donito',
     'topup_donito_info': (
@@ -1063,7 +1063,7 @@ UI_TEXT['en'].update({
         '🔎 After sending, just send the transaction hash as text (no screenshot needed). The bot will find and verify the deposit automatically.'
     ),
     'topup_crypto_need_proof': '🔎 Please send only the transaction hash as text (no photo needed). The hash must be a single continuous text with no spaces.',
-    'btn_send_hash': '🔎 Send transaction hash',
+    'btn_send_hash': '🔎 Send tx hash',
     'topup_receipt_ok_crypto_hint': '\n\n⏳ If your deposit is not confirmed automatically, you can send the transaction hash at any time and it will be checked again.',
     'topup_hash_prompt': '🔎 Send the transaction hash of your deposit (a single continuous text with no spaces).',
     'topup_hash_received': '✅ Hash received and being checked. If it matches your deposit it will be confirmed automatically; otherwise the admin will review it manually.',
@@ -1097,7 +1097,7 @@ UI_TEXT['en'].update({
 UI_TEXT['en'].update({
     'disabled_feature': '⛔ This feature is currently disabled by the administrator.',
     'price_unit_suffix': ' Toman/GB',
-    'btn_reseller': '🧑‍💼 Become a Reseller',
+    'btn_reseller': '🧑‍💼 Reseller',
     'topup_approved_mult': '✅ Your wallet was topped up by <b>{credited}</b> Toman (deposit {amount} Toman × multiplier {multiplier}).',
     'topup_approved': '✅ Your wallet was topped up by <b>{credited}</b> Toman.',
     'topup_rejected': '❌ Your deposit receipt was rejected. Please contact support.',
@@ -1241,7 +1241,7 @@ UI_TEXT['en'].update({
 
 # ---- فروشندگی جدید: ساخت خودکار حساب فروشنده روی پنل سرویس‌دهنده (بدون پرداخت) ----
 UI_TEXT['fa'].update({
-    'btn_reseller': '🏪 دریافت پنل فروشندگی',
+    'btn_reseller': '🏪 پنل فروشندگی',
     'btn_reseller_activate': '✅ ساخت حساب فروشندگی',
     'reseller_intro': (
         '🏪 <b>پنل فروشندگی</b>\n{divider}\n'
@@ -1282,7 +1282,7 @@ UI_TEXT['fa'].update({
 })
 UI_TEXT['en'].update({
     'btn_reseller': '🏪 Get Seller Panel',
-    'btn_reseller_activate': '✅ Create seller account',
+    'btn_reseller_activate': '✅ Seller account',
     'reseller_intro': (
         '🏪 <b>Seller panel</b>\n{divider}\n'
         'Get your own seller account in a few steps and sell services to your customers from its panel.\n\n'
@@ -1327,7 +1327,7 @@ UI_TEXT['en'].update({
 UI_TEXT['fa'].update({
     'btn_reseller_status': '📊 وضعیت فروشندگی',
     # تایید دستی پرداخت دونیتو
-    'btn_donito_manual': '📨 پرداخت کردم ولی شارژ نشد',
+    'btn_donito_manual': '📨 شارژ نشد؟',
     'donito_manual_ask': (
         '🧾 <b>تایید دستی پرداخت</b>\n{divider}\n'
         'اگه پرداخت کردید ولی شارژ خودکار انجام نشد، <b>کد پیگیری</b> پرداخت یا <b>اسمی که باهاش دونیت کردید</b> رو همین‌جا بفرستید تا ادمین بررسی و دستی تایید کنه.\n'
@@ -1351,10 +1351,10 @@ UI_TEXT['fa'].update({
         'یکی از بسته‌ها رو انتخاب کنید، یا «خرید دلخواه» رو بزنید تا خودتون حجم و مدت رو تنظیم کنید.\n\n'
         '💳 موجودی فعلی: <b>{wallet}</b> تومان'
     ),
-    'btn_buy_custom': '🛠 خرید دلخواه (انتخاب حجم و مدت)',
+    'btn_buy_custom': '🛠 خرید دلخواه',
     'plan_not_found': '⚠️ این بسته دیگه موجود نیست. لطفاً دوباره از منوی خرید انتخاب کنید.',
     # هشدارها
-    'btn_alert_manage': '⚙️ مدیریت / تمدید کانفیگ',
+    'btn_alert_manage': '⚙️ مدیریت / تمدید',
     'alert_exp_soon': (
         '⏰ <b>هشدار انقضا</b>\n{divider}\n'
         'کانفیگ <b>{label}</b> فقط <b>{days}</b> روز دیگه ({date}) منقضی می‌شه.\n'
@@ -1385,7 +1385,7 @@ UI_TEXT['fa'].update({
         '👋 <b>تستت چطور بود؟</b>\n{divider}\n'
         'اگه از سرعت و کیفیت سرویس راضی بودی، همین الان می‌تونی یه بسته بخری و بدون قطعی ادامه بدی.'
     ),
-    'btn_nudge_buy': '🛍 مشاهده بسته‌ها و خرید',
+    'btn_nudge_buy': '🛍 بسته‌ها و خرید',
 })
 UI_TEXT['en'].update({
     'btn_alert_renew': '🔄 Quick renew',
@@ -1402,7 +1402,7 @@ UI_TEXT['en'].update({
 })
 UI_TEXT['en'].update({
     'btn_reseller_status': '📊 Seller status',
-    'btn_donito_manual': '📨 I paid but was not credited',
+    'btn_donito_manual': '📨 Not credited?',
     'donito_manual_ask': (
         '🧾 <b>Manual payment review</b>\n{divider}\n'
         'If you paid but the automatic top-up did not happen, send your <b>tracking code</b> or the <b>name you donated with</b> here and the admin will review and approve it manually.\n'
@@ -1417,9 +1417,9 @@ UI_TEXT['en'].update({
         'Pick a plan, or tap “Custom purchase” to choose the volume and duration yourself.\n\n'
         '💳 Current balance: <b>{wallet}</b> Toman'
     ),
-    'btn_buy_custom': '🛠 Custom purchase (choose volume & days)',
+    'btn_buy_custom': '🛠 Custom purchase',
     'plan_not_found': '⚠️ This plan is no longer available. Please pick again from the buy menu.',
-    'btn_alert_manage': '⚙️ Manage / renew config',
+    'btn_alert_manage': '⚙️ Manage / renew',
     'alert_exp_soon': (
         '⏰ <b>Expiry warning</b>\n{divider}\n'
         'Your config <b>{label}</b> expires in <b>{days}</b> day(s) ({date}).\n'
@@ -1475,7 +1475,7 @@ def ui_setting_key(lang, key):
 UI_TEXT['fa'].update({
     'svc_unlimited': '♾ پلن نامحدود',
     'svc_proxy': '📡 پروکسی تلگرام',
-    'btn_unl_rebuy': '🔁 خرید پلن نامحدود جدید',
+    'btn_unl_rebuy': '🔁 نامحدود جدید',
     'btn_open_proxy': '📡 اتصال به پروکسی',
     'btn_sub_page': 'صفحه اشتراک🌐',
     'unl_unavailable': '⚠️ فروش پلن نامحدود الان در دسترس نیست. کمی بعد دوباره تلاش کنید.',
@@ -1506,7 +1506,7 @@ UI_TEXT['fa'].update({
 UI_TEXT['en'].update({
     'svc_unlimited': '♾ Unlimited plan',
     'svc_proxy': '📡 Telegram proxy',
-    'btn_unl_rebuy': '🔁 Buy a new unlimited plan',
+    'btn_unl_rebuy': '🔁 New unlimited plan',
     'btn_open_proxy': '📡 Connect to proxy',
     'btn_sub_page': 'Subscription page🌐',
     'unl_unavailable': '⚠️ Unlimited plans are not available right now. Please try again later.',
@@ -1551,7 +1551,7 @@ UI_TEXT['en'].update({
                    'Adjust devices and duration with the + / - buttons:\n\n💰 Current price: <b>{price}</b>'),
     'unl_users_btn': '👥 {n} device(s)',
     'buy_hub_text': '🛍 <b>Buy a service</b>\n{divider}\nChoose an option:\n\n💳 Balance: <b>{wallet}</b>',
-    'btn_buy_plans': '📦 Ready-made packages',
+    'btn_buy_plans': '📦 Ready packages',
     'btn_back_buy': '↩️ Back',
     'unl_support_error': '⚠️ Creating the plan failed. Any charged amount was returned to your wallet; please message support.',
     'unl_days_btn': '⏳ {n} days',
@@ -5118,53 +5118,92 @@ def get_updates(offset=None):
 
 
 # ---------------------------------------------------------------------------
-# جلوگیری از «...» شدن متن دکمه‌ها: دکمه‌های اینلاین وقتی کنار هم باشن نصف عرض رو
-# می‌گیرن و متن بلندشون بریده می‌شه. اینجا هر ردیفی که دکمه‌ی بلند داره شکسته می‌شه
-# تا دکمه‌ی بلند تمام‌عرض بیاد و فقط دکمه‌های کوتاه کنار هم بمونن. این تابع روی همه‌ی
-# پیام‌ها (ارسال، ویرایش، عکس) اعمال می‌شه، پس همه‌ی دکمه‌های ربات رو پوشش می‌ده.
+# کوتاه‌کردن متن دکمه‌های اینلاین تا «...» نشن. فقط *متن* دکمه عوض می‌شه، نه چیدمان:
+# هیچ دکمه‌ای جابه‌جا یا تک‌ردیفی نمی‌شه. متن فقط وقتی کوتاه می‌شه که از جای دکمه
+# بلندتر باشه و مرحله‌به‌مرحله (تا جایی که جا بشه) مخفف می‌شه:
+#   «4,000 تومان/گیگ» -> «4000/GB» ، «50 گیگ» -> «50GB» ، «150,000 تومان» -> «150000ت»
+# فقط کیبورد اینلاین دست می‌خوره؛ متن کیبورد معمولی (پایین صفحه) نباید عوض بشه چون
+# همون متن برای تشخیص دکمه به ربات برمی‌گرده.
 # ---------------------------------------------------------------------------
-BTN_PAIR_MAX_CHARS = 16     # حداکثر طول متن دکمه برای اینکه دوتایی کنار هم بشینه
-BTN_TRIPLE_MAX_CHARS = 10   # حداکثر طول متن برای ردیف‌های سه‌تایی و بیشتر
+_BTN_WIDTH_BY_ROW = {1: 44, 2: 22, 3: 14}     # ظرفیت تقریبی هر دکمه بر حسب تعداد دکمه‌ها تو ردیف
+_BTN_WIDTH_MANY = 10
+_BTN_INVISIBLE = '\u200c\u200d\u200e\u200f\ufe0e\ufe0f'
 
 
-def _btn_text_len(b):
+def _btn_visual_width(t):
+    w = 0.0
+    for ch in str(t):
+        if ch in _BTN_INVISIBLE:
+            continue
+        o = ord(ch)
+        if o >= 0x1F000 or 0x2600 <= o <= 0x27BF or ch in '⏳♾⚡':
+            w += 2
+        elif 'A' <= ch <= 'Z':
+            w += 1.4
+        else:
+            w += 1
+    return w
+
+
+def _btn_shorten_steps():
+    import re as _re
+    num = r'[\d۰-۹][\d۰-۹,٬]*'
+    return (
+        lambda t: _re.sub(r'(' + num + r')\s*(?:تومان|Toman)?\s*/\s*(?:گیگ|GB)', lambda m: _re.sub(r'[,٬]', '', m.group(1)) + '/GB', t),
+        lambda t: _re.sub(r'([\d۰-۹])\s*(?:گیگابایت|گیگ|GB)\b', r'\1GB', t),
+        lambda t: _re.sub(r'([\d۰-۹])\s*تومان', r'\1ت', t),
+        lambda t: _re.sub(r'([\d۰-۹])\s*Toman', r'\1T', t),
+        lambda t: t.replace(' — ', ' ').replace(' - ', ' '),
+        lambda t: _re.sub(r'\s*[\(（][^)）]*[\)）]', '', t),
+        lambda t: t.replace('فقط ', '').replace(' only', '').replace(' Only', ''),
+        lambda t: _re.sub(r'(?<=[\d۰-۹])[,٬](?=[\d۰-۹]{3})', '', t),
+    )
+
+
+_BTN_STEPS = None
+
+
+def _shorten_btn_text(text, width):
+    global _BTN_STEPS
     try:
-        return len(str(b.get('text', '')))
+        if _btn_visual_width(text) <= width:
+            return text
+        if _BTN_STEPS is None:
+            _BTN_STEPS = _btn_shorten_steps()
+        t = str(text)
+        for step in _BTN_STEPS:
+            t2 = step(t).strip()
+            if t2:
+                t = t2
+            if _btn_visual_width(t) <= width:
+                break
+        return t
     except Exception:
-        return 0
+        return text
 
 
-def _fit_keyboard(markup):
-    """ردیف‌های دارای دکمه‌ی بلند رو می‌شکنه؛ ورودی نامعتبر یا کیبورد غیراینلاین دست‌نخورده برمی‌گرده."""
+def _shorten_keyboard(markup):
+    """فقط متن دکمه‌های اینلاین رو کوتاه می‌کنه؛ تعداد ردیف‌ها و دکمه‌ها دقیقاً همون می‌مونه."""
     try:
         if not isinstance(markup, dict) or not isinstance(markup.get('inline_keyboard'), list):
             return markup
-        out = []
+        rows = []
         for row in markup['inline_keyboard']:
-            if not isinstance(row, list) or len(row) <= 1:
-                out.append(row)
+            if not isinstance(row, list):
+                rows.append(row)
                 continue
-            limit = BTN_PAIR_MAX_CHARS if len(row) == 2 else BTN_TRIPLE_MAX_CHARS
-            if all(_btn_text_len(b) <= limit for b in row):
-                out.append(row)
-                continue
-            # بازچینی: دکمه‌های کوتاه دوتایی، دکمه‌ی بلند تنها
-            pending = None
+            width = _BTN_WIDTH_BY_ROW.get(len(row), _BTN_WIDTH_MANY)
+            new_row = []
             for b in row:
-                if _btn_text_len(b) > BTN_PAIR_MAX_CHARS:
-                    if pending is not None:
-                        out.append([pending])
-                        pending = None
-                    out.append([b])
-                elif pending is None:
-                    pending = b
+                if isinstance(b, dict) and isinstance(b.get('text'), str):
+                    nb = dict(b)
+                    nb['text'] = _shorten_btn_text(b['text'], width)
+                    new_row.append(nb)
                 else:
-                    out.append([pending, b])
-                    pending = None
-            if pending is not None:
-                out.append([pending])
+                    new_row.append(b)
+            rows.append(new_row)
         new = dict(markup)
-        new['inline_keyboard'] = out
+        new['inline_keyboard'] = rows
         return new
     except Exception:
         return markup
@@ -5176,7 +5215,7 @@ def _raw_send_message(chat_id, text, parse_mode='HTML', reply_markup=None):
     if parse_mode:
         payload['parse_mode'] = parse_mode
     if reply_markup:
-        payload['reply_markup'] = json.dumps(_fit_keyboard(reply_markup))
+        payload['reply_markup'] = json.dumps(_shorten_keyboard(reply_markup))
     _t0 = time.time()
     try:
         res = SESSION.post(url, json=payload, timeout=15)
@@ -5206,7 +5245,7 @@ def edit_message(chat_id, message_id, text, parse_mode='HTML', reply_markup=None
     if parse_mode:
         payload['parse_mode'] = parse_mode
     if reply_markup:
-        payload['reply_markup'] = json.dumps(_fit_keyboard(reply_markup))
+        payload['reply_markup'] = json.dumps(_shorten_keyboard(reply_markup))
     try:
         res = SESSION.post(url, json=payload, timeout=15)
         return res.json()
@@ -5393,7 +5432,7 @@ def send_photo(chat_id, photo_id, caption=None, parse_mode='HTML', reply_markup=
     if parse_mode:
         payload['parse_mode'] = parse_mode
     if reply_markup:
-        payload['reply_markup'] = json.dumps(_fit_keyboard(reply_markup))
+        payload['reply_markup'] = json.dumps(_shorten_keyboard(reply_markup))
     try:
         res = SESSION.post(url, json=payload, timeout=20)
         return res.json()
@@ -5422,7 +5461,7 @@ def send_photo_bytes(chat_id, image_bytes, filename='qr.png', caption=None, pars
     if parse_mode:
         data['parse_mode'] = parse_mode
     if reply_markup:
-        data['reply_markup'] = json.dumps(_fit_keyboard(reply_markup))
+        data['reply_markup'] = json.dumps(_shorten_keyboard(reply_markup))
     files = {'photo': (filename, image_bytes, 'image/png')}
     try:
         res = SESSION.post(url, data=data, files=files, timeout=25)
@@ -6940,7 +6979,7 @@ def action_my_configs(chat_id):
         ctype = cfg[9] if len(cfg) > 9 else 'both'
         if ctype in EXTRA_TYPES:
             txt += build_extra_card(chat_id, i, cfg) + '\n\n'
-            manage_rows.append([{'text': u(chat_id, 'btn_manage_config', idx=i, label=str(cfg[4])[:20]),
+            manage_rows.append([{'text': u(chat_id, 'btn_manage_config', idx=i, label=str(cfg[4])[:12]),
                                  'callback_data': 'managecfg_' + str(cfg[0])}])
             continue
         ctype_label = get_ctype_label(chat_id, ctype)
@@ -6971,7 +7010,7 @@ def action_my_configs(chat_id):
                 gb=f'{gb_total:g}', remaining_gb=f'{remaining_gb:.2f}', used_gb=f'{used_gb:.2f}',
                 remaining_days=remaining_days, ctype_label=ctype_label, sub_url=str(cfg[1]),
             ) + '\n\n'
-        btn_label = str(cfg[4])[:20]
+        btn_label = str(cfg[4])[:12]
         manage_rows.append([{
             'text': u(chat_id, 'btn_manage_config', idx=i, label=btn_label),
             'callback_data': 'managecfg_' + str(cfg[0])
@@ -8133,6 +8172,41 @@ _HEALTH_PORT = int(os.getenv("PORT", "8080"))
 # وقتی بات و پنل تو یه سرویس با start.py اجرا می‌شن، پورت مال پنله و start.py این رو ۱ می‌ذاره
 if os.getenv("DISABLE_HEALTH_SERVER") != "1" and start_health_server(_HEALTH_PORT):
     start_keepalive(_HEALTH_PORT)
+# ---------------------------------------------------------------------------
+# کاهش مصرف رم: هر چند دقیقه کش‌های بزرگ‌شده خالی می‌شن (همه‌شون از دیتابیس دوباره پر می‌شن)،
+# garbage collector اجرا می‌شه و حافظه‌ی آزادشده با malloc_trim به سیستم‌عامل برمی‌گرده
+# (بدون این، پایتون تو لینوکس رمِ آزادشده رو نگه می‌داره و نمودار رم بالا می‌مونه).
+# ---------------------------------------------------------------------------
+def _mem_janitor(interval=300):
+    try:
+        import gc as _gc
+    except Exception:
+        _gc = None
+    try:
+        import ctypes as _ct
+        _libc = _ct.CDLL('libc.so.6')
+    except Exception:
+        _libc = None
+    names = ('_member_cache', '_cfg_kind_cache', '_qr_last_sent', '_ban_notice_at',
+             '_user_info_cache', '_activity_cache', '_user_kb_cache', '_user_lang_cache',
+             '_ban_cache', '_gate_verified_mem')
+    while True:
+        time.sleep(interval)
+        try:
+            g = globals()
+            for n in names:
+                d = g.get(n)
+                if isinstance(d, dict) and len(d) > 20000:
+                    d.clear()
+            if _gc:
+                _gc.collect()
+            if _libc:
+                _libc.malloc_trim(0)
+        except Exception:
+            pass
+
+
+threading.Thread(target=_mem_janitor, daemon=True).start()
 threading.Thread(target=commands_watcher, daemon=True).start()
 threading.Thread(target=registry_watcher, daemon=True).start()
 threading.Thread(target=crypto_deposit_watcher, daemon=True).start()

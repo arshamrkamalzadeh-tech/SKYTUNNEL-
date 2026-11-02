@@ -6769,8 +6769,29 @@ if __name__ == "__main__":
         print("⚠️ ensure_schema:", e)
     port = int(os.getenv("PORT", "8080"))
     start_keepalive(port)
+
+    # کاهش مصرف رم: هر ۵ دقیقه GC + برگردوندن حافظه‌ی آزادشده به سیستم‌عامل (malloc_trim)
+    def _mem_janitor(interval=300):
+        try:
+            import gc as _gc
+            import ctypes as _ct
+            _libc = _ct.CDLL("libc.so.6")
+        except Exception:
+            _gc, _libc = None, None
+        while True:
+            time.sleep(interval)
+            try:
+                if _gc:
+                    _gc.collect()
+                if _libc:
+                    _libc.malloc_trim(0)
+            except Exception:
+                pass
+    threading.Thread(target=_mem_janitor, daemon=True).start()
+
     try:
         from waitress import serve          # اگه نصب باشه: سرور تولیدی چندترده (خیلی سریع‌تر از سرور توسعه‌ی Flask)
-        serve(app, host="0.0.0.0", port=port, threads=16)
+        # پنل فقط ادمین استفاده می‌کنه؛ ۶ ترد کافیه و رم کمتری می‌گیره (با PANEL_THREADS قابل تغییره)
+        serve(app, host="0.0.0.0", port=port, threads=int(os.getenv("PANEL_THREADS", "6")))
     except ImportError:
         app.run(host="0.0.0.0", port=port, threaded=True)
