@@ -5117,13 +5117,66 @@ def get_updates(offset=None):
         return {'ok': False, 'result': []}
 
 
+# ---------------------------------------------------------------------------
+# جلوگیری از «...» شدن متن دکمه‌ها: دکمه‌های اینلاین وقتی کنار هم باشن نصف عرض رو
+# می‌گیرن و متن بلندشون بریده می‌شه. اینجا هر ردیفی که دکمه‌ی بلند داره شکسته می‌شه
+# تا دکمه‌ی بلند تمام‌عرض بیاد و فقط دکمه‌های کوتاه کنار هم بمونن. این تابع روی همه‌ی
+# پیام‌ها (ارسال، ویرایش، عکس) اعمال می‌شه، پس همه‌ی دکمه‌های ربات رو پوشش می‌ده.
+# ---------------------------------------------------------------------------
+BTN_PAIR_MAX_CHARS = 16     # حداکثر طول متن دکمه برای اینکه دوتایی کنار هم بشینه
+BTN_TRIPLE_MAX_CHARS = 10   # حداکثر طول متن برای ردیف‌های سه‌تایی و بیشتر
+
+
+def _btn_text_len(b):
+    try:
+        return len(str(b.get('text', '')))
+    except Exception:
+        return 0
+
+
+def _fit_keyboard(markup):
+    """ردیف‌های دارای دکمه‌ی بلند رو می‌شکنه؛ ورودی نامعتبر یا کیبورد غیراینلاین دست‌نخورده برمی‌گرده."""
+    try:
+        if not isinstance(markup, dict) or not isinstance(markup.get('inline_keyboard'), list):
+            return markup
+        out = []
+        for row in markup['inline_keyboard']:
+            if not isinstance(row, list) or len(row) <= 1:
+                out.append(row)
+                continue
+            limit = BTN_PAIR_MAX_CHARS if len(row) == 2 else BTN_TRIPLE_MAX_CHARS
+            if all(_btn_text_len(b) <= limit for b in row):
+                out.append(row)
+                continue
+            # بازچینی: دکمه‌های کوتاه دوتایی، دکمه‌ی بلند تنها
+            pending = None
+            for b in row:
+                if _btn_text_len(b) > BTN_PAIR_MAX_CHARS:
+                    if pending is not None:
+                        out.append([pending])
+                        pending = None
+                    out.append([b])
+                elif pending is None:
+                    pending = b
+                else:
+                    out.append([pending, b])
+                    pending = None
+            if pending is not None:
+                out.append([pending])
+        new = dict(markup)
+        new['inline_keyboard'] = out
+        return new
+    except Exception:
+        return markup
+
+
 def _raw_send_message(chat_id, text, parse_mode='HTML', reply_markup=None):
     url = BASE_URL + '/sendMessage'
     payload = {'chat_id': chat_id, 'text': text}
     if parse_mode:
         payload['parse_mode'] = parse_mode
     if reply_markup:
-        payload['reply_markup'] = json.dumps(reply_markup)
+        payload['reply_markup'] = json.dumps(_fit_keyboard(reply_markup))
     _t0 = time.time()
     try:
         res = SESSION.post(url, json=payload, timeout=15)
@@ -5153,7 +5206,7 @@ def edit_message(chat_id, message_id, text, parse_mode='HTML', reply_markup=None
     if parse_mode:
         payload['parse_mode'] = parse_mode
     if reply_markup:
-        payload['reply_markup'] = json.dumps(reply_markup)
+        payload['reply_markup'] = json.dumps(_fit_keyboard(reply_markup))
     try:
         res = SESSION.post(url, json=payload, timeout=15)
         return res.json()
@@ -5340,7 +5393,7 @@ def send_photo(chat_id, photo_id, caption=None, parse_mode='HTML', reply_markup=
     if parse_mode:
         payload['parse_mode'] = parse_mode
     if reply_markup:
-        payload['reply_markup'] = json.dumps(reply_markup)
+        payload['reply_markup'] = json.dumps(_fit_keyboard(reply_markup))
     try:
         res = SESSION.post(url, json=payload, timeout=20)
         return res.json()
@@ -5369,7 +5422,7 @@ def send_photo_bytes(chat_id, image_bytes, filename='qr.png', caption=None, pars
     if parse_mode:
         data['parse_mode'] = parse_mode
     if reply_markup:
-        data['reply_markup'] = json.dumps(reply_markup)
+        data['reply_markup'] = json.dumps(_fit_keyboard(reply_markup))
     files = {'photo': (filename, image_bytes, 'image/png')}
     try:
         res = SESSION.post(url, data=data, files=files, timeout=25)
@@ -5902,10 +5955,9 @@ def _action_buy_custom_menu(chat_id):
     # جدول settings) خونده شده، پس با تغییر قیمت از پنل، متن دکمه هم بدون نیاز
     # به ری‌استارت به‌روز می‌شه. دکمه‌ها اینلاین‌ان و HTML رو نشون نمی‌دن، پس
     # اینجا قیمت رو بدون تگ <b> می‌چسبونیم.
-    unit_suffix = u(chat_id, 'price_unit_suffix')
     type_kb = {
         'inline_keyboard': _pair_buttons([{
-            'text': f"{get_ctype_label(chat_id, k)}: {ct[k]['price_per_gb']:,}{unit_suffix}",
+            'text': f"{get_ctype_label(chat_id, k)}: {ct[k]['price_per_gb']}/GB",
             'callback_data': 'buytype_' + k,
         } for k in order])
     }
