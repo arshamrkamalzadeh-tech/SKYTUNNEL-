@@ -280,6 +280,29 @@ def get_default_days():
     return max(1, _setting_int('default_days', 30))
 
 
+# قیمت‌گذاری مدت (روز): پیش‌فرض خاموش. وقتی روشنه، هر روزِ بیشتر از «روز رایگان» پولیه.
+def day_price_enabled():
+    return str(get_setting('day_price_enabled', '0')).strip() == '1'
+
+
+def get_day_price():
+    return max(0, _setting_int('day_price', 0))
+
+
+def get_day_free_days():
+    return max(0, _setting_int('day_price_free_days', 30))
+
+
+def day_surcharge(days):
+    """هزینه‌ی روزهای اضافه (۰ اگه قیمت‌گذاری روز خاموش باشه)."""
+    if not day_price_enabled():
+        return 0
+    try:
+        return max(0, int(days) - get_day_free_days()) * get_day_price()
+    except Exception:
+        return 0
+
+
 # --- محدودیت‌های قابل‌تنظیم از پنل (بدون ری‌استارت). عدد 0 یعنی «بدون محدودیت» (مگر جایی که ذکر شده) ---
 def get_rate_limit_count():
     """حداکثر تعداد آپدیت (پیام/دکمه) یک کاربر غیرادمین تو هر بازه؛ 0 = خاموش."""
@@ -414,9 +437,9 @@ UI_TEXT = {
             'هر گیگابایت: <b>{price_per_gb}</b> تومان\n'
             '💳 موجودی: <b>{wallet}</b> تومان\n\n'
             'حجم، مدت اعتبار و تعداد کاربر رو با دکمه‌های + / - تنظیم کن:\n\n'
-            '{devices_line}'
+            '{days_line}{devices_line}'
             '🏷 نام کانفیگ: <b>{label}</b>\n'
-            '✏️ برای نام دلخواه، همین‌جا یه پیام بفرست.\n\n'
+            '✏️ برای نام دلخواه، دکمه‌ی «نام» رو بزن یا همین‌جا یه پیام بفرست.\n\n'
             '💰 قیمت فعلی: <b>{price}</b> تومان'
         ),
         'qty_continue': '✅ ادامه',
@@ -728,9 +751,9 @@ UI_TEXT = {
             'Per GB: <b>{price_per_gb}</b> Toman\n'
             '💳 Balance: <b>{wallet}</b> Toman\n\n'
             'Adjust volume, duration and number of users with the +/- buttons:\n\n'
-            '{devices_line}'
+            '{days_line}{devices_line}'
             '🏷 Config name: <b>{label}</b>\n'
-            '✏️ To use a custom name, just send it here as a message.\n\n'
+            '✏️ For a custom name tap the Name button or just send it here as a message.\n\n'
             '💰 Current price: <b>{price}</b> Toman'
         ),
         'qty_continue': '✅ Continue',
@@ -1663,6 +1686,8 @@ UI_TEXT['fa'].update({
     'plan_btn': '📦 {title} — {price} {cur}',
     'buy_menu_type_btn': '{label}: {price}/GB',
     'btn_unl_back': '↩️',
+    'qty_days_line': '⏳ هر روز بیشتر از {free} روز: <b>{price}</b> تومان',
+    'qty_name_btn': '🏷 نام: {name}',
 })
 UI_TEXT['en'].update({
     'plan_options_screen': (
@@ -1685,6 +1710,8 @@ UI_TEXT['en'].update({
     'plan_btn': '📦 {title} — {price} {cur}',
     'buy_menu_type_btn': '{label}: {price}/GB',
     'btn_unl_back': '↩️',
+    'qty_days_line': '⏳ Each day beyond {free} days: <b>{price}</b> Toman',
+    'qty_name_btn': '🏷 Name: {name}',
 })
 
 
@@ -4454,7 +4481,7 @@ def _reorder_extra(chat_id, order):
             send_message(chat_id, u(chat_id, 'unl_unavailable'))
             return
         step = {'step': 'confirm_buy', 'gb': 0, 'days': days, 'price': p, 'base_price': p,
-                'label': get_next_user_label(), 'type': 'unlimited', 'devices': devices}
+                'label': peek_next_user_label(), 'label_auto': True, 'type': 'unlimited', 'devices': devices}
     else:
         if not proxy_available():
             send_message(chat_id, u(chat_id, 'proxy_unavailable'))
@@ -4463,7 +4490,7 @@ def _reorder_extra(chat_id, order):
         g = min(max(float(gb or mn), mn), mx)
         p = proxy_price(g)
         step = {'step': 'confirm_buy', 'gb': g, 'days': 0, 'price': p, 'base_price': p,
-                'label': get_next_user_label(), 'type': 'proxy'}
+                'label': peek_next_user_label(), 'label_auto': True, 'type': 'proxy'}
     user_steps[str(chat_id)] = step
     send_message(chat_id, build_purchase_invoice(chat_id, step), reply_markup=build_purchase_kb(chat_id))
 
@@ -5114,6 +5141,56 @@ def get_next_user_label():
         conn.commit()
         conn.close()
         return 'USER-' + str(next_val)
+
+
+_inflight_labels = set()
+
+
+def _read_label_counter():
+    conn = get_conn()
+    c = conn.cursor()
+    c.execute("SELECT value FROM settings WHERE key='user_label_counter'")
+    res = c.fetchone()
+    conn.close()
+    try:
+        return int(res[0]) if res and res[0] else 0
+    except Exception:
+        return 0
+
+
+def peek_next_user_label():
+    """اسم پیش‌فرض بعدی (USER-n) بدون مصرف‌کردن شماره؛ فقط برای نمایش تو فاکتور."""
+    with _label_counter_lock:
+        return 'USER-' + str(_read_label_counter() + 1)
+
+
+def reserve_user_label():
+    """موقع ساخت کانفیگ: کوچک‌ترین شماره‌ی آزاد رو موقت رزرو می‌کنه (تا دو خرید هم‌زمان یه اسم نگیرن)
+    ولی شمارنده‌ی اصلی رو بالا نمی‌بره. فقط با commit_user_label بعد از تحویل موفق بالا می‌ره."""
+    with _label_counter_lock:
+        n = _read_label_counter() + 1
+        while n in _inflight_labels:
+            n += 1
+        _inflight_labels.add(n)
+        return 'USER-' + str(n), n
+
+
+@with_db_retry
+def commit_user_label(n):
+    with _label_counter_lock:
+        _inflight_labels.discard(n)
+        conn = get_conn()
+        c = conn.cursor()
+        if _read_label_counter() < n:
+            c.execute("INSERT INTO settings (key, value) VALUES ('user_label_counter', ?) "
+                      "ON CONFLICT(key) DO UPDATE SET value=excluded.value", (str(n),))
+            conn.commit()
+        conn.close()
+
+
+def release_user_label(n):
+    with _label_counter_lock:
+        _inflight_labels.discard(n)
 
 
 def get_ordered_keys(setting_key, default_keys):
@@ -5845,6 +5922,8 @@ def _qty_base_price(st):
 def qty_total_price(st):
     """قیمت نهایی = قیمت حجم (یا بسته) + هزینه‌ی تعداد کاربر همزمان."""
     price = _qty_base_price(st)
+    if not st.get('fixed') and st.get('type', 'both') not in EXTRA_TYPES:
+        price += day_surcharge(st['days'])
     if _qty_devices_on(st):
         price += device_price(st.get('device_limit', 1))
     return price
@@ -5886,6 +5965,9 @@ def build_quantity_screen(chat_id, step_data):
     wallet = get_wallet_db(chat_id)
     label = step_data.get('label') or u(chat_id, 'qty_name_default')
 
+    days_line = ''
+    if day_price_enabled() and not fixed and get_day_price() > 0:
+        days_line = u(chat_id, 'qty_days_line', free=get_day_free_days(), price=f'{get_day_price():,}') + '\n'
     devices_line = ''
     if dev_on:
         devices_word = u(chat_id, 'device_word_unlimited') if dl == 0 else dl
@@ -5899,7 +5981,7 @@ def build_quantity_screen(chat_id, step_data):
     else:
         text = u(chat_id, 'qty_screen', ctype_label=ctype_label,
                  price_per_gb=f"{cfg_type['price_per_gb']:,}", wallet=f'{wallet:,}', price=f'{price:,}',
-                 label=label, devices_line=devices_line)
+                 label=label, devices_line=devices_line, days_line=days_line)
 
     rows = []
     if not fixed:
@@ -5920,6 +6002,7 @@ def build_quantity_screen(chat_id, step_data):
             {'text': users_txt, 'callback_data': 'qty_noop'},
             {'text': u(chat_id, 'btn_qty_plus'), 'callback_data': 'qty_user_inc'},
         ])
+    rows.append([{'text': u(chat_id, 'qty_name_btn', name=label), 'callback_data': 'qty_name'}])
     if step_data.get('label'):
         rows.append([{'text': u(chat_id, 'qty_name_reset_btn'), 'callback_data': 'qty_name_reset'}])
     rows.append([{'text': u(chat_id, 'qty_continue'), 'callback_data': 'qty_confirm'},
@@ -7838,6 +7921,8 @@ TEXT_WHERE.update({
     'qty_users_btn': '👥 دکمه‌ی وسط ردیف تعداد کاربر',
     'qty_users_unlimited_btn': '♾ دکمه‌ی وسط ردیف تعداد کاربر وقتی «بدون محدودیت» انتخاب شده',
     'qty_name_default': '🏷 چیزی که به‌جای اسم نشون داده می‌شه وقتی کاربر اسم دلخواه نذاشته (اسم واقعی موقع خرید USER-n می‌شه)',
+    'qty_name_btn': '🏷 دکمه‌ی نام کانفیگ تو صفحه‌ی خرید (با زدنش از کاربر اسم می‌پرسه)',
+    'qty_days_line': '⏳ خطی که قیمت هر روز اضافه رو نشون می‌ده (فقط وقتی قیمت‌گذاری روز روشنه)',
     'qty_name_reset_btn': '🏷 دکمه‌ی برگشت به اسم پیش‌فرض (بعد از اینکه کاربر اسم دلخواه فرستاد ظاهر می‌شه)',
     'qty_continue': '✅ دکمه‌ی ادامه تو صفحه‌ی خرید',
     'ask_label_skip': '➡️ دکمه‌ی «رد شدن (اسم پیش‌فرض)» تو مرحله‌ی اسم — فقط برای نامحدود و پروکسی',
@@ -8133,7 +8218,7 @@ def quick_renew_pack(user_id, row_id):
         price = proxy_price(gb)
     if price is None:
         types = get_config_types()
-        price = round(gb * types.get(ctype, types['both'])['price_per_gb'])
+        price = round(gb * types.get(ctype, types['both'])['price_per_gb']) + day_surcharge(days)
     gb = int(gb) if gb == int(gb) else gb
     return cfg, gb, days, int(price)
 
@@ -8518,10 +8603,11 @@ def _process_update_impl(update):
                 gb, days = order[2], order[3]
                 if gb is not None and float(gb).is_integer():
                     gb = int(gb)
-                price = int(round(gb * types[ctype]['price_per_gb']))
-                new_label = get_next_user_label()
+                price = int(round(gb * types[ctype]['price_per_gb'])) + day_surcharge(days)
+                new_label = peek_next_user_label()
                 user_steps[str(chat_id)] = {
                     'step': 'confirm_buy',
+                    'label_auto': True,
                     'gb': gb,
                     'days': days,
                     'price': price,
@@ -8544,10 +8630,11 @@ def _process_update_impl(update):
                 ctype = cfg[9] if len(cfg) > 9 else 'both'
                 cfg_type = get_config_types().get(ctype, get_config_types()['both'])
                 gb, days = cfg[3], cfg[5]
-                price = gb * cfg_type['price_per_gb']
-                new_label = get_next_user_label()  # اسم قدیمی رو تکرار نمی‌کنیم چون پنل هر اسم رو فقط یک‌بار قبول می‌کنه
+                price = gb * cfg_type['price_per_gb'] + day_surcharge(days)
+                new_label = peek_next_user_label()  # اسم قدیمی رو تکرار نمی‌کنیم چون پنل هر اسم رو فقط یک‌بار قبول می‌کنه
                 user_steps[str(chat_id)] = {
                     'step': 'confirm_buy',
+                    'label_auto': True,
                     'gb': gb,
                     'days': days,
                     'price': price,
@@ -8622,6 +8709,9 @@ def _process_update_impl(update):
                         )
                         return
                     send_message(chat_id, u(chat_id, 'building_config'), transient=True)
+                    _lbl_n = None
+                    if s.get('label_auto'):
+                        label, _lbl_n = reserve_user_label()     # شماره‌ی USER فقط بعد از ساخت موفق مصرف می‌شه
                     try:
                         if ctype == 'unlimited':
                             res = make_unlimited(s.get('devices') or 1, days, label,
@@ -8635,6 +8725,11 @@ def _process_update_impl(update):
                         print('⚠️ استثنا هنگام ساخت کانفیگ:', _mc_err)
                         res = {'success': False, 'error': str(_mc_err), 'error_code': None}
                     if res['success'] and res['sub_url']:
+                        if _lbl_n:
+                            try:
+                                commit_user_label(_lbl_n)
+                            except Exception as _lc_err:
+                                print('⚠️ ثبت شماره‌ی اسم پیش‌فرض:', _lc_err)
                         if ctype not in EXTRA_TYPES:
                             try:
                                 apply_device_limit(chat_id, res.get('config_id'), s.get('device_limit'), label)
@@ -8684,6 +8779,15 @@ def _process_update_impl(update):
                             process_referral_reward(chat_id, 'purchase', price)   # بعد از پیام موفقیت، تا خریدار معطل نشه
                     else:
                         # ساخت کانفیگ نشد → پول برگردونده می‌شه و کد تخفیف آزاد می‌شه
+                        if _lbl_n:
+                            _ec = (str(res.get('error_code') or '') + ' ' + str(res.get('error') or '')).lower()
+                            if any(w in _ec for w in ('409', 'exist', 'duplicate', 'taken', 'already', 'used')):
+                                try:
+                                    commit_user_label(_lbl_n)      # اسم تو پنل از قبل هست؛ رد می‌شیم تا کاربر گیر نکنه
+                                except Exception:
+                                    release_user_label(_lbl_n)
+                            else:
+                                release_user_label(_lbl_n)         # شکست عادی: شماره مصرف نمی‌شه
                         try:
                             update_wallet_db(chat_id, price, 'refund_failed_purchase')
                             if _claimed_code:
@@ -9140,6 +9244,24 @@ def _process_update_impl(update):
                 text, kb = build_quantity_screen(chat_id, s)
                 edit_message(chat_id, query['message']['message_id'], text, reply_markup=kb)
 
+        elif data == 'qty_name':
+            s = user_steps.get(str(chat_id), {})
+            if s.get('step') != 'pick_quantity':
+                flow_end(chat_id, 'expired')
+            else:
+                send_message(chat_id, u(chat_id, 'ask_label_prompt'), reply_markup={'inline_keyboard': [[
+                    {'text': u(chat_id, 'ask_label_skip'), 'callback_data': 'qty_name_skip'},
+                    {'text': u(chat_id, 'btn_cancel'), 'callback_data': 'cancel'}]]})
+
+        elif data == 'qty_name_skip':
+            s = user_steps.get(str(chat_id), {})
+            if s.get('step') != 'pick_quantity':
+                flow_end(chat_id, 'expired')
+            else:
+                s['label'] = None
+                _t, _kb = build_quantity_screen(chat_id, s)
+                send_message(chat_id, _t, reply_markup=_kb)
+
         elif data == 'qty_noop':
             pass  # دکمه‌ی نمایش مقدار وسط، فقط برای نشون‌دادنه و کاری انجام نمی‌ده
 
@@ -9151,9 +9273,10 @@ def _process_update_impl(update):
                 ctype = s.get('type', 'both')
                 gb, days = s['gb'], s['days']
                 price = qty_total_price(s)
-                label = s.get('label') or get_next_user_label()   # USER-1, USER-2, ... اگه اسم دلخواه ندادن
+                label = s.get('label') or peek_next_user_label()   # USER-n فقط نمایشیه؛ شماره موقع تحویل موفق مصرف می‌شه
                 user_steps[str(chat_id)] = {
                     'step': 'confirm_buy',
+                    'label_auto': not s.get('label'),
                     'gb': gb,
                     'days': days,
                     'price': price,
@@ -9182,11 +9305,12 @@ def _process_update_impl(update):
         elif data == 'skip_label':
             s = user_steps.get(str(chat_id), {})
             if s.get('step') == 'ask_label':
-                label = get_next_user_label()  # USER-1, USER-2, ... — هر اسم فقط یک‌بار تو پنل قابل استفاده‌ست
+                label = peek_next_user_label()  # فقط نمایشی؛ شماره موقع تحویل موفق مصرف می‌شه
                 gb, days, price = s['gb'], s['days'], s['price']
                 ctype = s.get('type', 'both')
                 user_steps[str(chat_id)] = {
                     'step': 'confirm_buy',
+                    'label_auto': True,
                     'gb': gb,
                     'days': days,
                     'price': price,
@@ -9364,13 +9488,15 @@ def _process_update_impl(update):
             send_message(chat_id, _t, reply_markup=_kb)
 
         elif step.get('step') == 'ask_label':
-            label = clean_label(text) or get_next_user_label()
+            _typed = clean_label(text)
+            label = _typed or peek_next_user_label()
             gb = step['gb']
             days = step['days']
             price = step['price']
             ctype = step.get('type', 'both')
             user_steps[str(chat_id)] = {
                 'step': 'confirm_buy',
+                'label_auto': not _typed,
                 'gb': gb,
                 'days': days,
                 'price': price,
@@ -9530,7 +9656,7 @@ def _process_update_impl(update):
                             price_per_gb = proxy_price_per_gb()
                         else:
                             price_per_gb = get_config_types().get(ctype, get_config_types()['both'])['price_per_gb']
-                        price = round(extra_gb * price_per_gb)
+                        price = round(extra_gb * price_per_gb) + (day_surcharge(extra_days) if ctype != 'proxy' else 0)
                         user_steps[str(chat_id)] = {
                             'step': 'ext_confirm',
                             'row_id': row_id,
