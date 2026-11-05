@@ -340,6 +340,15 @@ def get_auto_ban_strikes():
     return max(1, _setting_int('auto_ban_strikes', 5))
 
 
+def get_device_enabled(): return get_setting('device_limit_enabled', '1') == '1'
+def get_device_max(): return min(5, max(1, _setting_int('device_max', 5)))  # سقف API: 5
+def get_device_extra_price(): return max(0, _setting_int('device_extra_price', 20))
+def get_device_unlimited_price(): return max(0, _setting_int('device_unlimited_price', 1200))
+def device_price(n):
+    """n=0 یعنی بدون محدودیت. کاربر اول رایگانه."""
+    return get_device_unlimited_price() if n == 0 else max(0, n - 1) * get_device_extra_price()
+
+
 def get_extend_min_gb():
     """حداقل حجم هر تمدید (گیگ). جلوی تمدید تقریباً رایگان با حجم خیلی کم (مثلاً 0.0001) رو می‌گیره."""
     return max(0.0, _setting_float('extend_min_gb', 1.0))
@@ -1589,12 +1598,36 @@ UI_TEXT['en'].update({
 # به‌جای فرستادن دوباره‌ی پیام اولیه‌ی منو، همین پیام‌ها جای صفحه‌ی فعلی میان؛
 # از پنل (صفحه‌ی «متن‌های ربات» > «لغو و پایان مراحل») قابل تغییرن.
 UI_TEXT['fa'].update({
+    'devices_screen': ('👥 <b>حداکثر تعداد کاربر همزمان</b>\n'
+                       'چند نفر بتونن هم‌زمان به این کانفیگ وصل بشن؟\n\n'
+                       '• کاربر اول: <b>رایگان</b>\n'
+                       '• هر کاربر اضافه: <b>{extra}</b> تومان\n'
+                       '• بدون محدودیت: <b>{unl}</b> تومان\n\n'
+                       '💰 قیمت پایه: <b>{base}</b> تومان\n'
+                       '💳 موجودی: <b>{wallet}</b> تومان'),
+    'device_btn_free': '👤 ۱ کاربر (رایگان)',
+    'device_btn_paid': '👥 {n} کاربر (+{price})',
+    'device_btn_unlimited': '♾ بدون محدودیت (+{price})',
+    'invoice_devices': '👥 کاربر همزمان: <b>{devices}</b>',
+    'device_word_unlimited': 'نامحدود',
     'flow_cancelled': '❌ لغو شد.\nهر وقت خواستید از منو دوباره شروع کنید.',
     'flow_expired': 'ℹ️ این صفحه دیگه معتبر نیست.\nلطفاً از منو دوباره شروع کنید.',
     'flow_home': '🏠 یکی از گزینه‌های منوی پایین رو انتخاب کنید.',
     'kb_placeholder': 'یکی از گزینه‌ها رو انتخاب کنید 👇',
 })
 UI_TEXT['en'].update({
+    'devices_screen': ('👥 <b>Max simultaneous users</b>\n'
+                       'How many people can connect to this config at the same time?\n\n'
+                       '• First user: <b>free</b>\n'
+                       '• Each extra user: <b>{extra}</b> Toman\n'
+                       '• Unlimited: <b>{unl}</b> Toman\n\n'
+                       '💰 Base price: <b>{base}</b> Toman\n'
+                       '💳 Wallet: <b>{wallet}</b> Toman'),
+    'device_btn_free': '👤 1 user (free)',
+    'device_btn_paid': '👥 {n} users (+{price})',
+    'device_btn_unlimited': '♾ Unlimited (+{price})',
+    'invoice_devices': '👥 Simultaneous users: <b>{devices}</b>',
+    'device_word_unlimited': 'Unlimited',
     'flow_cancelled': '❌ Cancelled.\nStart again from the menu whenever you like.',
     'flow_expired': 'ℹ️ This page is no longer valid.\nPlease start again from the menu.',
     'flow_home': '🏠 Please choose an option from the menu below.',
@@ -4187,8 +4220,8 @@ def build_unl_screen(chat_id, st):
          {'text': u(chat_id, 'btn_qty_plus'), 'callback_data': 'unl_days_inc'}],
         [{'text': u(chat_id, 'unl_week_minus_btn'), 'callback_data': 'unl_days_dec7'},
          {'text': u(chat_id, 'unl_week_plus_btn'), 'callback_data': 'unl_days_inc7'}],
-        [{'text': u(chat_id, 'qty_continue'), 'callback_data': 'unl_confirm'}],
-        [{'text': u(chat_id, 'btn_cancel'), 'callback_data': 'cancel'}],
+        [{'text': u(chat_id, 'qty_continue'), 'callback_data': 'unl_confirm'},
+         {'text': u(chat_id, 'btn_cancel'), 'callback_data': 'cancel'}],
     ]}
     return text, kb
 
@@ -5775,11 +5808,74 @@ def build_quantity_screen(chat_id, step_data):
                 {'text': '⏳ ' + str(days) + ' ' + u(chat_id, 'unit_day'), 'callback_data': 'qty_noop'},
                 {'text': u(chat_id, 'btn_qty_plus'), 'callback_data': 'qty_days_inc'},
             ],
-            [{'text': u(chat_id, 'qty_continue'), 'callback_data': 'qty_confirm'}],
-            [{'text': u(chat_id, 'btn_cancel'), 'callback_data': 'cancel'}],
+            [{'text': u(chat_id, 'qty_continue'), 'callback_data': 'qty_confirm'},
+             {'text': u(chat_id, 'btn_cancel'), 'callback_data': 'cancel'}],
         ]
     }
     return text, kb
+
+
+def build_device_screen(chat_id, st):
+    base = st['price']
+    btns = []
+    for n in range(1, get_device_max() + 1):
+        if n == 1:
+            t = u(chat_id, 'device_btn_free')
+        else:
+            t = u(chat_id, 'device_btn_paid', n=n, price=f'{device_price(n):,}')
+        btns.append({'text': t, 'callback_data': f'dev_{n}'})
+    btns.append({'text': u(chat_id, 'device_btn_unlimited', price=f'{device_price(0):,}'), 'callback_data': 'dev_0'})
+    rows = _pair_buttons(btns)
+    rows.append([{'text': u(chat_id, 'btn_cancel'), 'callback_data': 'cancel'}])
+    text = u(chat_id, 'devices_screen', extra=f'{get_device_extra_price():,}', unl=f'{get_device_unlimited_price():,}',
+             base=f'{base:,}', wallet=f'{get_wallet_db(chat_id):,}')
+    return text, {'inline_keyboard': rows}
+
+
+def go_device_or_label(chat_id, gb, days, price, ctype):
+    """بعد از انتخاب حجم/مدت: اگه محدودیت کاربر فعاله اول تعداد کاربر رو می‌پرسه، وگرنه مستقیم اسم."""
+    if get_device_enabled() and ctype not in EXTRA_TYPES:
+        user_steps[str(chat_id)] = {'step': 'pick_devices', 'gb': gb, 'days': days, 'price': price,
+                                    'base': price, 'type': ctype}
+        text, kb = build_device_screen(chat_id, user_steps[str(chat_id)])
+        send_message(chat_id, text, reply_markup=kb)
+    else:
+        user_steps[str(chat_id)] = {'step': 'ask_label', 'gb': gb, 'days': days, 'price': price, 'type': ctype}
+        send_ask_label_prompt(chat_id)
+
+
+# مقدار limit برای «بدون محدودیت» در API (طبق مستندات 0).
+DEVICE_UNLIMITED_API_LIMIT = 0  # طبق مستندات API: 0 یعنی بدون محدودیت
+
+
+def set_device_limit(config_id, limit):
+    r = SESSION.put(f'{CONFIG_API}/{config_id}/device-limit',
+                    headers={'Authorization': f'Bearer {CONFIG_KEY}'},
+                    json={'limit': int(limit)}, timeout=(PANEL_CONNECT_TIMEOUT, 10))
+    return r.status_code < 300
+
+
+def apply_device_limit(chat_id, config_id, limit, label=''):
+    if limit is None or not config_id:
+        return
+    if limit == 0:
+        limit = DEVICE_UNLIMITED_API_LIMIT
+        if limit is None:
+            return
+    ok = False
+    for _ in range(2):
+        try:
+            if set_device_limit(config_id, limit):
+                ok = True
+                break
+        except Exception as e:
+            print('⚠️ device-limit error:', e)
+    if not ok:
+        try:
+            send_message(ADMIN_ID, f'⚠️ اعمال محدودیت {limit} کاربر روی کانفیگ {config_id} ({label}) '
+                                   f'کاربر {chat_id} ناموفق بود؛ دستی تنظیم کنید.', parse_mode=None)
+        except Exception:
+            pass
 
 
 def send_ask_label_prompt(chat_id):
@@ -5820,6 +5916,9 @@ def build_purchase_invoice(chat_id, step_data):
         u(chat_id, 'invoice_duration', days=days),
         DIVIDER,
     ]
+    if step_data.get('device_limit') is not None:
+        _dl = step_data['device_limit']
+        lines.insert(4, u(chat_id, 'invoice_devices', devices=(u(chat_id, 'device_word_unlimited') if _dl == 0 else _dl)))
     if discount_code:
         lines.append(u(chat_id, 'invoice_discount_line', code=discount_code, percent=discount_percent))
         lines.append(u(chat_id, 'invoice_base_price', base_price=base_price))
@@ -7518,7 +7617,7 @@ _TEXT_GROUP_RULES = [
     (('unl_', 'btn_unl', 'extra_inv_devices', 'extra_inv_days'), '♾ پلن نامحدود'),
     (('proxy_', 'btn_open_proxy', 'extra_inv_gb', 'extra_inv_proxy_days'), '📡 پروکسی تلگرام'),
     (('plans_menu', 'plan_', 'btn_buy_plans'), '📦 بسته‌های آماده'),
-    (('buy_menu', 'btn_buy_custom', 'qty_', 'btn_qty', 'ask_label'), '🛠 خرید دلخواه (حجم و مدت)'),
+    (('buy_menu', 'btn_buy_custom', 'qty_', 'btn_qty', 'ask_label', 'device'), '🛠 خرید دلخواه (حجم و مدت)'),
     (('extra_days_left', 'extra_order_item'), '🗂 کانفیگ‌های من و مدیریت'),
     (('alert_', 'btn_alert', 'qrenew_', 'nudge_', 'btn_nudge'), '🔔 هشدار و یادآوری به کاربر'),
     (('join_', 'btn_join'), '📢 عضویت اجباری در کانال'),
@@ -8075,7 +8174,7 @@ def config_alerts_watcher():
 # هیچ رمز/کلیدی تو user_steps نیست (رمز فروشنده فقط ارسال می‌شه و ذخیره نمی‌شه).
 # ---------------------------------------------------------------------------
 _STEPS_TTL = 6 * 3600
-_STEPS_NO_RESTORE = {'confirm_buy', 'ext_confirm', 'trial_pay_confirm', 'confirm_delete', 'rotate_confirm', 'buy_enter_discount', 'pick_quantity'}
+_STEPS_NO_RESTORE = {'confirm_buy', 'ext_confirm', 'trial_pay_confirm', 'confirm_delete', 'rotate_confirm', 'buy_enter_discount', 'pick_quantity', 'pick_devices'}
 _steps_saved = {}
 
 
@@ -8408,6 +8507,11 @@ def _process_update_impl(update):
                         print('⚠️ استثنا هنگام ساخت کانفیگ:', _mc_err)
                         res = {'success': False, 'error': str(_mc_err), 'error_code': None}
                     if res['success'] and res['sub_url']:
+                        if ctype not in EXTRA_TYPES:
+                            try:
+                                apply_device_limit(chat_id, res.get('config_id'), s.get('device_limit'), label)
+                            except Exception as _dl_err:
+                                print('⚠️ device limit:', _dl_err)
                         try:
                             days = res.get('days') or days
                             save_user_config(chat_id, res['sub_url'], res['config_id'], gb, label, days, price, ctype)
@@ -8869,9 +8973,7 @@ def _process_update_impl(update):
             if not _plan or not is_feature_enabled('buy'):
                 send_message(chat_id, u(chat_id, 'plan_not_found'))
             else:
-                user_steps[str(chat_id)] = {'step': 'ask_label', 'gb': _plan['gb'], 'days': _plan['days'],
-                                            'price': _plan['price'], 'type': _plan['type']}
-                send_ask_label_prompt(chat_id)
+                go_device_or_label(chat_id, _plan['gb'], _plan['days'], _plan['price'], _plan['type'])
 
         elif data.startswith('buytype_'):
             ctype = data.split('_', 1)[1]
@@ -8911,7 +9013,20 @@ def _process_update_impl(update):
                 cfg_type = get_config_types().get(ctype, get_config_types()['both'])
                 gb, days = s['gb'], s['days']
                 price = gb * cfg_type['price_per_gb']
-                user_steps[str(chat_id)] = {'step': 'ask_label', 'gb': gb, 'days': days, 'price': price, 'type': ctype}
+                go_device_or_label(chat_id, gb, days, price, ctype)
+
+        elif data.startswith('dev_'):
+            s = user_steps.get(str(chat_id), {})
+            try:
+                n = int(data[4:])
+            except ValueError:
+                n = -1
+            if s.get('step') != 'pick_devices' or not (0 <= n <= get_device_max()):
+                flow_end(chat_id, 'expired')
+            else:
+                s['price'] = s['base'] + device_price(n)
+                s['device_limit'] = n
+                s['step'] = 'ask_label'
                 send_ask_label_prompt(chat_id)
 
         elif data == 'skip_label':
@@ -8928,7 +9043,8 @@ def _process_update_impl(update):
                     'base_price': price,
                     'label': label,
                     'type': ctype,
-                    'devices': s.get('devices')
+                    'devices': s.get('devices'),
+                    'device_limit': s.get('device_limit')
                 }
                 send_message(chat_id, build_purchase_invoice(chat_id, user_steps[str(chat_id)]), reply_markup=build_purchase_kb(chat_id))
             else:
@@ -9103,7 +9219,8 @@ def _process_update_impl(update):
                 'base_price': price,
                 'label': label,
                 'type': ctype,
-                'devices': step.get('devices')
+                'devices': step.get('devices'),
+                'device_limit': step.get('device_limit')
             }
             send_message(
                 chat_id,
