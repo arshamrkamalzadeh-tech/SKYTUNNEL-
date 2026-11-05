@@ -1998,6 +1998,9 @@ def init_db():
         'ALTER TABLE users ADD COLUMN referred_by INTEGER',
         'ALTER TABLE users ADD COLUMN banned INTEGER DEFAULT 0',
         'ALTER TABLE users ADD COLUMN banned_until REAL DEFAULT 0',
+        'ALTER TABLE users ADD COLUMN blocked_bot INTEGER DEFAULT 0',
+        'ALTER TABLE users ADD COLUMN blocked_at TEXT',
+        'ALTER TABLE users ADD COLUMN block_reason TEXT',
         'ALTER TABLE resellers ADD COLUMN username TEXT',
         'ALTER TABLE resellers ADD COLUMN password_hash TEXT',
         'ALTER TABLE resellers ADD COLUMN password_plain TEXT',
@@ -3488,6 +3491,46 @@ def _submit_user_write(fn, *args):
             _UW_PENDING -= 1
         return False
     return True
+
+
+# --- ثبت «کاربر ربات رو بلاک کرده» (برای شمارنده‌ی پنل) ---
+# فقط وقتی ارسال پیام با خطای بلاک/403 برگرده، و فقط در صف کم‌اهمیتِ USER_WRITE_EXECUTOR (با سقف معوقه)؛
+# پس مسیر ارسال پیام و پاسخ‌دهی هیچ‌وقت منتظر دیتابیس نمی‌مونه. هر کاربر حداکثر هر ۶ ساعت یک‌بار ثبت می‌شه.
+_BLOCK_MARKED = {}
+_BLOCK_MARK_TTL = 6 * 3600
+
+
+@with_db_retry
+def _mark_user_blocked_db(user_id, reason):
+    conn = get_conn()
+    c = conn.cursor()
+    c.execute('UPDATE users SET blocked_bot=1, blocked_at=?, block_reason=? WHERE user_id=?',
+              (datetime.now(timezone.utc).isoformat(timespec='seconds'), (reason or '')[:120], user_id))
+    conn.commit()
+    conn.close()
+
+
+def _note_send_failure(chat_id, res):
+    try:
+        if not isinstance(res, dict) or res.get('ok'):
+            return
+        code = int(res.get('error_code') or 0)
+        desc = str(res.get('description') or '')
+        low = desc.lower()
+        if not (code == 403 or any(k in low for k in ('blocked', 'forbidden', 'kicked', 'deactivated', 'bot was'))):
+            return
+        uid = int(chat_id)
+        if uid <= 0 or uid == ADMIN_ID:
+            return          # گروه/کانال یا ادمین
+        now = time.time()
+        if now - _BLOCK_MARKED.get(uid, 0) < _BLOCK_MARK_TTL:
+            return
+        if len(_BLOCK_MARKED) > 5000:
+            _BLOCK_MARKED.clear()
+        _BLOCK_MARKED[uid] = now
+        _submit_user_write(_mark_user_blocked_db, uid, desc)
+    except Exception:
+        pass
 
 
 def _describe_update(update, step_name):
@@ -5072,8 +5115,8 @@ def get_setting(key, default='1'):
     now = time.time()
     if now - _settings_cache_ts > _SETTINGS_CACHE_TTL:
         if _settings_cache_ts == 0.0:
-            # اولین بار (کش خالیه): باید همون لحظه خونده بشه
-            _refresh_settings_cache()
+            # اولین بار (کش خالیه): باید همون لحظه خونده بشه (با چند بار تلاش؛ نه بی‌صدا برگشتن به پیش‌فرض)
+            _load_settings_blocking()
         else:
             # کش کهنه شده ولی مقدار قبلی هست: همون رو فوراً برگردون و رفرش رو
             # تو پس‌زمینه انجام بده تا کاربرِ بدشانس هر ۲۰ ثانیه معطل نشه
@@ -5092,6 +5135,25 @@ def _refresh_settings_cache():
         _settings_cache_ts = time.time()
     except Exception as e:
         print('⚠️ خطا در رفرش کش تنظیمات (با آخرین مقادیر کش‌شده ادامه داده می‌شه):', e)
+
+
+_settings_load_lock = threading.Lock()
+
+
+def _load_settings_blocking(attempts=3, delay=0.8):
+    """کش تنظیمات هنوز هیچ‌وقت با موفقیت از دیتابیس پر نشده (مثلاً درست بعد از ری‌دیپلوی یا وقتی Turso لحظه‌ای کنده).
+    اگه همین‌جا بی‌صدا با «کش خالی» ادامه بدیم، همه‌ی تنظیمات پنل (متن کادر تایپ، سبک کیبورد، متن‌ها...) برای اون
+    پیام به پیش‌فرض برمی‌گردن؛ پس چند بار با فاصله تلاش می‌کنیم. فقط یه ترد همزمان تلاش می‌کنه."""
+    with _settings_load_lock:
+        for i in range(max(1, attempts)):
+            if _settings_cache_ts > 0.0:
+                return True
+            _refresh_settings_cache()
+            if _settings_cache_ts > 0.0:
+                return True
+            if i < attempts - 1:
+                time.sleep(delay * (1.6 ** i))
+    return _settings_cache_ts > 0.0
 
 
 def _schedule_settings_refresh():
@@ -5382,7 +5444,10 @@ def _raw_send_message(chat_id, text, parse_mode='HTML', reply_markup=None):
     _t0 = time.time()
     try:
         res = SESSION.post(url, json=payload, timeout=15)
-        return res.json()
+        _j = res.json()
+        if not _j.get('ok'):
+            _note_send_failure(chat_id, _j)
+        return _j
     except Exception:
         return {'ok': False}
     finally:
@@ -7702,7 +7767,11 @@ def main_menu(chat_id, note=None):
     # یه پیام کوتاه با remove_keyboard می‌فرستیم تا کیبورد قدیمی واقعاً جمع
     # بشه، بعد پیام اصلیِ منو با دکمه‌های شیشه‌ای می‌ره. این کار برای هر کاربر
     # فقط یک‌بار (تا وقتی سبک دوباره عوض نشه) انجام می‌شه.
-    if get_user_kb_style(chat_id) != style:
+    # اگه تنظیمات پنل هنوز خونده نشده (دیتابیس در دسترس نیست)، سبک کیبورد «پیش‌فرض» نباید برای کاربر ذخیره بشه
+    # (قبلاً همین باعث می‌شد کیبورد کاربر بی‌دلیل عوض/پاک بشه)؛ پس تا وقتی تنظیمات نیومده سبک ذخیره‌شده‌ی خودش رو نگه می‌داریم.
+    if not _load_settings_blocking(attempts=2, delay=0.5):
+        style = get_user_kb_style(chat_id) or style
+    elif get_user_kb_style(chat_id) != style:
         if style == 'inline':
             send_message(chat_id, u(chat_id, 'kb_removed_note'), reply_markup={'remove_keyboard': True})
         set_user_kb_style(chat_id, style)
@@ -7720,12 +7789,7 @@ def main_menu(chat_id, note=None):
             'resize_keyboard': True
         }
         # متن محوِ کادر تایپ (input_field_placeholder، طبق مستندات سروش ۱ تا ۶۴ کاراکتر)
-        try:
-            _ph = str(u(chat_id, 'kb_placeholder') or '').strip()[:64]
-            if _ph:
-                keyboard['input_field_placeholder'] = _ph
-        except Exception:
-            pass
+        keyboard['input_field_placeholder'] = _kb_placeholder_text(chat_id)
 
     # دکمه‌های سفارشی ادمین (از پنل) — بعد از دکمه‌های اصلی
     try:
@@ -7773,6 +7837,26 @@ def main_menu(chat_id, note=None):
     if note:
         text = note + '\n' + DIVIDER + '\n' + text
     send_message(chat_id, text, reply_markup=keyboard)
+
+
+_KB_PH_LAST = {}
+
+
+def _kb_placeholder_text(chat_id):
+    """متن محوِ کادر تایپ؛ هیچ‌وقت خالی/حذف نمی‌شه (حذفش یعنی کلاینت به «پیامی را بنویس» برمی‌گرده).
+    اولویت: مقدار پنل ← آخرین مقدار سالمی که قبلاً خونده شده ← پیش‌فرض کد."""
+    lang = get_user_lang(chat_id)
+    ph = ''
+    try:
+        ph = str(u(chat_id, 'kb_placeholder') or '').strip()[:64]
+        if ph and _settings_cache_ts > 0.0:
+            _KB_PH_LAST[lang] = ph
+        elif _settings_cache_ts <= 0.0 and _KB_PH_LAST.get(lang):
+            ph = _KB_PH_LAST[lang]
+    except Exception as e:
+        print('⚠️ خوندن متن کادر تایپ ناموفق:', e)
+        ph = _KB_PH_LAST.get(lang, '')
+    return ph or UI_TEXT.get(lang, UI_TEXT['fa']).get('kb_placeholder') or UI_TEXT['fa']['kb_placeholder']
 
 
 def notify_admin_new_ticket(tid, user_id, message):
@@ -8112,7 +8196,8 @@ except Exception as _pe:
     print('⚠️ purge_seller_plain_passwords_once:', _pe)
 try:
     reset_seller_text_overrides_once()
-    _refresh_settings_cache()
+    if not _load_settings_blocking(attempts=6, delay=1.0):
+        print('⚠️ تنظیمات پنل موقع استارت از دیتابیس خونده نشد؛ با اولین پیام دوباره تلاش می‌شه')
 except Exception as e:
     print('⚠️ ریست متن‌های فروشندگی انجام نشد:', e)
 sync_text_registry()

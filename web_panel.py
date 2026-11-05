@@ -783,6 +783,9 @@ def ensure_schema():
             "ALTER TABLE user_configs ADD COLUMN base_days INTEGER",
             "ALTER TABLE users ADD COLUMN banned INTEGER DEFAULT 0",
             "ALTER TABLE users ADD COLUMN banned_until REAL DEFAULT 0",
+            "ALTER TABLE users ADD COLUMN blocked_bot INTEGER DEFAULT 0",
+            "ALTER TABLE users ADD COLUMN blocked_at TEXT",
+            "ALTER TABLE users ADD COLUMN block_reason TEXT",
         ):
             try:
                 c.execute(stmt)
@@ -1156,6 +1159,7 @@ def get_full_stats():
     # کاربران
     s["users_total"] = val("SELECT COUNT(*) FROM users")
     s["users_banned"] = val("SELECT COUNT(*) FROM users WHERE " + BANNED_ACTIVE_SQL)
+    s["users_blocked"] = val("SELECT COUNT(*) FROM users WHERE " + BLOCKED_SQL)
     s["users_online"] = val("SELECT COUNT(*) FROM users WHERE last_active >= ?", (iso_utc(minutes=5),))
     s["users_24h"] = val("SELECT COUNT(*) FROM users WHERE last_active >= ?", (iso_utc(hours=24),))
     s["users_7d"] = val("SELECT COUNT(*) FROM users WHERE last_active >= ?", (iso_utc(days=7),))
@@ -1589,6 +1593,45 @@ def send_telegram_message(chat_id, text, reply_markup=None):
         return False
 
 
+def send_telegram_message_ex(chat_id, text):
+    """مثل send_telegram_message ولی دلیل خطا رو هم برمی‌گردونه: (ok, kind, desc)
+    kind یکی از: ok | blocked (کاربر ربات رو بلاک کرده/حذف‌شده) | notfound (چت پیدا نشد؛ مثلاً هیچ‌وقت /start نزده)
+    | flood (محدودیت سرعت) | other. روی 429 یک‌بار صبر می‌کنه و دوباره تلاش می‌کنه."""
+    if not BOT_TOKEN:
+        return False, "other", "BOT_TOKEN تنظیم نشده"
+    desc, code = "", 0
+    for attempt in (1, 2):
+        try:
+            res = SESSION.post(BASE_URL + "/sendMessage",
+                               json={"chat_id": chat_id, "text": text, "parse_mode": "HTML"}, timeout=15)
+            try:
+                d = res.json()
+            except Exception:
+                d = {}
+            if d.get("ok"):
+                return True, "ok", ""
+            code = int(d.get("error_code") or res.status_code or 0)
+            desc = str(d.get("description") or res.text[:120] or "")
+        except Exception as e:
+            return False, "other", "network: " + str(e)[:80]
+        if code == 429 and attempt == 1:
+            try:
+                wait = float((d.get("parameters") or {}).get("retry_after") or 2)
+            except Exception:
+                wait = 2
+            time.sleep(min(max(wait, 1), 5))
+            continue
+        break
+    low = desc.lower()
+    if code == 429:
+        return False, "flood", desc
+    if code == 403 or any(k in low for k in ("blocked", "forbidden", "kicked", "deactivated", "bot was", "stopped")):
+        return False, "blocked", desc
+    if code == 404 or "not found" in low:
+        return False, "notfound", desc
+    return False, "other", desc
+
+
 # پیام همگانی (سازگار با Vercel/سرورلس): تردِ پس‌زمینه تو سرورلس بعد از جواب‌دادن کشته می‌شه،
 # پس وضعیت ارسال تو دیتابیس (جدول settings، کلید broadcast_state) نگه داشته می‌شه و صفحه‌ی
 # «پیام همگانی» با JS هر بار یه دسته‌ی کوچیک (BROADCAST_BATCH کاربر) رو از مسیر /broadcast/step
@@ -1640,9 +1683,41 @@ def _bc_next_ids(last_id, limit):
     return res
 
 
+@with_db_retry
+def _bc_mark(blocked_ids, ok_ids, reason):
+    """کاربرهایی که ربات رو بلاک کردن علامت می‌خورن؛ اگه بعداً پیام رسید (آنبلاک کردن) علامت برمی‌داره."""
+    conn = get_conn()
+    c = conn.cursor()
+    if blocked_ids:
+        ph = ",".join("?" * len(blocked_ids))
+        c.execute(f"UPDATE users SET blocked_bot=1, blocked_at=?, block_reason=? WHERE user_id IN ({ph})",
+                  (datetime.now(timezone.utc).isoformat(timespec="seconds"), (reason or "")[:120], *blocked_ids))
+    if ok_ids:
+        ph = ",".join("?" * len(ok_ids))
+        c.execute(f"UPDATE users SET blocked_bot=0 WHERE COALESCE(blocked_bot,0)=1 AND user_id IN ({ph})", tuple(ok_ids))
+    conn.commit()
+    conn.close()
+
+
+@with_db_retry
+def get_blocked_count():
+    """تعداد کاربرانی که ربات رو بلاک کردن (اگه بعد از بلاک دوباره با ربات کار کنن حساب نمی‌شن)."""
+    conn = get_conn()
+    c = conn.cursor()
+    try:
+        c.execute("SELECT COUNT(*) FROM users WHERE " + BLOCKED_SQL)
+        n = c.fetchone()[0]
+    except Exception as e:
+        if "stream" in str(e).lower():
+            raise
+        n = 0
+    conn.close()
+    return int(n or 0)
+
+
 def _bc_summary(st, **extra):
     d = {"running": bool(st.get("running")), "sent": int(st.get("sent", 0)), "failed": int(st.get("failed", 0)),
-         "total": int(st.get("total", 0))}
+         "total": int(st.get("total", 0)), "blocked": int(st.get("blocked", 0))}
     d.update(extra)
     return d
 
@@ -1671,6 +1746,7 @@ def _env_int(name, default):
 
 BANNED_ACTIVE_SQL = ("(COALESCE(banned,0)=1 AND (COALESCE(banned_until,0)=0 "
                      "OR banned_until>CAST(strftime('%s','now') AS REAL)))")   # بن دائم، یا موقتِ هنوز منقضی‌نشده
+BLOCKED_SQL = ("(COALESCE(blocked_bot,0)=1 AND (last_active IS NULL OR last_active<=COALESCE(blocked_at,'')))")
 PROXY_HOPS = max(1, _env_int("TRUSTED_PROXY_HOPS", 1))   # تعداد پراکسی‌های جلوی پنل (nginx = 1، Cloudflare + nginx = 2)
 
 
@@ -2589,6 +2665,10 @@ def logout():
 def dashboard():
     s = get_dashboard_stats()
     x = get_extra_stats()
+    try:
+        blocked_total = get_blocked_count()
+    except Exception:
+        blocked_total = 0
     recent = get_users_page(offset=0, limit=7, sort="active")
 
     open_tickets, pending_topups = s["open_tickets"], s["pending_topups"]
@@ -2678,7 +2758,7 @@ def dashboard():
         ("فعال ۲۴ ساعت", N(f['users_24h'])), ("فعال ۷ روز", N(f['users_7d'])), ("فعال ۳۰ روز", N(f['users_30d'])),
         ("عضو جدید امروز", N(f['new_today'])), ("عضو جدید ۷ روز", N(f['new_7d'])), ("عضو جدید ۳۰ روز", N(f['new_30d'])),
         ("خریداران (حداقل یک کانفیگ)", f"{N(f['buyers'])} ({pct(f['buyers'], f['users_total'])})"),
-        ("دارای موجودی کیف پول", N(f['users_with_wallet'])), ("مسدود شده", N(f['users_banned'])),
+        ("دارای موجودی کیف پول", N(f['users_with_wallet'])), ("مسدود شده (توسط ادمین)", N(f['users_banned'])), ("🚫 بلاک‌کرده‌ی ربات", N(f['users_blocked'])),
         ("زبان انگلیسی", N(f['users_en'])), ("دعوت شده با رفرال", N(f['referred']))])}</div>
       <div class="card"><h3>💰 فروش و درآمد</h3>{kv([
         ("درآمد کل", T(f['ord_revenue'])), ("تعداد کل سفارش‌ها", N(f['ord_total'])),
@@ -2738,6 +2818,7 @@ def dashboard():
     </section>
 
     <div class="stats">
+      <a class="stat" href="{url_for('broadcast')}" style="text-decoration:none;color:inherit;"><span>🚫 بلاک‌کرده‌ی ربات</span><b class="num">{blocked_total:,}</b><small>نفر ›</small></a>
       <div class="stat"><span>🟢 آنلاین (۵ دقیقه اخیر)</span><b class="num">{x['online_now']:,}</b></div>
       <div class="stat"><span>فعال در ۲۴ ساعت اخیر</span><b class="num">{x['active_24h']:,}</b></div>
       <div class="stat"><span>عضو جدید ۷ روز اخیر</span><b class="num">{x['new_7d']:,}</b></div>
@@ -4446,6 +4527,7 @@ def broadcast():
             else:
                 total = _bc_count()
                 _bc_save({"running": total > 0, "text": text, "last_id": None, "sent": 0, "failed": 0, "total": total,
+                          "blocked": 0, "notfound": 0, "flood": 0, "other": 0, "errs": {},
                           "started": datetime.now(timezone.utc).isoformat(), "lock_until": 0})
                 flash(f"ارسال پیام همگانی برای {total:,} کاربر شروع شد. تا تموم‌شدن این صفحه رو باز نگه دارید.")
         return redirect(url_for("broadcast"))
@@ -4455,8 +4537,17 @@ def broadcast():
     state = ""
     if st.get("total"):
         done = int(st.get("sent", 0)) + int(st.get("failed", 0))
+        errs = st.get("errs") or {}
+        errs_html = "".join(f'<li><span class="num">{int(n):,}</span> × <code>{esc(str(k))}</code></li>'
+                            for k, n in sorted(errs.items(), key=lambda kv: -int(kv[1]))[:6])
+        detail = (f'<p class="muted num" id="bc-detail" style="margin:6px 0 0;">🚫 بلاک‌کرده: {int(st.get("blocked", 0)):,} · '
+                  f'چت پیدا نشد: {int(st.get("notfound", 0)):,} · محدودیت سرعت: {int(st.get("flood", 0)):,} · '
+                  f'سایر خطاها: {int(st.get("other", 0)):,}</p>')
+        if errs_html:
+            detail += f'<details style="margin-top:8px;"><summary>🔎 دلیل دقیق خطاها</summary><ul style="margin:6px 0 0;">{errs_html}</ul></details>'
         state = (f'<div class="card"><b id="bc-title">{"⏳ در حال ارسال… (این صفحه رو نبندید)" if running else "✅ آخرین ارسال تمام شد"}</b>'
                  f'<p class="muted num" id="bc-prog" style="margin:6px 0 0;">{done:,} از {int(st["total"]):,} — موفق: {int(st.get("sent", 0)):,} · ناموفق: {int(st.get("failed", 0)):,}</p>'
+                 + detail
                  + ('<form method="post" style="margin-top:10px;"><input type="hidden" name="action" value="cancel">'
                     '<button type="submit" class="danger">⏹ توقف ارسال</button></form>' if running else '')
                  + '</div>')
@@ -4472,7 +4563,7 @@ def broadcast():
       .then(function(r){return r.json();})
       .then(function(d){
         var p=document.getElementById('bc-prog');
-        if(p){p.textContent=fmt(d.sent+d.failed)+' از '+fmt(d.total)+' — موفق: '+fmt(d.sent)+' · ناموفق: '+fmt(d.failed);}
+        if(p){p.textContent=fmt(d.sent+d.failed)+' از '+fmt(d.total)+' — موفق: '+fmt(d.sent)+' · ناموفق: '+fmt(d.failed)+' (🚫 بلاک: '+fmt(d.blocked)+')';}
         if(d.running){setTimeout(step,d.busy?3000:200);}else{location.reload();}
       })
       .catch(function(){setTimeout(step,4000);});
@@ -4480,8 +4571,15 @@ def broadcast():
   step();
 })();
 </script>""".replace("__CSRF__", csrf_token()).replace("__URL__", url_for("broadcast_step"))
+    try:
+        blocked_now = get_blocked_count()
+    except Exception:
+        blocked_now = 0
+    blocked_card = (f'<div class="card"><b>🚫 بلاک‌کرده‌ی ربات (تا الان): <span class="num">{blocked_now:,}</span></b>'
+                    '<p class="muted" style="margin:6px 0 0;">با هر پیام همگانی، کاربرانی که ربات رو بلاک کرده‌اند شناسایی و اینجا شمرده می‌شن.</p></div>')
     content = f"""
     {state}
+    {blocked_card}
     <div class="card">
       <form method="post" onsubmit="return confirm('این پیام برای همه‌ی کاربران ارسال بشه؟');">
         <label>متن پیام همگانی (فرمت HTML تلگرام پشتیبانی می‌شود، مثل &lt;b&gt;بولد&lt;/b&gt;)</label>
@@ -4516,17 +4614,35 @@ def broadcast_step():
     text = st.get("text", "")
     sent = failed = 0
     last = st.get("last_id")
+    cnt = {"blocked": 0, "notfound": 0, "flood": 0, "other": 0}
+    errs = dict(st.get("errs") or {})
+    blocked_ids, ok_ids, block_reason = [], [], ""
     deadline = now + 40
     for uid in ids:
-        if send_telegram_message(uid, text):
+        ok, kind, desc = send_telegram_message_ex(uid, text)
+        if ok:
             sent += 1
+            ok_ids.append(uid)
         else:
             failed += 1
+            cnt[kind] = cnt.get(kind, 0) + 1
+            key = (desc or kind)[:90]
+            errs[key] = int(errs.get(key, 0)) + 1
+            if kind == "blocked":
+                blocked_ids.append(uid)
+                block_reason = desc
         last = uid
-        time.sleep(0.05)
+        time.sleep(0.1)
         if time.time() > deadline:
             break
-    st.update(last_id=last, sent=int(st.get("sent", 0)) + sent, failed=int(st.get("failed", 0)) + failed, lock_until=0)
+    try:
+        _bc_mark(blocked_ids, ok_ids, block_reason)
+    except Exception as e:
+        print("⚠️ علامت‌گذاری بلاک‌ها:", e)
+    if len(errs) > 15:
+        errs = dict(sorted(errs.items(), key=lambda kv: -int(kv[1]))[:15])
+    st.update(last_id=last, sent=int(st.get("sent", 0)) + sent, failed=int(st.get("failed", 0)) + failed, lock_until=0,
+              errs=errs, **{k: int(st.get(k, 0)) + v for k, v in cnt.items()})
     _bc_save(st)
     return _out(_bc_summary(st))
 
@@ -5177,8 +5293,24 @@ def texts_page():
             f'<input type="hidden" name="lang" value="{lang}"><input type="hidden" name="view" value="{view}">'
             '<button type="submit" class="secondary">↩ برگرداندن همه‌ی متن‌های قدیمی به پیش‌فرض جدید</button></form></div>')
 
+    ph_item = next((it for it in registry.get(lang, []) if it["k"] == "kb_placeholder"), None)
+    ph_html = ""
+    if ph_item:
+        ph_cur = all_settings.get(ph_item["s"], ph_item["d"])
+        ph_html = f'''
+    <div class="panel">
+      <h3 style="margin-top:0;">⌨️ متن کادر تایپ ({'فارسی' if lang == 'fa' else 'English'})</h3>
+      <form method="post" action="{url_for('texts_placeholder')}">
+        <input type="hidden" name="lang" value="{lang}">
+        <input type="text" name="ph" value="{esc(ph_cur)}" maxlength="64" placeholder="{esc(ph_item['d'])}">
+        <p class="muted" style="font-size:12.5px;margin:6px 0 10px;">متنِ کم‌رنگی که داخل کادر نوشتن پیام نشون داده می‌شه (حداکثر ۶۴ کاراکتر). برای هر کاربر با /start یا دفعه‌ی بعدی که منوی اصلی براش میاد اعمال می‌شه. خالی بگذارید تا پیش‌فرض بشه.</p>
+        <button type="submit">💾 ذخیره</button>
+      </form>
+    </div>'''
+
     content = f"""
     {TEXTS_CSS_JS}
+    {ph_html}
     <div class="panel">
       <div class="flex" style="margin-bottom:12px;">
         <a class="{tab_fa}" href="{url_for('texts_page', lang='fa', view=view)}">🇮🇷 فارسی</a>
@@ -5210,6 +5342,25 @@ def texts_page():
     <p><small class="muted">دکمه‌های منوی اصلی و نام نوع سرویس‌ها (فارسی) هم همین‌جا در گروه «🔘 دکمه‌های منوی اصلی و نوع سرویس» قابل ویرایش‌اند؛ فقط «ترتیب» دکمه‌ها در صفحه‌ی «دکمه‌ها و ظاهر» تنظیم می‌شود.</small></p>
     """
     return render_page("همه‌ی متن‌های ربات", "texts", content)
+
+
+@app.route("/texts/placeholder", methods=["POST"])
+@login_required
+def texts_placeholder():
+    lang = "en" if request.form.get("lang") == "en" else "fa"
+    registry = load_text_registry()
+    item = next((it for it in (registry or {}).get(lang, []) if it["k"] == "kb_placeholder"), None)
+    if not item:
+        flash("⚠️ لیست متن‌ها از ربات دریافت نشده؛ ربات را ری‌استارت کنید.")
+        return redirect(url_for("texts_page", lang=lang))
+    value = request.form.get("ph", "").replace("\r", " ").replace("\n", " ").strip()[:64]
+    if value == "" or value == item["d"].strip():
+        delete_setting(item["s"])
+        flash("متن کادر تایپ به پیش‌فرض برگشت.")
+    else:
+        set_setting(item["s"], value)
+        flash("✅ متن کادر تایپ ذخیره شد؛ از دفعه‌ی بعدی که منوی اصلی برای کاربر میاد اعمال می‌شه.")
+    return redirect(url_for("texts_page", lang=lang))
 
 
 @app.route("/texts/reset_outdated", methods=["POST"])
