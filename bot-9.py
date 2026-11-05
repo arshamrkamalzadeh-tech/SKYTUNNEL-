@@ -1795,6 +1795,72 @@ UPDATE_EXECUTOR = ThreadPoolExecutor(max_workers=32)
 # نباید جواب اصلی به کاربر رو معطل کنن، تو یه استخر جدا اجرا می‌شن.
 BG_EXECUTOR = ThreadPoolExecutor(max_workers=8)
 
+# ---------------------------------------------------------------------------
+# ابزار تشخیص کندی (فقط لاگ؛ روی رفتار ربات اثری نداره و سربارش ناچیزه)
+#   [slow]       هر آپدیتی که کل زمانش (صف + قفل + گیت + هندلر) از SLOW_LOG_SECONDS بیشتر شد، با تفکیک زمان
+#   [slow-http]  هر تماس شبکه‌ای تکی (API سروش یا سرویس‌های بیرونی) که از SLOW_HTTP_SECONDS کندتر بود
+#   [slow-db]    هر کوئری دیتابیس که از ۱ ثانیه کندتر بود (از قبل بود)
+#   [gate-slow]  چک عضویت کانال وقتی کند بود، با تفکیک «تازه‌سازی لیست» و «شناسایی کاربر»
+#   [perf]       هر PERF_LOG_EVERY ثانیه خلاصه: تعداد/میانگین/p95 زمان جواب + پینگ دیتابیس و API
+# خاموش‌کردن لاگ خلاصه: PERF_LOG_EVERY=0 ؛ تغییر آستانه‌ها: SLOW_LOG_SECONDS و SLOW_HTTP_SECONDS
+# ---------------------------------------------------------------------------
+SLOW_LOG_SECONDS = float(os.getenv('SLOW_LOG_SECONDS', '1.5') or 1.5)
+SLOW_HTTP_SECONDS = float(os.getenv('SLOW_HTTP_SECONDS', '3') or 3)
+PERF_LOG_EVERY = int(os.getenv('PERF_LOG_EVERY', '300') or 0)
+_TM = threading.local()
+_PERF_LOCK = threading.Lock()
+_PERF = {'rows': [], 'slow': 0, 'qmax': 0}
+_RECV_TS = {}      # update_id -> زمان دریافت (برای محاسبه‌ی زمان انتظار تو صف)
+
+
+def _tm_begin():
+    _TM.d = {'db': 0.0, 'db_n': 0, 'api': 0.0, 'api_n': 0, 'ext': 0.0, 'ext_n': 0, 'ext_max': 0.0, 'ext_host': ''}
+
+
+def _tm_add(kind, dt, host=''):
+    d = getattr(_TM, 'd', None)
+    if d is None:
+        return
+    d[kind] += dt
+    d[kind + '_n'] += 1
+    if kind == 'ext' and dt > d['ext_max']:
+        d['ext_max'], d['ext_host'] = dt, host
+
+
+def _tm_end():
+    d = getattr(_TM, 'd', None)
+    _TM.d = None
+    return d
+
+
+_session_request_orig = SESSION.request
+
+
+def _timed_request(method, url, *a, **k):
+    _t = time.time()
+    try:
+        return _session_request_orig(method, url, *a, **k)
+    finally:
+        try:
+            _dt = time.time() - _t
+            _u = str(url)
+            if _u.startswith(BASE_URL):
+                _name = '/' + _u.rsplit('/', 1)[-1]
+                _tm_add('api', _dt)
+                if _dt > SLOW_HTTP_SECONDS:
+                    print(f'[slow-http] api {_name} {_dt:.1f}s')
+            else:
+                from urllib.parse import urlsplit as _us
+                _host = _us(_u).netloc
+                _tm_add('ext', _dt, _host)
+                if _dt > SLOW_HTTP_SECONDS:
+                    print(f'[slow-http] {_host} {method} {_dt:.1f}s')
+        except Exception:
+            pass
+
+
+SESSION.request = _timed_request
+
 # قفل جدا برای هر chat_id: دو آپدیت از یه کاربر واحد (مثلاً دوبار زدن سریع
 # دکمه‌ی «تایید خرید») صف می‌شن و یکی‌یکی اجرا می‌شن؛ کاربرهای مختلف همچنان
 # کاملاً موازی پردازش می‌شن.
@@ -1871,6 +1937,7 @@ def with_db_retry(func):
             raise
         finally:
             _dt = time.time() - _t0
+            _tm_add('db', _dt)
             if _dt > 1.0:   # تشخیص کندی: لتنسی دیتابیس راه دور (Turso) اینجا دیده می‌شه
                 print(f'[slow-db] {func.__name__} {_dt:.1f}s')
     return wrapper
@@ -8196,7 +8263,7 @@ except Exception as _pe:
     print('⚠️ purge_seller_plain_passwords_once:', _pe)
 try:
     reset_seller_text_overrides_once()
-    if not _load_settings_blocking(attempts=6, delay=1.0):
+    if not _load_settings_blocking(attempts=2, delay=0.5):
         print('⚠️ تنظیمات پنل موقع استارت از دیتابیس خونده نشد؛ با اولین پیام دوباره تلاش می‌شه')
 except Exception as e:
     print('⚠️ ریست متن‌های فروشندگی انجام نشد:', e)
@@ -8604,6 +8671,64 @@ def _mem_janitor(interval=300):
 
 
 threading.Thread(target=_mem_janitor, daemon=True).start()
+def _perf_db_ping():
+    _t = time.time()
+    try:
+        conn = get_conn()
+        c = conn.cursor()
+        c.execute('SELECT 1')
+        c.fetchone()
+        conn.close()
+        return time.time() - _t
+    except Exception as e:
+        print('[perf] db ping failed:', repr(e)[:100])
+        return -1.0
+
+
+def _perf_api_ping():
+    _t = time.time()
+    try:
+        SESSION.get(BASE_URL + '/getMe', timeout=8)
+        return time.time() - _t
+    except Exception as e:
+        print('[perf] api ping failed:', repr(e)[:100])
+        return -1.0
+
+
+def perf_reporter():
+    """هر PERF_LOG_EVERY ثانیه یک خط خلاصه‌ی عملکرد؛ پینگ دیتابیس/API نشون می‌ده کندی از زیرساخته یا از کد."""
+    if PERF_LOG_EVERY <= 0:
+        return
+    time.sleep(45)
+    first = True
+    while True:
+        try:
+            with _PERF_LOCK:
+                rows = _PERF['rows'][:]
+                _PERF['rows'].clear()
+                slow, qmax = _PERF['slow'], _PERF['qmax']
+                _PERF['slow'], _PERF['qmax'] = 0, 0
+            n = len(rows)
+            dbp, apip = _perf_db_ping(), _perf_api_ping()
+            if n:
+                lat = sorted(r[0] for r in rows)
+                avg, p95, mx = sum(lat) / n, lat[max(0, int(n * 0.95) - 1)], lat[-1]
+                a_db, a_api, a_ext = (sum(r[i] for r in rows) / n for i in (1, 2, 3))
+                stat = (f'updates={n} avg={avg:.2f}s p95={p95:.2f}s max={mx:.1f}s slow={slow} '
+                        f'| per-update avg: db={a_db:.2f}s api={a_api:.2f}s ext={a_ext:.2f}s')
+            else:
+                stat = 'updates=0'
+            try:
+                inflight = sum(_INFLIGHT.values())
+            except Exception:
+                inflight = -1
+            print(f'[perf] {stat} | ping: db={dbp:.2f}s api={apip:.2f}s | pool_queue_max={qmax} inflight={inflight}')
+        except Exception as e:
+            print('[perf] reporter error:', repr(e)[:100])
+        time.sleep(PERF_LOG_EVERY)
+
+
+threading.Thread(target=perf_reporter, daemon=True).start()
 threading.Thread(target=commands_watcher, daemon=True).start()
 threading.Thread(target=registry_watcher, daemon=True).start()
 threading.Thread(target=crypto_deposit_watcher, daemon=True).start()
@@ -10359,6 +10484,26 @@ async def g_resolve_user(client, uid):
     return None
 
 
+async def g_resolve_user_fast(client, uid, timeout=3.0):
+    """مثل g_resolve_user ولی با سقف زمان. کاربری که اکانت چک‌کننده هیچ‌وقت ندیده (مثلاً عضو کانال نیست) باعث می‌شد
+    هر بار چند RPC پشت‌سرهم با خطای 404 بخوره و ۵ تا ۱۰ ثانیه جواب ربات عقب بیفته."""
+    try:
+        return await asyncio.wait_for(g_resolve_user(client, uid), timeout)
+    except Exception:
+        return None
+
+
+def _g_unresolved_recent(link, uid, ttl=90.0):
+    return time.time() - _G.setdefault('unresolved', {}).get((link, uid), 0.0) < ttl
+
+
+def _g_mark_unresolved(link, uid):
+    d = _G.setdefault('unresolved', {})
+    if len(d) > 5000:
+        d.clear()
+    d[(link, uid)] = time.time()
+
+
 def _g_part_uid(pt):
     """آیدی کاربرِ یک participant (فقط خودِ participant؛ نه users جانبی مثل دعوت‌کننده)."""
     uid_ = getattr(pt, 'user_id', None)
@@ -10374,12 +10519,35 @@ def _g_is_member_participant(part):
     return not isinstance(part, (tl_types.ChannelParticipantLeft, tl_types.ChannelParticipantBanned))
 
 
+async def _g_timed(gt, key, coro):
+    _t = time.time()
+    try:
+        return await coro
+    finally:
+        gt[key] = gt.get(key, 0.0) + (time.time() - _t)
+
+
 async def g_check_one(client, ch, link, uid, force=False):
+    """True/False. (تایمینگ هر مرحله‌ی چک عضویت لاگ می‌شه تا کندی‌ها قابل ردیابی باشن.)"""
+    gt = {}
+    _t0 = time.time()
+    res = None
+    try:
+        res = await _g_check_one_impl(client, ch, link, uid, force, gt)
+        return res
+    finally:
+        _tot = time.time() - _t0
+        if _tot > SLOW_LOG_SECONDS:
+            parts = ' '.join(f'{k}={v:.1f}s' for k, v in gt.items())
+            print(f'[gate-slow] uid={uid} force={int(bool(force))} result={res} total={_tot:.1f}s {parts}'.rstrip())
+
+
+async def _g_check_one_impl(client, ch, link, uid, force, gt):
     """True/False."""
     if force:
         # چک اجباری (/start یا دکمه‌ی «عضو شدم»): اول لیست رو تازه کن تا لفت‌دادن‌ها دیده بشن
         try:
-            await g_refresh_members(client, link, force=True)
+            await _g_timed(gt, 'refresh', g_refresh_members(client, link, force=True))
         except Exception as e:
             print('[gate] forced refresh failed:', repr(e))
     if uid in _gm(link):
@@ -10387,29 +10555,37 @@ async def g_check_one(client, ch, link, uid, force=False):
     # لیست قدیمیه (هر ۵ دقیقه همگام می‌شه)؛ قبل از هر کاری تازه‌اش کن
     if not force:
         try:
-            await g_refresh_members(client, link, force=False)
+            await _g_timed(gt, 'refresh', g_refresh_members(client, link, force=False))
         except Exception as e:
             print('[gate] refresh before check failed:', repr(e))
         if uid in _gm(link):
             return True
     if _G.get('peruser_unsupported', _gate_opt('gate_peruser', 'GATE_PERUSER') != '1'):
         return False  # چک تکی پشتیبانی نمی‌شه و لیست تازه‌ست؛ الکی منتظر نمون
-    print(f'[gate] check uid={uid}: not in list (size={len(_gm(link))}, mode={_G["modes"].get(link)}, '
-          f'ids={sorted(_gm(link))})')
-    user = await g_resolve_user(client, uid)
+    # کاربری که چند ثانیه پیش «تو لیست نبود و شناسایی هم نشد» دوباره اینجا نمیاد (سرعت ربات)؛ فقط دکمه‌ی «عضو شدم»
+    # و /start (force) این میان‌بر رو دور می‌زنن.
+    if not force and _g_unresolved_recent(link, uid):
+        return False
+    print(f'[gate] check uid={uid}: not in list (size={len(_gm(link))}, mode={_G["modes"].get(link)})')
+    user = await _g_timed(gt, 'resolve', g_resolve_user_fast(client, uid))
     if user is None:
-        # اکانت هنوز این کاربر رو ندیده (مثلاً تازه عضو شده)؛ لیست رو تازه کن و دوباره تلاش کن
-        await g_refresh_members(client, link, force=force)
+        if not force:
+            _g_mark_unresolved(link, uid)
+            print(f'[gate] user {uid} not in member list and cannot be resolved -> not member')
+            return False
+        # چک اجباری: اکانت هنوز این کاربر رو ندیده (مثلاً تازه عضو شده)؛ لیست رو تازه کن و یه‌بار دیگه تلاش کن
+        await _g_timed(gt, 'refresh', g_refresh_members(client, link, force=True))
         if uid in _gm(link):
             return True
-        user = await g_resolve_user(client, uid)
+        user = await _g_timed(gt, 'resolve', g_resolve_user_fast(client, uid))
         if user is None:
+            _g_mark_unresolved(link, uid)
             print(f'[gate] user {uid} not in member list and cannot be resolved -> not member')
             return False
 
     if tl_functions is not None:
         try:
-            res = await client(tl_functions.channels.GetParticipantRequest(ch, user))
+            res = await _g_timed(gt, 'participant', client(tl_functions.channels.GetParticipantRequest(ch, user)))
             return _g_is_member_participant(res.participant)
         except Exception as e:
             if 'NotParticipant' in type(e).__name__:
@@ -11802,6 +11978,8 @@ def safe_process_update(update):
     پشت‌سرهم بزنه، تردِ دوم صبر می‌کنه تا تردِ اول کاملاً تموم بشه (و
     user_steps کاربر رو ریست کنه) — و چون دیگه step به 'confirm_buy' نیست، تلاش
     دوم به جای ساخت/پرداخت تکراری، فقط منوی اصلی رو نشون می‌ده."""
+    _t_enter = time.time()
+    _t_recv = _RECV_TS.pop(update.get('update_id'), None) or _t_enter
     chat_id = None
     if 'callback_query' in update:
         chat_id = update['callback_query'].get('message', {}).get('chat', {}).get('id')
@@ -11821,20 +11999,40 @@ def safe_process_update(update):
 
     def _run():
         t0 = time.time()
+        _tm_begin()
         capture_referral(update)   # قبل از گیت عضویت اجباری، تا لینک دعوت گم نشه
         try:
             track_activity(update)
         except Exception as e:
             print('⚠️ track_activity:', e)
+        tp = time.time()
         handled = ban_gate(update) or admin_gate_handler(update) or join_gate(update)
         t1 = time.time()
         if not handled:
             process_update(update)
         t2 = time.time()
-        if t2 - t0 > 1.5:  # لاگ کندی: معلوم می‌کنه وقت تو گیت رفته یا تو خودِ هندلر
+        tm = _tm_end() or {}
+        total = t2 - _t_recv
+        try:
+            _q = UPDATE_EXECUTOR._work_queue.qsize()
+        except Exception:
+            _q = -1
+        with _PERF_LOCK:
+            _PERF['rows'].append((total, tm.get('db', 0.0), tm.get('api', 0.0), tm.get('ext', 0.0)))
+            if len(_PERF['rows']) > 20000:
+                del _PERF['rows'][:10000]
+            if _q > _PERF['qmax']:
+                _PERF['qmax'] = _q
+            if total > SLOW_LOG_SECONDS:
+                _PERF['slow'] += 1
+        if total > SLOW_LOG_SECONDS:  # لاگ کندی: معلوم می‌کنه وقت تو صف/قفل/گیت/هندلر یا دیتابیس/شبکه رفته
             what = ((update.get('message') or {}).get('text')
                     or (update.get('callback_query') or {}).get('data') or '?')
-            print(f'[slow] chat={chat_id} {str(what)[:30]!r} gate={t1 - t0:.1f}s handler={t2 - t1:.1f}s')
+            _ext = (f" ext_max={tm.get('ext_host')} {tm.get('ext_max', 0):.1f}s" if tm.get('ext_max', 0) > 1 else '')
+            print(f'[slow] chat={chat_id} {str(what)[:30]!r} total={total:.1f}s queue={_t_enter - _t_recv:.1f}s '
+                  f'lock={t0 - _t_enter:.1f}s pre={tp - t0:.1f}s gate={t1 - tp:.1f}s handler={t2 - t1:.1f}s | '
+                  f"db={tm.get('db', 0):.1f}s/{tm.get('db_n', 0)} api={tm.get('api', 0):.1f}s/{tm.get('api_n', 0)} "
+                  f"ext={tm.get('ext', 0):.1f}s/{tm.get('ext_n', 0)}{_ext} pool_q={_q}")
 
     lock = get_chat_lock(chat_id) if chat_id is not None else None
     try:
@@ -11864,6 +12062,9 @@ while True:
                 if _drop:
                     continue      # اسپم/مسدود/بار اضافه؛ اصلاً وارد صف نمی‌شه
                 try:
+                    if len(_RECV_TS) > 3000:
+                        _RECV_TS.clear()
+                    _RECV_TS[update.get('update_id')] = time.time()
                     UPDATE_EXECUTOR.submit(_tracked_process, update, _tid)
                 except Exception:
                     if _tid is not None:

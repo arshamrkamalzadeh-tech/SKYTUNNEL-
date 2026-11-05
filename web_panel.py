@@ -2781,7 +2781,11 @@ def dashboard():
         {table(["نوع", "تعداد", "درآمد", "گیگ"], f['ord_by_type'], lambda r: (r[0], N(r[1]), N(r[2]), f"{float(r[3] or 0):,.1f}"))}
         <h3 style="margin-top:14px;">🎁 تست رایگان</h3>{kv([
         ("کاربران استفاده‌کننده", N(f['trial_users'])),
-        ("درصد از کل کاربران", pct(f['trial_users'], f['users_total']))])}</div>
+        ("درصد از کل کاربران", pct(f['trial_users'], f['users_total']))])}
+        <form method="post" action="{url_for('trials_reset_all')}" style="margin-top:10px;"
+              onsubmit="return confirm('سابقه‌ی تست رایگان «همه‌ی کاربران» پاک بشه تا دوباره بتونن تست بگیرن؟ این کار برگشت‌پذیر نیست.');">
+          <button type="submit" class="danger">♻️ ریست تست رایگان همه‌ی کاربران</button>
+        </form></div>
     </div>
     <div class="grid cols-2">
       <div class="card"><h3>💳 شارژ کیف پول</h3>{kv([
@@ -3064,6 +3068,26 @@ def user_ban(user_id):
     if request.form.get("next") == "list":
         return redirect(url_for("users"))
     return redirect(url_for("user_detail", user_id=user_id))
+
+
+@with_db_retry
+def reset_all_trials():
+    conn = get_conn()
+    c = conn.cursor()
+    c.execute("SELECT COUNT(*) FROM free_trials")
+    n = int(c.fetchone()[0] or 0)
+    c.execute("DELETE FROM free_trials")
+    conn.commit()
+    conn.close()
+    return n
+
+
+@app.route("/trials/reset-all", methods=["POST"])
+@login_required
+def trials_reset_all():
+    n = reset_all_trials()
+    flash(f"♻️ تست رایگان {n:,} کاربر ریست شد؛ همه می‌تونن دوباره تست بگیرن.")
+    return redirect(url_for("dashboard"))
 
 
 @app.route("/users/<int:user_id>/trial-reset", methods=["POST"])
