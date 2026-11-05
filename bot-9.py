@@ -413,7 +413,10 @@ UI_TEXT = {
             '📦 <b>{ctype_label}</b>\n'
             'هر گیگابایت: <b>{price_per_gb}</b> تومان\n'
             '💳 موجودی: <b>{wallet}</b> تومان\n\n'
-            'حجم و مدت اعتبار رو با دکمه‌های + / - تنظیم کن:\n\n'
+            'حجم، مدت اعتبار و تعداد کاربر رو با دکمه‌های + / - تنظیم کن:\n\n'
+            '{devices_line}'
+            '🏷 نام کانفیگ: <b>{label}</b>\n'
+            '✏️ برای نام دلخواه، همین‌جا یه پیام بفرست.\n\n'
             '💰 قیمت فعلی: <b>{price}</b> تومان'
         ),
         'qty_continue': '✅ ادامه',
@@ -724,7 +727,10 @@ UI_TEXT = {
             '📦 <b>{ctype_label}</b>\n'
             'Per GB: <b>{price_per_gb}</b> Toman\n'
             '💳 Balance: <b>{wallet}</b> Toman\n\n'
-            'Adjust the volume and duration with the +/- buttons:\n\n'
+            'Adjust volume, duration and number of users with the +/- buttons:\n\n'
+            '{devices_line}'
+            '🏷 Config name: <b>{label}</b>\n'
+            '✏️ To use a custom name, just send it here as a message.\n\n'
             '💰 Current price: <b>{price}</b> Toman'
         ),
         'qty_continue': '✅ Continue',
@@ -1632,6 +1638,53 @@ UI_TEXT['en'].update({
     'flow_expired': 'ℹ️ This page is no longer valid.\nPlease start again from the menu.',
     'flow_home': '🏠 Please choose an option from the menu below.',
     'kb_placeholder': 'Choose an option 👇',
+})
+
+
+# صفحه‌ی یکپارچه‌ی خرید (حجم + مدت + تعداد کاربر + نام) و دکمه‌هایی که قبلاً مستقیم تو کد بودن
+UI_TEXT['fa'].update({
+    'plan_options_screen': (
+        '📦 <b>{title}</b>\n'
+        '📶 {gb} گیگ — ⏳ {days} روز\n'
+        '💳 موجودی: <b>{wallet}</b> تومان\n\n'
+        'تعداد کاربر همزمان رو با دکمه‌های + / - تنظیم کن:\n\n'
+        '{devices_line}'
+        '🏷 نام کانفیگ: <b>{label}</b>\n'
+        '✏️ برای نام دلخواه، همین‌جا یه پیام بفرست.\n\n'
+        '💰 قیمت فعلی: <b>{price}</b> تومان'
+    ),
+    'qty_users_line': '👥 کاربر همزمان: <b>{devices}</b> (کاربر اول رایگان، هر کاربر اضافه {extra} تومان)',
+    'qty_gb_btn': '📶 {n} گیگ',
+    'qty_days_btn': '⏳ {n} روز',
+    'qty_users_btn': '👥 {n} کاربر',
+    'qty_users_unlimited_btn': '♾ نامحدود',
+    'qty_name_default': 'پیش‌فرض',
+    'qty_name_reset_btn': '↩️ برگشت به اسم پیش‌فرض',
+    'plan_btn': '📦 {title} — {price} {cur}',
+    'buy_menu_type_btn': '{label}: {price}/GB',
+    'btn_unl_back': '↩️',
+})
+UI_TEXT['en'].update({
+    'plan_options_screen': (
+        '📦 <b>{title}</b>\n'
+        '📶 {gb} GB — ⏳ {days} days\n'
+        '💳 Balance: <b>{wallet}</b> Toman\n\n'
+        'Adjust the number of simultaneous users with the +/- buttons:\n\n'
+        '{devices_line}'
+        '🏷 Config name: <b>{label}</b>\n'
+        '✏️ To use a custom name, just send it here as a message.\n\n'
+        '💰 Current price: <b>{price}</b> Toman'
+    ),
+    'qty_users_line': '👥 Simultaneous users: <b>{devices}</b> (first user free, each extra user {extra} Toman)',
+    'qty_gb_btn': '📶 {n} GB',
+    'qty_days_btn': '⏳ {n} days',
+    'qty_users_btn': '👥 {n} users',
+    'qty_users_unlimited_btn': '♾ Unlimited',
+    'qty_name_default': 'Default',
+    'qty_name_reset_btn': '↩️ Back to default name',
+    'plan_btn': '📦 {title} — {price} {cur}',
+    'buy_menu_type_btn': '{label}: {price}/GB',
+    'btn_unl_back': '↩️',
 })
 
 
@@ -4273,7 +4326,7 @@ def action_unl_days(chat_id, devices):
     if not rows:
         send_message(chat_id, u(chat_id, 'unl_unavailable'))
         return
-    rows.append([{'text': '↩️', 'callback_data': 'buy_unl'}, {'text': u(chat_id, 'btn_cancel'), 'callback_data': 'cancel'}])
+    rows.append([{'text': u(chat_id, 'btn_unl_back'), 'callback_data': 'buy_unl'}, {'text': u(chat_id, 'btn_cancel'), 'callback_data': 'cancel'}])
     send_message(chat_id, u(chat_id, 'unl_pick_days', divider=DIVIDER, devices=devices, wallet=f'{get_wallet_db(chat_id):,}'),
                  reply_markup={'inline_keyboard': _tidy_rows(rows)})
 
@@ -5778,41 +5831,100 @@ DEFAULT_SUPPORT_PROMPT = '🎧 پیام خود را برای پشتیبانی ا
 DEFAULT_SUPPORT_TICKET_CREATED = '✅ پیام شما با شناسه تیکت #{tid} برای پشتیبانی ثبت شد و به‌زودی پاسخ داده می‌شود.'
 
 
+def _qty_devices_on(st):
+    return bool(get_device_enabled()) and st.get('type', 'both') not in EXTRA_TYPES
+
+
+def _qty_base_price(st):
+    if st.get('fixed'):                       # بسته‌ی آماده: قیمت ثابته
+        return int(st['base'])
+    cfg_type = get_config_types().get(st.get('type', 'both'), get_config_types()['both'])
+    return st['gb'] * cfg_type['price_per_gb']
+
+
+def qty_total_price(st):
+    """قیمت نهایی = قیمت حجم (یا بسته) + هزینه‌ی تعداد کاربر همزمان."""
+    price = _qty_base_price(st)
+    if _qty_devices_on(st):
+        price += device_price(st.get('device_limit', 1))
+    return price
+
+
+def _qty_device_steps():
+    return list(range(1, get_device_max() + 1)) + [0]      # ۰ = بدون محدودیت (آخرِ لیست)
+
+
+def _qty_device_move(cur, direction):
+    seq = _qty_device_steps()
+    if cur not in seq:
+        cur = 1
+    idx = seq.index(cur) + direction
+    return seq[max(0, min(idx, len(seq) - 1))]
+
+
+def new_quantity_state(ctype, gb, days, fixed_price=None, title=None):
+    st = {'step': 'pick_quantity', 'type': ctype, 'gb': gb, 'days': days, 'label': None}
+    if fixed_price is not None:
+        st.update({'fixed': True, 'base': int(fixed_price), 'title': title or ''})
+    st['device_limit'] = 1 if _qty_devices_on(st) else None
+    return st
+
+
 def build_quantity_screen(chat_id, step_data):
-    """صفحه‌ی انتخاب حجم/روز با دکمه‌های +/- می‌سازه. مقدار وسط (که خودِ عدد
-    فعلی رو نشون می‌ده) قابل کلیک نیست، فقط برای نمایشه."""
+    """صفحه‌ی یکپارچه‌ی خرید: حجم، مدت، تعداد کاربر و نام کانفیگ همه تو یه صفحه‌ان
+    (دیگه مرحله‌ی جدا برای تعداد کاربر یا اسم نداریم). مقدار وسط هر ردیف فقط نمایشه.
+    اسم کانفیگ با فرستادن یه پیام همین‌جا ثبت می‌شه؛ اگه چیزی نفرستن، اسم پیش‌فرض (USER-n) می‌خوره."""
     ctype = step_data.get('type', 'both')
     cfg_type = get_config_types().get(ctype, get_config_types()['both'])
     ctype_label = get_ctype_label(chat_id, ctype)
     gb = step_data['gb']
     days = step_data['days']
-    price = gb * cfg_type['price_per_gb']
+    fixed = bool(step_data.get('fixed'))
+    dev_on = _qty_devices_on(step_data)
+    dl = step_data.get('device_limit', 1)
+    price = qty_total_price(step_data)
     wallet = get_wallet_db(chat_id)
+    label = step_data.get('label') or u(chat_id, 'qty_name_default')
 
-    text = u(
-        chat_id, 'qty_screen',
-        ctype_label=ctype_label,
-        price_per_gb=f"{cfg_type['price_per_gb']:,}",
-        wallet=f'{wallet:,}',
-        price=f'{price:,}',
-    )
-    kb = {
-        'inline_keyboard': [
-            [
-                {'text': u(chat_id, 'btn_qty_minus'), 'callback_data': 'qty_gb_dec'},
-                {'text': '📶 ' + str(gb) + ' ' + u(chat_id, 'unit_gb'), 'callback_data': 'qty_noop'},
-                {'text': u(chat_id, 'btn_qty_plus'), 'callback_data': 'qty_gb_inc'},
-            ],
-            [
-                {'text': u(chat_id, 'btn_qty_minus'), 'callback_data': 'qty_days_dec'},
-                {'text': '⏳ ' + str(days) + ' ' + u(chat_id, 'unit_day'), 'callback_data': 'qty_noop'},
-                {'text': u(chat_id, 'btn_qty_plus'), 'callback_data': 'qty_days_inc'},
-            ],
-            [{'text': u(chat_id, 'qty_continue'), 'callback_data': 'qty_confirm'},
-             {'text': u(chat_id, 'btn_cancel'), 'callback_data': 'cancel'}],
-        ]
-    }
-    return text, kb
+    devices_line = ''
+    if dev_on:
+        devices_word = u(chat_id, 'device_word_unlimited') if dl == 0 else dl
+        devices_line = u(chat_id, 'qty_users_line', devices=devices_word,
+                         extra=f'{get_device_extra_price():,}', unl=f'{get_device_unlimited_price():,}') + '\n'
+
+    if fixed:
+        text = u(chat_id, 'plan_options_screen', title=step_data.get('title', ''), gb=f'{gb:g}', days=days,
+                 ctype_label=ctype_label, wallet=f'{wallet:,}', price=f'{price:,}', label=label,
+                 devices_line=devices_line)
+    else:
+        text = u(chat_id, 'qty_screen', ctype_label=ctype_label,
+                 price_per_gb=f"{cfg_type['price_per_gb']:,}", wallet=f'{wallet:,}', price=f'{price:,}',
+                 label=label, devices_line=devices_line)
+
+    rows = []
+    if not fixed:
+        rows.append([
+            {'text': u(chat_id, 'btn_qty_minus'), 'callback_data': 'qty_gb_dec'},
+            {'text': u(chat_id, 'qty_gb_btn', n=gb), 'callback_data': 'qty_noop'},
+            {'text': u(chat_id, 'btn_qty_plus'), 'callback_data': 'qty_gb_inc'},
+        ])
+        rows.append([
+            {'text': u(chat_id, 'btn_qty_minus'), 'callback_data': 'qty_days_dec'},
+            {'text': u(chat_id, 'qty_days_btn', n=days), 'callback_data': 'qty_noop'},
+            {'text': u(chat_id, 'btn_qty_plus'), 'callback_data': 'qty_days_inc'},
+        ])
+    if dev_on:
+        users_txt = u(chat_id, 'qty_users_unlimited_btn') if dl == 0 else u(chat_id, 'qty_users_btn', n=dl)
+        rows.append([
+            {'text': u(chat_id, 'btn_qty_minus'), 'callback_data': 'qty_user_dec'},
+            {'text': users_txt, 'callback_data': 'qty_noop'},
+            {'text': u(chat_id, 'btn_qty_plus'), 'callback_data': 'qty_user_inc'},
+        ])
+    if step_data.get('label'):
+        rows.append([{'text': u(chat_id, 'qty_name_reset_btn'), 'callback_data': 'qty_name_reset'}])
+    rows.append([{'text': u(chat_id, 'qty_continue'), 'callback_data': 'qty_confirm'},
+                 {'text': u(chat_id, 'btn_cancel'), 'callback_data': 'cancel'}])
+    return text, {'inline_keyboard': rows}
 
 
 def build_device_screen(chat_id, st):
@@ -6071,7 +6183,7 @@ def action_plans_menu(chat_id):
     user_steps[str(chat_id)] = {}
     layout = buy_layout(chat_id)
     cur = u(chat_id, 'cur')
-    rows = [[{'text': f"📦 {p['title']} — {p['price']:,} {cur}", 'callback_data': 'plan_' + p['id']}] for p in plans]
+    rows = [[{'text': u(chat_id, 'plan_btn', title=p['title'], price=f"{p['price']:,}", cur=cur), 'callback_data': 'plan_' + p['id']}] for p in plans]
     rows.extend(_buy_rows(chat_id, layout['plans']))
     if len(layout['hub']) > 1:
         rows.append([{'text': u(chat_id, 'btn_back_buy'), 'callback_data': 'buy_hub'}])
@@ -6095,7 +6207,7 @@ def _action_buy_custom_menu(chat_id):
     # اینجا قیمت رو بدون تگ <b> می‌چسبونیم.
     type_kb = {
         'inline_keyboard': _pair_buttons([{
-            'text': f"{get_ctype_label(chat_id, k)}: {ct[k]['price_per_gb']}/GB",
+            'text': u(chat_id, 'buy_menu_type_btn', label=get_ctype_label(chat_id, k), price=ct[k]['price_per_gb']),
             'callback_data': 'buytype_' + k,
         } for k in order])
     }
@@ -7717,6 +7829,22 @@ TEXT_WHERE = {
     'unl_card': '♾ کارت اطلاعات کانفیگ نامحدود تو «کانفیگ‌های من»',
     'proxy_card': '📡 کارت اطلاعات پروکسی تو «کانفیگ‌های من»',
 }
+TEXT_WHERE.update({
+    'qty_screen': '🛠 صفحه‌ی خرید دلخواه (حجم + مدت + تعداد کاربر + نام) — همه‌چیز تو همین یه صفحه‌ست',
+    'plan_options_screen': '📦 صفحه‌ی بعد از انتخاب یه بسته‌ی آماده (تعداد کاربر + نام)',
+    'qty_users_line': '👥 خطی که تعداد کاربر همزمان و هزینه‌ش رو تو صفحه‌ی خرید نشون می‌ده',
+    'qty_gb_btn': '📶 دکمه‌ی وسط ردیف حجم (مثلاً «1 گیگ»)',
+    'qty_days_btn': '⏳ دکمه‌ی وسط ردیف مدت (مثلاً «30 روز»)',
+    'qty_users_btn': '👥 دکمه‌ی وسط ردیف تعداد کاربر',
+    'qty_users_unlimited_btn': '♾ دکمه‌ی وسط ردیف تعداد کاربر وقتی «بدون محدودیت» انتخاب شده',
+    'qty_name_default': '🏷 چیزی که به‌جای اسم نشون داده می‌شه وقتی کاربر اسم دلخواه نذاشته (اسم واقعی موقع خرید USER-n می‌شه)',
+    'qty_name_reset_btn': '🏷 دکمه‌ی برگشت به اسم پیش‌فرض (بعد از اینکه کاربر اسم دلخواه فرستاد ظاهر می‌شه)',
+    'qty_continue': '✅ دکمه‌ی ادامه تو صفحه‌ی خرید',
+    'ask_label_skip': '➡️ دکمه‌ی «رد شدن (اسم پیش‌فرض)» تو مرحله‌ی اسم — فقط برای نامحدود و پروکسی',
+    'plan_btn': '📦 هر دکمه‌ی بسته تو صفحه‌ی بسته‌های آماده',
+    'buy_menu_type_btn': '🛠 هر دکمه‌ی نوع سرویس تو خرید دلخواه (اسم + قیمت هر گیگ)',
+    'btn_unl_back': '♾ دکمه‌ی برگشت تو صفحه‌ی انتخاب مدت نامحدود',
+})
 TEXT_WHERE.update({'unl_card': '♾ کارت اطلاعات کانفیگ نامحدود تو «کانفیگ‌های من»',
                    'proxy_card': '📡 کارت اطلاعات پروکسی تو «کانفیگ‌های من»'})
 
@@ -8973,7 +9101,10 @@ def _process_update_impl(update):
             if not _plan or not is_feature_enabled('buy'):
                 send_message(chat_id, u(chat_id, 'plan_not_found'))
             else:
-                go_device_or_label(chat_id, _plan['gb'], _plan['days'], _plan['price'], _plan['type'])
+                user_steps[str(chat_id)] = new_quantity_state(_plan['type'], _plan['gb'], _plan['days'],
+                                                              fixed_price=_plan['price'], title=_plan['title'])
+                text, kb = build_quantity_screen(chat_id, user_steps[str(chat_id)])
+                send_message(chat_id, text, reply_markup=kb)
 
         elif data.startswith('buytype_'):
             ctype = data.split('_', 1)[1]
@@ -8981,16 +9112,18 @@ def _process_update_impl(update):
             if not cfg_type or not product_enabled(ctype):
                 send_message(chat_id, u(chat_id, 'disabled_feature'))
             else:
-                user_steps[str(chat_id)] = {'step': 'pick_quantity', 'type': ctype, 'gb': get_default_gb(), 'days': get_default_days()}
+                user_steps[str(chat_id)] = new_quantity_state(ctype, get_default_gb(), get_default_days())
                 text, kb = build_quantity_screen(chat_id, user_steps[str(chat_id)])
                 send_message(chat_id, text, reply_markup=kb)
 
-        elif data in ('qty_gb_inc', 'qty_gb_dec', 'qty_days_inc', 'qty_days_dec'):
+        elif data in ('qty_gb_inc', 'qty_gb_dec', 'qty_days_inc', 'qty_days_dec', 'qty_user_inc', 'qty_user_dec', 'qty_name_reset'):
             s = user_steps.get(str(chat_id), {})
             if s.get('step') != 'pick_quantity':
                 flow_end(chat_id, 'expired')
             else:
-                if data == 'qty_gb_inc':
+                if s.get('fixed') and data in ('qty_gb_inc', 'qty_gb_dec', 'qty_days_inc', 'qty_days_dec'):
+                    pass
+                elif data == 'qty_gb_inc':
                     s['gb'] = min(s['gb'] + 1, get_buy_max_gb())
                 elif data == 'qty_gb_dec':
                     s['gb'] = max(s['gb'] - 1, 1)
@@ -8998,6 +9131,12 @@ def _process_update_impl(update):
                     s['days'] = min(s['days'] + 1, get_buy_max_days())
                 elif data == 'qty_days_dec':
                     s['days'] = max(s['days'] - 1, 1)
+                elif data == 'qty_user_inc' and _qty_devices_on(s):
+                    s['device_limit'] = _qty_device_move(s.get('device_limit', 1), +1)
+                elif data == 'qty_user_dec' and _qty_devices_on(s):
+                    s['device_limit'] = _qty_device_move(s.get('device_limit', 1), -1)
+                elif data == 'qty_name_reset':
+                    s['label'] = None
                 text, kb = build_quantity_screen(chat_id, s)
                 edit_message(chat_id, query['message']['message_id'], text, reply_markup=kb)
 
@@ -9010,10 +9149,21 @@ def _process_update_impl(update):
                 flow_end(chat_id, 'expired')
             else:
                 ctype = s.get('type', 'both')
-                cfg_type = get_config_types().get(ctype, get_config_types()['both'])
                 gb, days = s['gb'], s['days']
-                price = gb * cfg_type['price_per_gb']
-                go_device_or_label(chat_id, gb, days, price, ctype)
+                price = qty_total_price(s)
+                label = s.get('label') or get_next_user_label()   # USER-1, USER-2, ... اگه اسم دلخواه ندادن
+                user_steps[str(chat_id)] = {
+                    'step': 'confirm_buy',
+                    'gb': gb,
+                    'days': days,
+                    'price': price,
+                    'base_price': price,
+                    'label': label,
+                    'type': ctype,
+                    'devices': None,
+                    'device_limit': s.get('device_limit') if _qty_devices_on(s) else None
+                }
+                send_message(chat_id, build_purchase_invoice(chat_id, user_steps[str(chat_id)]), reply_markup=build_purchase_kb(chat_id))
 
         elif data.startswith('dev_'):
             s = user_steps.get(str(chat_id), {})
@@ -9204,6 +9354,14 @@ def _process_update_impl(update):
 
         elif step.get('step') == 'admin_wallet_amount' and chat_id == ADMIN_ID:
             admin_wallet_submit(chat_id, text, step)
+
+        elif step.get('step') == 'pick_quantity':
+            # کاربر تو همون صفحه‌ی حجم/مدت/تعداد کاربر یه متن فرستاده: اسم دلخواه کانفیگ
+            _nm = clean_label(text)
+            if _nm:
+                step['label'] = _nm
+            _t, _kb = build_quantity_screen(chat_id, step)
+            send_message(chat_id, _t, reply_markup=_kb)
 
         elif step.get('step') == 'ask_label':
             label = clean_label(text) or get_next_user_label()

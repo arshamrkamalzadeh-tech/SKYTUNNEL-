@@ -410,7 +410,7 @@ _REG_CACHE = {"d": None, "t": 0.0}
 
 def load_text_registry():
     """رجیستری متن‌ها فقط موقع استارت بات عوض می‌شه؛ ۶۰ ثانیه کش."""
-    if _REG_CACHE["d"] is not None and time.time() - _REG_CACHE["t"] < 60:
+    if _REG_CACHE["d"] is not None and time.time() - _REG_CACHE["t"] < 15:
         return _REG_CACHE["d"]
     d = _load_text_registry_uncached()
     if d is not None:
@@ -5109,6 +5109,7 @@ def texts_page():
 
     groups_html = ""
     jump_html_list = []
+    outdated_count = 0
     for g in order:
         boxes = ""
         for it in by_group[g]:
@@ -5126,6 +5127,16 @@ def texts_page():
             ref_html = f'<div class="ref">متن فارسی (مرجع):\n{esc(ref)}</div>' if (ref and not default) else ""
             ph_attr = f' placeholder="{esc(ref)}"' if (ref and not default) else ""
             badge = '<span class="badge on">سفارشی</span>' if overridden else ""
+            missing = [ph for ph in it.get("p", []) if overridden and ("{" + ph + "}") not in value]
+            if missing:
+                outdated_count += 1
+                badge += ' <span class="badge off">قدیمی</span>'
+                warn_html = ('<div class="ref" style="color:#b45309;">⚠️ این متن سفارشی‌شده‌ی قدیمیه و این بخش‌ها رو نداره '
+                             '(احتمالاً بعد از آپدیت ربات اضافه شدن): '
+                             + " ".join("<code>{" + esc(m) + "}</code>" for m in missing)
+                             + '<br>«↩ پیش‌فرض» رو بزن تا متن جدید بیاد، یا خودت اضافه‌شون کن.</div>')
+            else:
+                warn_html = ""
             if as_button:
                 field_html = f'<input type="text" name="t__{esc(setting)}" value="{esc(value)}" maxlength="64"{ph_attr}>'
             else:
@@ -5136,6 +5147,7 @@ def texts_page():
             <div class="txt" data-default="{esc(default)}" data-search="{search}">
               <label>{badge}<code class="key">{esc(key)}</code></label>
               {where_html}
+              {warn_html}
               {chips_html}
               {field_html}
               {ref_html}
@@ -5150,6 +5162,17 @@ def texts_page():
     vt = {v: ("btn" if view == v else "btn secondary") for v in ("all", "buttons", "messages")}
     note_en = ("<p class='muted' style='font-size:12.5px;'>متن‌هایی که ترجمه‌ی انگلیسی ندارن (کادرشون خالیه) فعلاً برای کاربران انگلیسی‌زبان "
                "به‌صورت فارسی نمایش داده می‌شن؛ اگه ترجمه‌شون رو بنویسید جایگزین می‌شه.</p>") if lang == "en" else ""
+
+    outdated_html = ""
+    if outdated_count:
+        reset_url = url_for("texts_reset_outdated")
+        outdated_html = (
+            '<div style="margin-top:10px;padding:10px;border:1px solid #b45309;border-radius:8px;">'
+            f'⚠️ <b>{outdated_count}</b> متن سفارشی‌شده قدیمیه و بخش‌های جدید ربات رو نداره (با برچسب «قدیمی» مشخص شده‌ن).'
+            f'<form method="post" action="{reset_url}" style="margin-top:8px;" '
+            "onsubmit=\"return confirm('متن‌های قدیمی به پیش‌فرض جدید برمی‌گردن و تغییرات سفارشی‌شون پاک می‌شه. ادامه؟');\">"
+            f'<input type="hidden" name="lang" value="{lang}"><input type="hidden" name="view" value="{view}">'
+            '<button type="submit" class="secondary">↩ برگرداندن همه‌ی متن‌های قدیمی به پیش‌فرض جدید</button></form></div>')
 
     content = f"""
     {TEXTS_CSS_JS}
@@ -5173,6 +5196,7 @@ def texts_page():
         تگ‌های <code>&lt;b&gt;</code> و <code>&lt;code&gt;</code> برای پررنگ‌کردن و کپی‌شدن متن‌اند.
       </p>
       {note_en}
+      {outdated_html}
     </div>
     <form method="post" action="{url_for('texts_save')}">
       <input type="hidden" name="lang" value="{lang}">
@@ -5183,6 +5207,30 @@ def texts_page():
     <p><small class="muted">دکمه‌های منوی اصلی و نام نوع سرویس‌ها (فارسی) هم همین‌جا در گروه «🔘 دکمه‌های منوی اصلی و نوع سرویس» قابل ویرایش‌اند؛ فقط «ترتیب» دکمه‌ها در صفحه‌ی «دکمه‌ها و ظاهر» تنظیم می‌شود.</small></p>
     """
     return render_page("همه‌ی متن‌های ربات", "texts", content)
+
+
+@app.route("/texts/reset_outdated", methods=["POST"])
+@login_required
+def texts_reset_outdated():
+    lang = "en" if request.form.get("lang") == "en" else "fa"
+    view = request.form.get("view", "all")
+    if view not in ("all", "buttons", "messages"):
+        view = "all"
+    registry = load_text_registry()
+    if not registry:
+        flash("⚠️ لیست متن‌ها از ربات دریافت نشده؛ ربات را ری‌استارت کنید.")
+        return redirect(url_for("texts_page", lang=lang, view=view))
+    current = get_all_settings()
+    n = 0
+    for it in registry.get(lang, []):
+        stored = current.get(it["s"])
+        if stored is None:
+            continue
+        if any(("{" + ph + "}") not in stored for ph in it.get("p", [])):
+            delete_setting(it["s"])
+            n += 1
+    flash(f"{n} متن قدیمی به پیش‌فرض جدید برگشت.")
+    return redirect(url_for("texts_page", lang=lang, view=view))
 
 
 @app.route("/texts/save", methods=["POST"])
