@@ -7371,22 +7371,26 @@ def _pair_buttons(buttons):
 
 
 def _tidy_rows(rows):
-    """ردیف‌های تک‌دکمه‌ای پشت‌سرهم رو دوتا‌دوتا کنار هم می‌چینه؛ ردیف‌هایی که از قبل چند دکمه دارن دست نمی‌خورن."""
-    out, pending = [], None
+    """ردیف‌های تک‌دکمه‌ایِ پشت‌سرهم رو مرتب می‌کنه: اگه فقط دوتا باشن هرکدوم تو ردیف خودش می‌مونه (تک‌ردیفی)؛
+    اگه بیشتر از دوتا باشن دوتا‌دوتا کنار هم می‌شن و باقی‌مونده (مثلاً سومی) پایینشون می‌آد.
+    ردیف‌هایی که از قبل چند دکمه دارن دست نمی‌خورن."""
+    out, group = [], []
+
+    def flush():
+        if len(group) == 2:
+            out.extend([[b] for b in group])
+        else:
+            for i in range(0, len(group), 2):
+                out.append(group[i:i + 2])
+        group.clear()
+
     for r in rows:
         if len(r) == 1:
-            if pending is None:
-                pending = r[0]
-            else:
-                out.append([pending, r[0]])
-                pending = None
+            group.append(r[0])
         else:
-            if pending is not None:
-                out.append([pending])
-                pending = None
+            flush()
             out.append(r)
-    if pending is not None:
-        out.append([pending])
+    flush()
     return out
 
 
@@ -7786,6 +7790,14 @@ def find_custom_button_by_label(text):
     return None
 
 
+def _cbtn_direct_url(it):
+    """لینکِ دکمه‌ی سفارشی (فقط نوع «پیام» با آدرس http/https)؛ تو حالت اینلاین مستقیم باز می‌شه."""
+    if str(it.get('type') or 'message') == 'goto':
+        return None
+    url = str(it.get('url') or '').strip()
+    return url if url.lower().startswith(('http://', 'https://')) else None
+
+
 def run_custom_button(chat_id, it):
     """کاری که با زدن دکمه‌ی سفارشی انجام می‌شه."""
     user_steps[str(chat_id)] = {}
@@ -7808,6 +7820,82 @@ def run_custom_button(chat_id, it):
     if not (isinstance(res, dict) and res.get('ok')):
         # HTML خراب بود؟ همون متن رو ساده بفرست
         send_message(chat_id, text, parse_mode=None, reply_markup=markup)
+
+
+# ---------------------------------------------------------------------------
+# همگام‌سازی سبک دکمه‌ها (کیبورد / اینلاین) برای هر کاربر
+# وقتی از پنل سبک عوض می‌شه، بقایای حالت قبلی برای هر کاربر (کیبورد پایین صفحه
+# یا پیام‌های منوی شیشه‌ای) پاک می‌شن و حالت قبلی فقط با تغییر دوباره از پنل برمی‌گرده.
+# ---------------------------------------------------------------------------
+_MAIN_MENU_MIDS = {}   # chat_id -> message_id آخرین منوی اصلیِ اینلاین
+
+
+def _is_main_menu_markup(markup):
+    """آیا این inline_keyboard همون شبکه‌ی دکمه‌های منوی اصلیه؟ (حداقل ۳ دکمه‌ی menu_*)"""
+    try:
+        n = 0
+        for row in (markup or {}).get('inline_keyboard') or []:
+            for b in row:
+                if str(b.get('callback_data') or '').startswith('menu_'):
+                    n += 1
+        return n >= 3
+    except Exception:
+        return False
+
+
+def _apply_kb_switch(chat_id, style):
+    """اگه سبک ذخیره‌شده‌ی کاربر با سبک فعلی پنل فرق داره، بقایای حالت قبلی رو پاک می‌کنه.
+    True یعنی سبک این کاربر همین الان عوض شد."""
+    if get_user_kb_style(chat_id) == style:
+        return False
+    if style == 'inline':
+        # کیبورد ثابتِ قبلی باید با remove_keyboard جمع بشه؛ تا موفق نشده سبک ذخیره نمی‌شه و دفعه‌ی بعد دوباره تلاش می‌شه
+        res = _raw_send_message(chat_id, u(chat_id, 'kb_removed_note'), reply_markup={'remove_keyboard': True})
+        if not (isinstance(res, dict) and res.get('ok')):
+            return False
+    else:
+        # منوی شیشه‌ای قبلی (اگه هنوز تو چت هست) پاک می‌شه
+        old = _MAIN_MENU_MIDS.pop(chat_id, None)
+        if old:
+            delete_message(chat_id, old)
+            cur = _ui_get(chat_id)
+            if cur and cur.get('mid') == old:
+                _ui_untrack(chat_id)
+    set_user_kb_style(chat_id, style)
+    return True
+
+
+def sync_kb_style(update):
+    """قبل از پردازش هر آپدیت صدا زده می‌شه. برمی‌گردونه (consumed, need_menu):
+    consumed=True یعنی آپدیت از یه دکمه‌ی قدیمیِ حالت قبلی بوده و همین‌جا مصرف شد (منوی تازه فرستاده شد)؛
+    need_menu=True یعنی کاربر تازه به حالت کیبورد رفته و باید کیبوردش بعد از پردازش بهش برسه."""
+    try:
+        is_cb = 'callback_query' in update
+        msg = (update['callback_query'].get('message') or {}) if is_cb else (update.get('message') or {})
+        chat_id = (msg.get('chat') or {}).get('id')
+        if chat_id is None or not _load_settings_blocking(attempts=2, delay=0.5):
+            return False, False
+        style = get_keyboard_style()
+        switched = _apply_kb_switch(chat_id, style)
+        if is_cb and style == 'reply':
+            q = update['callback_query']
+            data = str(q.get('data') or '')
+            if data.startswith(('menu_', 'cbtn_')) or data == 'admin_panel':
+                mid = msg.get('message_id')
+                if _is_main_menu_markup(msg.get('reply_markup')) or (mid is not None and _MAIN_MENU_MIDS.get(chat_id) == mid):
+                    # دکمه‌ی یه منوی شیشه‌ای قدیمی (حالت قبلی): پاکش کن و منوی حالت فعلی رو بفرست
+                    answer_callback(q['id'])
+                    if mid is not None:
+                        delete_message(chat_id, mid)
+                    _MAIN_MENU_MIDS.pop(chat_id, None)
+                    _ui_untrack(chat_id)
+                    user_steps[str(chat_id)] = {}
+                    main_menu(chat_id)
+                    return True, False
+        return False, (switched and style == 'reply')
+    except Exception as e:
+        print('⚠️ sync_kb_style:', e)
+        return False, False
 
 
 def main_menu(chat_id, note=None):
@@ -7838,10 +7926,8 @@ def main_menu(chat_id, note=None):
     # (قبلاً همین باعث می‌شد کیبورد کاربر بی‌دلیل عوض/پاک بشه)؛ پس تا وقتی تنظیمات نیومده سبک ذخیره‌شده‌ی خودش رو نگه می‌داریم.
     if not _load_settings_blocking(attempts=2, delay=0.5):
         style = get_user_kb_style(chat_id) or style
-    elif get_user_kb_style(chat_id) != style:
-        if style == 'inline':
-            send_message(chat_id, u(chat_id, 'kb_removed_note'), reply_markup={'remove_keyboard': True})
-        set_user_kb_style(chat_id, style)
+    else:
+        _apply_kb_switch(chat_id, style)
 
     if style == 'inline':
         keyboard = {
@@ -7860,12 +7946,14 @@ def main_menu(chat_id, note=None):
 
     # دکمه‌های سفارشی ادمین (از پنل) — بعد از دکمه‌های اصلی
     try:
-        custom = [(_cbtn_label(chat_id, it), str(it['id'])) for it in get_custom_buttons()]
+        custom = [(_cbtn_label(chat_id, it), str(it['id']), _cbtn_direct_url(it)) for it in get_custom_buttons()]
         if style == 'inline':
+            # حالت اینلاین: دکمه‌ی دارای لینک مستقیم لینک رو باز می‌کنه (بدون پیام جدید)؛ بقیه مثل قبل
             keyboard['inline_keyboard'].extend(
-                [{'text': t, 'callback_data': 'cbtn_' + i} for t, i in row] for row in _chunk_pairs(custom))
+                [({'text': t, 'url': url} if url else {'text': t, 'callback_data': 'cbtn_' + i}) for t, i, url in row]
+                for row in _chunk_pairs(custom))
         else:
-            keyboard['keyboard'].extend([{'text': t} for t, _i in row] for row in _chunk_pairs(custom))
+            keyboard['keyboard'].extend([{'text': t} for t, _i, _u in row] for row in _chunk_pairs(custom))
     except Exception as e:
         print('⚠️ ساخت دکمه‌های سفارشی ناموفق بود:', e)
 
@@ -7903,7 +7991,15 @@ def main_menu(chat_id, note=None):
         )
     if note:
         text = note + '\n' + DIVIDER + '\n' + text
-    send_message(chat_id, text, reply_markup=keyboard)
+    res = send_message(chat_id, text, reply_markup=keyboard)
+    _UI.menu_sent = True
+    if style == 'inline':
+        _mid = _ui_mid(res)
+        if _mid is not None:
+            _bound_cache(_MAIN_MENU_MIDS)
+            _MAIN_MENU_MIDS[chat_id] = _mid
+    else:
+        _MAIN_MENU_MIDS.pop(chat_id, None)
 
 
 _KB_PH_LAST = {}
@@ -12009,7 +12105,15 @@ def safe_process_update(update):
         handled = ban_gate(update) or admin_gate_handler(update) or join_gate(update)
         t1 = time.time()
         if not handled:
-            process_update(update)
+            _UI.menu_sent = False
+            _consumed, _need_menu = sync_kb_style(update)
+            if not _consumed:
+                process_update(update)
+                if _need_menu and not getattr(_UI, 'menu_sent', False):
+                    # کاربر تازه به حالت «کیبورد» رفته؛ کیبورد جدیدش رو همین‌جا می‌گیره
+                    _cid = ((update.get('message') or update.get('callback_query', {}).get('message') or {}).get('chat') or {}).get('id')
+                    if _cid is not None:
+                        main_menu(_cid)
         t2 = time.time()
         tm = _tm_end() or {}
         total = t2 - _t_recv
