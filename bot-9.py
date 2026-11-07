@@ -1678,6 +1678,34 @@ UI_TEXT['fa'].update({
     ),
     'qty_users_line': '👥 کاربر همزمان: <b>{devices}</b> (کاربر اول رایگان، هر کاربر اضافه {extra} تومان)',
     'qty_gb_btn': '📶 {n} گیگ',
+    'btn_acc_topup': '💳 شارژ کیف پول',
+    'btn_troubleshoot': '🛠 عیب‌یابی',
+    'btn_diag_support': '🎧 پیام به پشتیبانی',
+    'btn_diag_app': '📲 دریافت برنامه‌ی v2pro',
+    'btn_diag_back': '↩️ بازگشت',
+    'diag_paused': ('🛠 <b>عیب‌یابی کانفیگ «{label}»</b>\n{divider}\n'
+                    '⏸ این کانفیگ متوقف شده است و به همین دلیل متصل نمی‌شود.\n'
+                    'برای استفاده‌ی دوباره، آن را از سر بگیرید.'),
+    'diag_expired': ('🛠 <b>عیب‌یابی کانفیگ «{label}»</b>\n{divider}\n'
+                     '⌛ مدت اعتبار این کانفیگ به پایان رسیده است.\n'
+                     'برای اتصال دوباره، آن را تمدید کنید.'),
+    'diag_no_volume': ('🛠 <b>عیب‌یابی کانفیگ «{label}»</b>\n{divider}\n'
+                       '📉 حجم این کانفیگ به پایان رسیده است.\n'
+                       'برای ادامه‌ی استفاده، آن را تمدید کنید.'),
+    'diag_ok': ('🛠 <b>عیب‌یابی کانفیگ «{label}»</b>\n{divider}\n'
+                '✅ {summary}\n\n'
+                'لطفاً مراحل زیر را به‌ترتیب انجام دهید:\n\n'
+                '1️⃣ لینک اشتراک را یک‌بار حذف کنید و دوباره در برنامه وارد کنید.\n'
+                '2️⃣ حتماً از برنامه‌ی اختصاصی ما (<b>v2pro</b>) استفاده کنید تا از سرعت بهتری بهره‌مند شوید.\n'
+                '3️⃣ اینترنت خود را تغییر دهید (وای‌فای یا داده‌ی همراه).\n\n'
+                'اگر هیچ‌یک از مراحل بالا مشکل را برطرف نکرد، لطفاً به پشتیبانی پیام دهید.'),
+    'diag_summary_full': 'کانفیگ شما فعال و سالم است ({days} روز و {remaining} گیگابایت باقی‌مانده).',
+    'diag_summary_plain': 'کانفیگ شما فعال و سالم است.',
+    'btn_acc_cfgs': '📦 کانفیگ‌های من',
+    'myconfigs_summary': '📊 <b>خلاصه:</b> {n} کانفیگ فعال • {gb} گیگابایت باقی‌مانده • نزدیک‌ترین انقضا: {days} روز دیگر',
+    'qty_gb_jump_btn': '+{n} گیگ',
+    'qty_days_jump_btn': '+{n} روز',
+    'qty_users_unl_on_btn': '✅ ♾ نامحدود',
     'qty_days_btn': '⏳ {n} روز',
     'qty_users_btn': '👥 {n} کاربر',
     'qty_users_unlimited_btn': '♾ نامحدود',
@@ -1702,6 +1730,31 @@ UI_TEXT['en'].update({
     ),
     'qty_users_line': '👥 Simultaneous users: <b>{devices}</b> (first user free, each extra user {extra} Toman)',
     'qty_gb_btn': '📶 {n} GB',
+    'btn_acc_topup': '💳 Top up wallet',
+    'btn_troubleshoot': '🛠 Troubleshoot',
+    'btn_diag_support': '🎧 Message support',
+    'btn_diag_app': '📲 Get the v2pro app',
+    'btn_diag_back': '↩️ Back',
+    'diag_paused': ('🛠 <b>Troubleshooting “{label}”</b>\n{divider}\n'
+                    '⏸ This config is paused, so it cannot connect.\nResume it to use it again.'),
+    'diag_expired': ('🛠 <b>Troubleshooting “{label}”</b>\n{divider}\n'
+                     '⌛ This config has expired.\nRenew it to connect again.'),
+    'diag_no_volume': ('🛠 <b>Troubleshooting “{label}”</b>\n{divider}\n'
+                       '📉 This config has run out of data.\nRenew it to keep using it.'),
+    'diag_ok': ('🛠 <b>Troubleshooting “{label}”</b>\n{divider}\n'
+                '✅ {summary}\n\n'
+                'Please try the following steps in order:\n\n'
+                '1️⃣ Delete the subscription link once and enter it again in the app.\n'
+                '2️⃣ Be sure to use our own app (<b>v2pro</b>) for better speed.\n'
+                '3️⃣ Switch your connection (Wi-Fi or mobile data).\n\n'
+                'If none of these solves the problem, please message support.'),
+    'diag_summary_full': 'Your config is active and healthy ({days} day(s) and {remaining} GB left).',
+    'diag_summary_plain': 'Your config is active and healthy.',
+    'btn_acc_cfgs': '📦 My configs',
+    'myconfigs_summary': '📊 <b>Summary:</b> {n} active config(s) • {gb} GB left • nearest expiry: in {days} day(s)',
+    'qty_gb_jump_btn': '+{n} GB',
+    'qty_days_jump_btn': '+{n} days',
+    'qty_users_unl_on_btn': '✅ ♾ Unlimited',
     'qty_days_btn': '⏳ {n} days',
     'qty_users_btn': '👥 {n} users',
     'qty_users_unlimited_btn': '♾ Unlimited',
@@ -3666,21 +3719,77 @@ def _describe_update(update, step_name):
     return 'text'
 
 
+# «آخرین فعالیت»: قبلاً هر پیام یک نوشتن جدا تو صف بود و وقتی صف پر می‌شد (دیتابیس راه دور کند) نوشتن‌ها بی‌صدا
+# دور ریخته می‌شد؛ نتیجه‌اش این بود که پنل برای بعضی کاربرها زمان خیلی قدیمی نشان می‌داد.
+# حالا فقط آخرین فعالیت هر کاربر تو حافظه نگه داشته می‌شه (مقدار جدید جای قبلی می‌نشیند، پس هیچ‌چیز رد نمی‌شه) و یک
+# ترد هر چند ثانیه همه را یک‌جا و با چند کوئری دسته‌ای تو دیتابیس می‌نویسه. اگه نوشتن شکست بخوره، دفعه‌ی بعد دوباره تلاش می‌شه.
+_ACT_PENDING = {}                 # user_id -> (action, ts)
+_ACT_LOCK = threading.Lock()
+ACT_FLUSH_SEC = 8
+ACT_CHUNK = 40
+
+
 def _record_activity(user_id, update, step_name):
     if user_id in _UNREGISTERED:
         return
     try:
         action = _describe_update(update, step_name)
-        now = time.time()
-        prev = _activity_cache.get(user_id)
-        if prev and prev[0] == action and now - prev[1] < ACTIVITY_THROTTLE_SEC:
-            return
-        _bound_cache(_activity_cache)
-        _activity_cache[user_id] = (action, now)
         ts = datetime.now(timezone.utc).isoformat(timespec='seconds')
-        _touch_user_db(user_id, action, ts)
+        with _ACT_LOCK:
+            _ACT_PENDING[user_id] = (action, ts)
     except Exception as e:
         print('⚠️ ثبت آخرین فعالیت ناموفق بود:', e)
+
+
+@with_db_retry
+def _flush_activity_chunk(items):
+    """items: [(user_id, action, ts)] ← یک UPDATE برای چند کاربر (یک رفت‌وبرگشت به دیتابیس)."""
+    conn = get_conn()
+    c = conn.cursor()
+    when_ts, when_act, ids = [], [], []
+    p_ts, p_act = [], []
+    for uid, action, ts in items:
+        when_ts.append('WHEN ? THEN ?')
+        p_ts += [uid, ts]
+        when_act.append('WHEN ? THEN ?')
+        p_act += [uid, action]
+        ids.append(uid)
+    sql = ('UPDATE users SET last_active = CASE user_id ' + ' '.join(when_ts) + ' ELSE last_active END, '
+           'last_action = CASE user_id ' + ' '.join(when_act) + ' ELSE last_action END '
+           'WHERE user_id IN (' + ','.join('?' * len(ids)) + ')')
+    c.execute(sql, p_ts + p_act + ids)
+    conn.commit()
+    conn.close()
+
+
+def _flush_activity_once():
+    with _ACT_LOCK:
+        if not _ACT_PENDING:
+            return
+        batch = dict(_ACT_PENDING)
+        _ACT_PENDING.clear()
+    items = [(uid, a, ts) for uid, (a, ts) in batch.items()]
+    for k in range(0, len(items), ACT_CHUNK):
+        chunk = items[k:k + ACT_CHUNK]
+        try:
+            _flush_activity_chunk(chunk)
+        except Exception as e:
+            print('⚠️ نوشتن دسته‌ای آخرین فعالیت ناموفق بود (دوباره تلاش می‌شود):', e)
+            with _ACT_LOCK:
+                for uid, a, ts in chunk:
+                    _ACT_PENDING.setdefault(uid, (a, ts))      # اگه تو این فاصله مقدار تازه‌تری آمده، همان می‌ماند
+
+
+def _activity_flush_loop():
+    while True:
+        time.sleep(ACT_FLUSH_SEC)
+        try:
+            _flush_activity_once()
+        except Exception as e:
+            print('⚠️ حلقه‌ی ثبت فعالیت:', e)
+
+
+threading.Thread(target=_activity_flush_loop, name='activity-flush', daemon=True).start()
 
 
 def track_activity(update):
@@ -3698,7 +3807,7 @@ def track_activity(update):
         prefetch_user_state(chat_id)        # یک کوئری خواندنی؛ هیچ ردیفی ساخته نمی‌شه
     if chat_id in _UNREGISTERED:
         return                              # هنوز شارژ نکرده: هیچ‌چیز تو دیتابیس نوشته نمی‌شه
-    _submit_user_write(_record_activity, chat_id, update, step_name)
+    _record_activity(chat_id, update, step_name)        # فقط حافظه؛ نوشتنِ دیتابیس را ترد جداگانه انجام می‌دهد
 
 
 @with_db_retry
@@ -6132,6 +6241,10 @@ def new_quantity_state(ctype, gb, days, fixed_price=None, title=None):
     return st
 
 
+QTY_GB_JUMP = 10      # دکمه‌ی میان‌بر کنار حجم: +۱۰ گیگ
+QTY_DAYS_JUMP = 7     # دکمه‌ی میان‌بر کنار مدت: +۷ روز
+
+
 def build_quantity_screen(chat_id, step_data):
     """صفحه‌ی یکپارچه‌ی خرید: حجم، مدت، تعداد کاربر و نام کانفیگ همه در یک صفحه‌ان
     (دیگر مرحله‌ی جدا برای تعداد کاربر یا اسم نداریم). مقدار وسط هر ردیف فقط نمایشه.
@@ -6172,11 +6285,13 @@ def build_quantity_screen(chat_id, step_data):
             {'text': u(chat_id, 'btn_qty_minus'), 'callback_data': 'qty_gb_dec'},
             {'text': u(chat_id, 'qty_gb_btn', n=gb), 'callback_data': 'qty_noop'},
             {'text': u(chat_id, 'btn_qty_plus'), 'callback_data': 'qty_gb_inc'},
+            {'text': u(chat_id, 'qty_gb_jump_btn', n=QTY_GB_JUMP), 'callback_data': 'qty_gb_jump'},
         ])
         rows.append([
             {'text': u(chat_id, 'btn_qty_minus'), 'callback_data': 'qty_days_dec'},
             {'text': u(chat_id, 'qty_days_btn', n=days), 'callback_data': 'qty_noop'},
             {'text': u(chat_id, 'btn_qty_plus'), 'callback_data': 'qty_days_inc'},
+            {'text': u(chat_id, 'qty_days_jump_btn', n=QTY_DAYS_JUMP), 'callback_data': 'qty_days_jump'},
         ])
     if dev_on:
         users_txt = u(chat_id, 'qty_users_unlimited_btn') if dl == 0 else u(chat_id, 'qty_users_btn', n=dl)
@@ -6184,6 +6299,8 @@ def build_quantity_screen(chat_id, step_data):
             {'text': u(chat_id, 'btn_qty_minus'), 'callback_data': 'qty_user_dec'},
             {'text': users_txt, 'callback_data': 'qty_noop'},
             {'text': u(chat_id, 'btn_qty_plus'), 'callback_data': 'qty_user_inc'},
+            {'text': u(chat_id, 'qty_users_unl_on_btn' if dl == 0 else 'qty_users_unlimited_btn'),
+             'callback_data': 'qty_user_unl'},
         ])
     rows.append([{'text': u(chat_id, 'qty_name_btn', name=label), 'callback_data': 'qty_name'}])
     if step_data.get('label'):
@@ -7386,7 +7503,13 @@ def action_account(chat_id):
             total_price=f'{tp:,.0f}',
             divider=DIVIDER,
         )
-    send_message(chat_id, profile_text)
+    rows = []
+    _r1 = []
+    if is_feature_enabled('topup'):
+        _r1.append({'text': u(chat_id, 'btn_acc_topup'), 'callback_data': 'acc_topup'})
+    _r1.append({'text': u(chat_id, 'btn_acc_cfgs'), 'callback_data': 'acc_cfgs'})
+    rows.append(_r1)
+    send_message(chat_id, profile_text, reply_markup={'inline_keyboard': rows})
 
 
 def build_usage_bar(used_gb, total_gb, segments=10):
@@ -7456,12 +7579,26 @@ def action_my_configs(chat_id):
     else:
         txt = get_bot_text('myconfigs_header', DEFAULT_MYCONFIGS_HEADER) + '\n' + DIVIDER + '\n\n'
     manage_rows = []
+    _hdr_len = len(txt)
+    _sum_n, _sum_gb, _sum_days = 0, 0.0, None
+
+    def _cfg_row(i, cfg, ctype):
+        # ردیف هر کانفیگ: «مدیریت» + «صفحه اشتراک 🌐» (مثل پیام موفقیت خرید؛ با یک تپ صفحه‌ی اشتراک باز می‌شود)
+        row = [{'text': u(chat_id, 'btn_manage_config', idx=i, label=str(cfg[4])[:12]),
+                'callback_data': 'managecfg_' + str(cfg[0])}]
+        _su = str(cfg[1] or '').strip()
+        if _su.lower().startswith(('http://', 'https://')):
+            _t = u(chat_id, 'btn_open_proxy' if ctype in EXTRA_TYPES else 'btn_sub_page')
+            if len(configs) > 1:
+                _t += ' · ' + str(i)
+            row.append({'text': _t, 'url': _su})
+        return row
+
     for i, cfg in enumerate(configs, 1):
         ctype = cfg[9] if len(cfg) > 9 else 'both'
         if ctype in EXTRA_TYPES:
             txt += build_extra_card(chat_id, i, cfg) + '\n\n'
-            manage_rows.append([{'text': u(chat_id, 'btn_manage_config', idx=i, label=str(cfg[4])[:12]),
-                                 'callback_data': 'managecfg_' + str(cfg[0])}])
+            manage_rows.append(_cfg_row(i, cfg, ctype))
             continue
         ctype_label = get_ctype_label(chat_id, ctype)
         status = cfg[10] if len(cfg) > 10 else 'active'
@@ -7484,6 +7621,10 @@ def action_my_configs(chat_id):
         else:
             used_gb = max(0.0, float(used_gb))
             remaining_gb = max(0.0, gb_total - used_gb)
+            if status != 'paused' and remaining_days > 0:
+                _sum_n += 1
+                _sum_gb += remaining_gb
+                _sum_days = remaining_days if _sum_days is None else min(_sum_days, remaining_days)
             bar = build_usage_bar(used_gb, gb_total)
             txt += u(
                 chat_id, 'myconfigs_card',
@@ -7491,13 +7632,50 @@ def action_my_configs(chat_id):
                 gb=f'{gb_total:g}', remaining_gb=f'{remaining_gb:.2f}', used_gb=f'{used_gb:.2f}',
                 remaining_days=remaining_days, ctype_label=ctype_label, sub_url=str(cfg[1]),
             ) + '\n\n'
-        btn_label = str(cfg[4])[:12]
-        manage_rows.append([{
-            'text': u(chat_id, 'btn_manage_config', idx=i, label=btn_label),
-            'callback_data': 'managecfg_' + str(cfg[0])
-        }])
-    manage_rows = _pair_buttons([r[0] for r in manage_rows])      # دکمه‌های مدیریت دوتا‌دوتا کنار هم
+        manage_rows.append(_cfg_row(i, cfg, ctype))
+    if len(configs) > 1 and _sum_n:
+        _summary = u(chat_id, 'myconfigs_summary', n=_sum_n, gb=f'{_sum_gb:.1f}', days=_sum_days)
+        txt = txt[:_hdr_len] + _summary + '\n\n' + txt[_hdr_len:]
     send_message(chat_id, txt, reply_markup={'inline_keyboard': manage_rows})
+
+
+def send_diagnosis(chat_id, cfg):
+    """عیب‌یابی خودکار کانفیگ: اول علت‌های قطعی (متوقف، منقضی، اتمام حجم) را با دکمه‌ی حلشان نشان می‌دهد؛
+    اگر کانفیگ سالم بود، چک‌لیست سه‌مرحله‌ای و مسیر پیام به پشتیبانی را می‌دهد."""
+    row_id = cfg[0]
+    label = str(cfg[4])
+    status = cfg[10] if len(cfg) > 10 else 'active'
+    gb_total = float(cfg[3] or 0)
+    days_left = days_remaining(cfg[8])
+    rows = []
+    if status == 'paused':
+        key = 'diag_paused'
+        rows.append([{'text': u(chat_id, 'btn_resume'), 'callback_data': 'cfgresume_' + str(row_id)}])
+    elif days_left <= 0:
+        key = 'diag_expired'
+        rows.append([{'text': u(chat_id, 'btn_extend'), 'callback_data': 'cfgext_' + str(row_id)}])
+    else:
+        used = get_config_usage_gb(cfg[2])
+        if used is not None and gb_total > 0 and float(used) >= gb_total - 0.01:
+            key = 'diag_no_volume'
+            rows.append([{'text': u(chat_id, 'btn_extend'), 'callback_data': 'cfgext_' + str(row_id)}])
+        else:
+            key = 'diag_ok'
+            if used is not None and gb_total > 0:
+                summary = u(chat_id, 'diag_summary_full', days=days_left, remaining=f'{max(0.0, gb_total - float(used)):.1f}')
+            else:
+                summary = u(chat_id, 'diag_summary_plain')
+            extra = []
+            if is_feature_enabled('guide'):
+                extra.append({'text': u(chat_id, 'btn_diag_app'), 'callback_data': 'diag_app'})
+            if is_feature_enabled('support'):
+                extra.append({'text': u(chat_id, 'btn_diag_support'), 'callback_data': 'diag_support'})
+            if extra:
+                rows.append(extra)
+    rows.append([{'text': u(chat_id, 'btn_diag_back'), 'callback_data': 'managecfg_' + str(row_id)}])
+    text = u(chat_id, key, label=label, divider=DIVIDER, summary=summary) if key == 'diag_ok' \
+        else u(chat_id, key, label=label, divider=DIVIDER)
+    send_message(chat_id, text, reply_markup={'inline_keyboard': rows})
 
 
 def send_manage_panel(chat_id, cfg, note=None):
@@ -7523,6 +7701,8 @@ def send_manage_panel(chat_id, cfg, note=None):
         toggle_btn,
         {'text': u(chat_id, 'btn_rotate'), 'callback_data': 'cfgrotate_' + str(row_id)},
     ]
+    if is_feature_enabled('troubleshoot'):
+        _btns.append({'text': u(chat_id, 'btn_troubleshoot'), 'callback_data': 'cfgdiag_' + str(row_id)})
     if is_feature_enabled('delete_config'):
         _btns.append({'text': u(chat_id, 'btn_cfg_delete'), 'callback_data': 'cfgdel_' + str(row_id)})
     manage_kb = {'inline_keyboard': _pair_buttons(_btns)}      # دوتا‌دوتا کنار هم
@@ -9213,6 +9393,12 @@ def _process_update_impl(update):
         elif data in ('cancel_purchase', 'cancel'):
             flow_end(chat_id, 'cancel')
 
+        elif data == 'acc_cfgs':
+            action_my_configs(chat_id)
+
+        elif data == 'acc_topup':
+            action_topup_menu(chat_id)
+
         elif data == 'menu':
             # دکمه‌ی صریح «منوی اصلی»: تو حالت اینلاین همون پیام به منو تبدیل می‌شه؛
             # تو حالت کیبورد معمولی کیبورد پایین همیشه هست، پس فقط یه پیام کوتاه.
@@ -9300,6 +9486,22 @@ def _process_update_impl(update):
             else:
                 user_steps[str(chat_id)] = {'step': 'rename_ask_label', 'row_id': row_id}
                 send_message(chat_id, u(chat_id, 'rename_ask'), reply_markup=cancel_kb(chat_id))
+
+        elif data.startswith('cfgdiag_'):
+            row_id = _cb_int(data, 1, 1)
+            cfg = get_config_row(chat_id, row_id)
+            if not is_feature_enabled('troubleshoot'):
+                send_message(chat_id, u(chat_id, 'disabled_feature'))
+            elif not cfg:
+                send_message(chat_id, u(chat_id, 'config_not_found'))
+            else:
+                send_diagnosis(chat_id, cfg)
+
+        elif data == 'diag_support':
+            action_support_start(chat_id)
+
+        elif data == 'diag_app':
+            action_guide(chat_id)
 
         elif data.startswith('cfgqr_'):
             row_id = _cb_int(data, 1, 1)
@@ -9596,15 +9798,23 @@ def _process_update_impl(update):
                 text, kb = build_quantity_screen(chat_id, user_steps[str(chat_id)])
                 send_message(chat_id, text, reply_markup=kb)
 
-        elif data in ('qty_gb_inc', 'qty_gb_dec', 'qty_days_inc', 'qty_days_dec', 'qty_user_inc', 'qty_user_dec', 'qty_name_reset'):
+        elif data in ('qty_gb_inc', 'qty_gb_dec', 'qty_days_inc', 'qty_days_dec', 'qty_user_inc', 'qty_user_dec', 'qty_name_reset',
+                      'qty_gb_jump', 'qty_days_jump', 'qty_user_unl'):
             s = user_steps.get(str(chat_id), {})
             if s.get('step') != 'pick_quantity':
                 flow_end(chat_id, 'expired')
             else:
-                if s.get('fixed') and data in ('qty_gb_inc', 'qty_gb_dec', 'qty_days_inc', 'qty_days_dec'):
+                if s.get('fixed') and data in ('qty_gb_inc', 'qty_gb_dec', 'qty_days_inc', 'qty_days_dec', 'qty_gb_jump', 'qty_days_jump'):
                     pass
                 elif data == 'qty_gb_inc':
                     s['gb'] = min(s['gb'] + 1, get_buy_max_gb())
+                elif data == 'qty_gb_jump':
+                    s['gb'] = min(s['gb'] + QTY_GB_JUMP, get_buy_max_gb())
+                elif data == 'qty_days_jump':
+                    s['days'] = min(s['days'] + QTY_DAYS_JUMP, get_buy_max_days())
+                elif data == 'qty_user_unl' and _qty_devices_on(s):
+                    # «بدون محدودیت» (گزینه‌ی پولی)؛ دوباره زدن، به ۱ کاربر برمی‌گرداند
+                    s['device_limit'] = 1 if s.get('device_limit', 1) == 0 else 0
                 elif data == 'qty_gb_dec':
                     s['gb'] = max(s['gb'] - 1, 1)
                 elif data == 'qty_days_inc':

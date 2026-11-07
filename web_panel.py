@@ -273,6 +273,7 @@ FEATURES = {
     "reseller": "🏪 دریافت پنل فروشندگی",
     "guide": "📲 اپ مخصوص کانفیگ‌ها",
     "language": "🌐 تغییر زبان",
+    "troubleshoot": "🛠 عیب‌یابی کانفیگ",
 }
 
 USERS_PAGE_SIZE = 20
@@ -330,6 +331,49 @@ def with_db_retry(func):
     return wrapper
 
 
+_SWR_STATE = {}
+_SWR_LOCK = threading.Lock()
+
+
+def _swr_cache(ttl, max_stale=300):
+    """کش «بیات هم بده، پشت‌صحنه تازه کن» برای کوئری‌های سنگینِ فقط‌خواندنی (آمار داشبورد و ...).
+    تازه (کمتر از ttl ثانیه) → همان لحظه؛ کهنه ولی کمتر از max_stale → مقدار قبلی را فوراً می‌دهد و تو یک ترد جدا
+    تازه می‌کند (صفحه معطل دیتابیس راه دور نمی‌ماند)؛ خیلی کهنه یا اولین بار → همین‌جا محاسبه می‌شود."""
+    def deco(fn):
+        @wraps(fn)
+        def wrapper(*args):
+            key = (fn.__name__, args)
+            now = time.time()
+            with _SWR_LOCK:
+                ent = _SWR_STATE.get(key)
+            if ent and now - ent["t"] < ttl:
+                return ent["v"]
+            if ent and now - ent["t"] < max_stale:
+                with _SWR_LOCK:
+                    if ent.get("busy"):
+                        return ent["v"]
+                    ent["busy"] = True
+
+                def _refresh():
+                    try:
+                        v = fn(*args)
+                        with _SWR_LOCK:
+                            _SWR_STATE[key] = {"v": v, "t": time.time()}
+                    except Exception as e:
+                        print("⚠️ تازه‌سازی کش", fn.__name__, e)
+                        with _SWR_LOCK:
+                            ent["busy"] = False
+                threading.Thread(target=_refresh, daemon=True).start()
+                return ent["v"]
+            v = fn(*args)
+            with _SWR_LOCK:
+                _SWR_STATE[key] = {"v": v, "t": time.time()}
+            return v
+        wrapper.invalidate = lambda: _SWR_STATE.clear()
+        return wrapper
+    return deco
+
+
 @with_db_retry
 def ensure_settings_table():
     conn = get_conn()
@@ -357,12 +401,34 @@ def _fetch_settings_uncached():
     return {row[0]: row[1] for row in rows}
 
 
+_SET_REFRESHING = {"busy": False}
+
+
+def _settings_refresh_bg():
+    if _SET_REFRESHING["busy"]:
+        return
+    _SET_REFRESHING["busy"] = True
+
+    def _job():
+        try:
+            d = _fetch_settings_uncached()
+            _SET_CACHE["d"], _SET_CACHE["t"] = d, time.time()
+        except Exception as e:
+            print("⚠️ تازه‌سازی تنظیمات:", e)
+            _SET_CACHE["t"] = time.time() - _SET_TTL + 1      # چند ثانیه‌ی دیگر دوباره تلاش می‌شود
+        finally:
+            _SET_REFRESHING["busy"] = False
+    threading.Thread(target=_job, daemon=True).start()
+
+
 def get_setting(key, default="1"):
     """یه کوئری برای کل جدول و کش ۵ ثانیه‌ای؛ نوشتن (set/delete) کش رو پاک می‌کنه."""
     d = _SET_CACHE["d"]
-    if d is None or time.time() - _SET_CACHE["t"] > _SET_TTL:
+    if d is None:
         d = _fetch_settings_uncached()
         _SET_CACHE["d"], _SET_CACHE["t"] = d, time.time()
+    elif time.time() - _SET_CACHE["t"] > _SET_TTL:
+        _settings_refresh_bg()          # مقدار قبلی را فوراً می‌دهیم؛ تازه‌سازی پشت‌صحنه (نوشتنِ تنظیمات کش را کاملاً پاک می‌کند)
     v = d.get(key)
     return default if v is None else v
 
@@ -518,6 +584,7 @@ def normalize_setting(kind, raw):
     return raw, None
 
 
+@_swr_cache(15)
 @with_db_retry
 def get_dashboard_stats():
     conn = get_conn()
@@ -760,13 +827,24 @@ _schema_ready = False
 _schema_lock = threading.Lock()
 
 
+_schema_last_try = [0.0]
+
+
 def ensure_schema():
+    """بار اول (ترجیحاً از ترد راه‌اندازی) اجرا می‌شه. اگه یکی از دستورها خطای غیرمنتظره بده، قبلاً _schema_ready
+    هیچ‌وقت True نمی‌شد و *همه‌ی* این ده‌ها رفت‌وبرگشت به دیتابیس با هر درخواست تکرار می‌شد (دلیل کندیِ همه‌جا و لاگین).
+    حالا بعد از هر تلاش، حداکثر هر ۵ دقیقه یک‌بار دوباره امتحان می‌شود."""
     global _schema_ready
     if _schema_ready:
+        return
+    if _schema_last_try[0] and time.time() - _schema_last_try[0] < 300:
         return
     with _schema_lock:
         if _schema_ready:
             return
+        if _schema_last_try[0] and time.time() - _schema_last_try[0] < 300:
+            return
+        _schema_last_try[0] = time.time()
         ok = True
         conn = get_conn()
         c = conn.cursor()
@@ -787,6 +865,10 @@ def ensure_schema():
             "ALTER TABLE users ADD COLUMN blocked_bot INTEGER DEFAULT 0",
             "ALTER TABLE users ADD COLUMN blocked_at TEXT",
             "ALTER TABLE users ADD COLUMN block_reason TEXT",
+            "ALTER TABLE users ADD COLUMN referred_by INTEGER",
+            "ALTER TABLE users ADD COLUMN kb_style TEXT",
+            "CREATE INDEX IF NOT EXISTS idx_users_last_active ON users (last_active)",
+            "CREATE INDEX IF NOT EXISTS idx_user_configs_user ON user_configs (user_id)",
         ):
             try:
                 c.execute(stmt)
@@ -800,8 +882,12 @@ def ensure_schema():
             conn.commit()
         except Exception:
             pass
-        ensure_discount_table()
-        ensure_wallet_tables()
+        for _fn in (ensure_discount_table, ensure_wallet_tables):
+            try:
+                _fn()
+            except Exception as e:
+                print("⚠️ ensure_schema:", _fn.__name__, e)
+                ok = False
         _schema_ready = ok
 
 
@@ -889,6 +975,18 @@ def rel_time(value):
     if secs < 86400 * 365:
         return fa(f"{secs // (86400 * 30)} ماه پیش")
     return fa(f"{secs // (86400 * 365)} سال پیش")
+
+
+def rel_time_future(dt):
+    """«۳ روز دیگر» برای زمانی در آینده (dt آگاه از timezone)."""
+    secs = int((dt - datetime.now(timezone.utc)).total_seconds())
+    if secs < 60:
+        return "کمتر از یک دقیقه دیگر"
+    if secs < 3600:
+        return fa(f"{secs // 60} دقیقه دیگر")
+    if secs < 86400:
+        return fa(f"{secs // 3600} ساعت دیگر")
+    return fa(f"{secs // 86400} روز دیگر")
 
 
 def activity_state(value):
@@ -1081,6 +1179,47 @@ def reset_trial(user_id):
 
 
 @with_db_retry
+def get_user_overview(user_id):
+    """اطلاعات تکمیلیِ کاربر برای صفحه‌ی جزئیات: دعوت، خرید، شارژ، وضعیت بلاک/مسدودی. همه با دو رفت‌وبرگشت به دیتابیس."""
+    conn = get_conn()
+    c = conn.cursor()
+    topup_cond = "(reason LIKE 'topup_approved_%' OR reason LIKE 'panel_topup_approved_%')"
+    c.execute(
+        "SELECT u.referred_by, u.blocked_bot, u.blocked_at, u.block_reason, u.banned_until, "
+        "(SELECT COUNT(*) FROM users r WHERE r.referred_by=u.user_id), "
+        "(SELECT COUNT(*) FROM user_configs WHERE user_id=u.user_id), "
+        "(SELECT COALESCE(SUM(price),0) FROM user_configs WHERE user_id=u.user_id), "
+        "(SELECT MIN(created_at) FROM user_configs WHERE user_id=u.user_id), "
+        "(SELECT MAX(created_at) FROM user_configs WHERE user_id=u.user_id), "
+        "(SELECT COUNT(*) FROM user_configs WHERE user_id=u.user_id AND COALESCE(status,'active')='active'), "
+        f"(SELECT COUNT(*) FROM wallet_log WHERE user_id=u.user_id AND {topup_cond}), "
+        f"(SELECT COALESCE(SUM(delta),0) FROM wallet_log WHERE user_id=u.user_id AND {topup_cond}) "
+        "FROM users u WHERE u.user_id=?", (user_id,))
+    row = c.fetchone()
+    soonest = None
+    try:
+        c.execute("SELECT expires_at FROM user_configs WHERE user_id=? AND COALESCE(status,'active')='active' "
+                  "AND expires_at IS NOT NULL", (user_id,))
+        now = datetime.now(timezone.utc)
+        best = None
+        for (ex,) in c.fetchall():
+            d = parse_ts(ex)
+            if d and d >= now and (best is None or d < best):
+                best = d
+        soonest = best
+    except Exception:
+        soonest = None
+    conn.close()
+    if not row:
+        return None
+    keys = ("referred_by", "blocked_bot", "blocked_at", "block_reason", "banned_until", "invited", "cfg_total",
+            "cfg_spent", "first_buy", "last_buy", "cfg_active", "topup_count", "topup_sum")
+    d = dict(zip(keys, row))
+    d["soonest_expiry"] = soonest
+    return d
+
+
+@with_db_retry
 def get_user_configs(user_id, limit=50):
     conn = get_conn()
     c = conn.cursor()
@@ -1091,6 +1230,7 @@ def get_user_configs(user_id, limit=50):
     return res
 
 
+@_swr_cache(30)
 @with_db_retry
 def get_extra_stats():
     """فعال ۲۴ ساعت اخیر، عضو جدید ۷ روز اخیر و سری‌های روزانه‌ی ۱۴ روز اخیر (درآمد و عضویت)."""
@@ -1570,6 +1710,16 @@ def get_bot_info():
         return None
     if time.time() - _BOT_INFO["ts"] < 300:
         return _BOT_INFO["data"]
+    if _BOT_INFO["ts"]:
+        # کهنه شده: مقدار قبلی را می‌دهیم و پشت‌صحنه تازه می‌کنیم (قبلاً هر ۵ دقیقه یک صفحه تا ۶ ثانیه منتظر API می‌ماند)
+        if not _BOT_INFO.get("busy"):
+            _BOT_INFO["busy"] = True
+            threading.Thread(target=_fetch_bot_info, daemon=True).start()
+        return _BOT_INFO["data"]
+    return _fetch_bot_info()
+
+
+def _fetch_bot_info():
     data = None
     try:
         r = SESSION.get(BASE_URL + "/getMe", timeout=6).json()
@@ -1577,7 +1727,7 @@ def get_bot_info():
             data = r.get("result")
     except Exception:
         data = None
-    _BOT_INFO.update(ts=time.time(), data=data)
+    _BOT_INFO.update(ts=time.time(), data=data, busy=False)
     return data
 
 
@@ -1700,6 +1850,7 @@ def _bc_mark(blocked_ids, ok_ids, reason):
     conn.close()
 
 
+@_swr_cache(30)
 @with_db_retry
 def get_blocked_count():
     """تعداد کاربرانی که ربات رو بلاک کردن (اگه بعد از بلاک دوباره با ربات کار کنن حساب نمی‌شن)."""
@@ -1870,7 +2021,11 @@ def apply_env_overrides(force=False):
     if not force and time.time() - _ENV_LAST["ts"] < 10:
         return
     _ENV_LAST["ts"] = time.time()
-    st = get_all_settings()   # (کش‌شده؛ فقط هر ~۱۰ ثانیه یه کوئری)
+    st = _SET_CACHE["d"]
+    if st is None:
+        st = get_all_settings()      # فقط بار اول (یا بعد از ذخیره‌ی تنظیمات) همین‌جا می‌خونیم
+    else:
+        _settings_refresh_bg()       # بعد از اون پشت‌صحنه؛ درخواست کاربر معطل دیتابیس نمی‌ماند
     g = globals()
     for skey, gname in _ENV_OVERRIDES:
         if gname not in g:      # مثلاً CONFIG_API پایین‌تر تعریف می‌شه؛ تا وقتی تعریف نشده رد می‌شیم
@@ -1891,6 +2046,8 @@ def _before_request():
         return None
     if panel_rate_limited():
         return ("درخواست‌های بیش از حد؛ چند لحظه صبر کنید.", 429)
+    if request.endpoint in ("login", "logout"):
+        return None        # ورود/خروج به دیتابیس نیاز ندارد؛ قبلاً اولین صفحه‌ی پنل منتظر کوئری‌های دیتابیس راه دور می‌ماند
     try:
         apply_env_overrides()
     except Exception as e:
@@ -2983,6 +3140,35 @@ def user_detail(user_id):
       <tbody>{wl_rows if wl_rows else '<tr><td colspan="4">هنوز تغییری ثبت نشده (لاگ از نسخه‌ی جدید بات شروع شده).</td></tr>'}</tbody>
     </table>"""
 
+    overview_card = ""
+    try:
+        ov = get_user_overview(user_id)
+    except Exception as e:
+        print("⚠️ get_user_overview:", e)
+        ov = None
+    if ov:
+        _blocked = bool(ov["blocked_bot"]) and (not last_active or str(last_active) <= str(ov["blocked_at"] or ""))
+        _ref = ov["referred_by"]
+        _ref_html = (f'<a href="{url_for("user_detail", user_id=int(_ref))}" class="num">{int(_ref)}</a>' if _ref else "—")
+        _exp = ov["soonest_expiry"]
+        _exp_html = (f'{fmt_dt(_exp.isoformat())} <small class="muted">({rel_time_future(_exp)})</small>' if _exp else "—")
+        _bu = float(ov["banned_until"] or 0)
+        overview_card = f"""
+    <div class="card"><h3>📊 اطلاعات تکمیلی</h3>
+      <div class="kv">
+        <div><span>دعوت‌شده توسط</span><b>{_ref_html}</b></div>
+        <div><span>تعداد دعوت‌شده‌ها</span><b class="num">{int(ov['invited'] or 0)}</b></div>
+        <div><span>کانفیگ‌ها (کل / فعال)</span><b class="num">{int(ov['cfg_total'] or 0)} / {int(ov['cfg_active'] or 0)}</b></div>
+        <div><span>مجموع پرداخت برای کانفیگ‌ها</span><b class="num">{int(ov['cfg_spent'] or 0):,} تومان</b></div>
+        <div><span>اولین خرید</span><b>{fmt_dt(ov['first_buy'], with_time=False) if ov['first_buy'] else '—'}</b></div>
+        <div><span>آخرین خرید</span><b>{fmt_dt(ov['last_buy'], with_time=False) if ov['last_buy'] else '—'}</b></div>
+        <div><span>نزدیک‌ترین انقضای کانفیگ فعال</span><b>{_exp_html}</b></div>
+        <div><span>شارژهای تاییدشده (تعداد / جمع)</span><b class="num">{int(ov['topup_count'] or 0)} / {int(ov['topup_sum'] or 0):,} تومان</b></div>
+        <div><span>وضعیت ربات</span><b>{'🚫 ربات را بلاک کرده' if _blocked else '✅ فعال'}</b>{('<small class="muted">' + esc(ov['block_reason']) + '</small>') if (_blocked and ov['block_reason']) else ''}</div>
+        <div><span>مسدودی موقت تا</span><b>{fmt_dt(datetime.fromtimestamp(_bu, timezone.utc).isoformat()) if _bu > 0 else '—'}</b></div>
+      </div>
+    </div>"""
+
     trial_count, trial_last = get_trial_info(user_id)
     trial_card = f"""
     <div class="card"><h3>🧪 تست رایگان</h3>
@@ -3024,6 +3210,7 @@ def user_detail(user_id):
         </form></div>
     </div>
 
+    {overview_card}
     {ban_card}
     {trial_card}
     <p><a class="btn" href="{url_for('user_configs_admin', user_id=user_id)}">⚙️ مدیریت کانفیگ‌های این کاربر (تمدید، توقف، حذف، ساخت هدیه)</a></p>
@@ -3659,6 +3846,7 @@ SETTING_HELP = {
     "support": ("🎧 دکمه‌ی «پشتیبانی»", "خاموش باشه کاربر نمی‌تونه تیکت بسازه و دکمه‌ی پشتیبانی از منو حذف می‌شه.", ""),
     "reseller": ("🏪 دکمه‌ی «دریافت پنل فروشندگی»", "خاموش باشه کاربر نمی‌تونه حساب فروشندگی بگیره یا رمزش رو ببینه.", ""),
     "guide": ("📲 دکمه‌ی «اپ مخصوص کانفیگ‌ها»", "خاموش باشه راهنمای دانلود اپ از منوی ربات حذف می‌شه.", ""),
+    "troubleshoot": ("🛠 دکمه‌ی «عیب‌یابی» در مدیریت کانفیگ", "خاموش باشه دکمه‌ی عیب‌یابی خودکار از صفحه‌ی مدیریت کانفیگ حذف می‌شه.", ""),
     "language": ("🌐 دکمه‌ی «تغییر زبان»", "خاموش باشه دکمه‌ی تغییر زبان از منوی ربات حذف می‌شه و کاربرها نمی‌تونن زبان رو عوض کنن.", ""),
     # --- قیمت و پرداخت ---
     "price_wireguard": ("قیمت هر گیگ — وایرگارد", "قیمتی که ربات برای هر گیگ سرویس «فقط وایرگارد» به کاربر نشون می‌ده و از کیف پولش کم می‌کنه.", "تومان"),
@@ -3790,7 +3978,7 @@ SETTINGS_TABS = [
     ("status", "🟢 وضعیت و منو", [
         ("🚨 کلید اصلی", ["maintenance", "maintenance_text"]),
         ("🔌 دکمه‌های منوی ربات (روشن = نمایش بده)", ["feature:buy", "feature:trial", "feature:topup", "feature:exchange",
-                                                    "feature:delete_config", "feature:support", "feature:reseller", "feature:guide", "feature:language"]),
+                                                    "feature:delete_config", "feature:support", "feature:reseller", "feature:guide", "feature:language", "feature:troubleshoot"]),
     ]),
     ("products", "♾ محصولات", [
         ("🔌 روشن/خاموش کردن محصولات (خاموش = از صفحه‌ی خرید حذف می‌شه)",
@@ -7114,6 +7302,15 @@ if __name__ == "__main__":
         print("⚠️ ensure_schema:", e)
     port = int(os.getenv("PORT", "8080"))
     start_keepalive(port)
+
+    # گرم کردن کش‌ها پشت‌صحنه: اولین ورود ادمین دیگر منتظر اتصال به دیتابیس/API نمی‌ماند
+    def _warmup():
+        for _fn in (get_all_settings, get_bot_info, get_dashboard_stats, get_extra_stats, get_blocked_count):
+            try:
+                _fn()
+            except Exception as e:
+                print("⚠️ warmup", getattr(_fn, "__name__", _fn), e)
+    threading.Thread(target=_warmup, daemon=True).start()
 
     # کاهش مصرف رم: هر ۵ دقیقه GC + برگردوندن حافظه‌ی آزادشده به سیستم‌عامل (malloc_trim)
     def _mem_janitor(interval=300):
