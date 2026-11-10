@@ -6051,21 +6051,61 @@ def gate_delete(h):
 PROTO_TO_TYPE = {"xray": "config", "wireguard": "wireguard", "both": "both", "openvpn": "openvpn", "dns": "dns"}
 
 
-def cfg_call(method, suffix, config_id, body=None):
+def cfg_base_url(config_id, ctype=None):
+    """آدرس کانفیگ روی پنل: نامحدود و پروکسی آدرس Seller API جدا دارن (مثل ربات)، بقیه /configs."""
+    if ctype == "unlimited":
+        return SELLER_API_BASE + "/unlimited/" + str(config_id)
+    if ctype == "proxy":
+        return SELLER_API_BASE + "/proxies/" + str(config_id)
+    return CONFIG_API + "/" + str(config_id)
+
+
+def cfg_call(method, suffix, config_id, body=None, ctype=None):
     if not CONFIG_KEY:
         return {"success": False, "error": "CONFIG_KEY تو Environment پنل تنظیم نشده"}
     try:
-        res = SESSION.request(method, CONFIG_API + "/" + str(config_id) + suffix,
+        res = SESSION.request(method, cfg_base_url(config_id, ctype) + suffix,
                               headers={"Authorization": "Bearer " + CONFIG_KEY}, json=body, timeout=20)
         try:
             data = res.json()
         except Exception:
             data = {}
-        if res.status_code in (200, 201, 204):
+        if 200 <= res.status_code < 300:
             return {"success": True, "data": data if isinstance(data, dict) else {}}
         return {"success": False, "error": (res.text or str(res.status_code))[:200]}
     except Exception as e:
         return {"success": False, "error": str(e)[:200]}
+
+
+def cfg_fetch(config_id, ctype=None):
+    """اطلاعات فعلی کانفیگ از پنل (dict یا None). برای تایید نتیجه وقتی جواب پنل نیومده/ارور داده."""
+    r = cfg_call("GET", "", config_id, ctype=ctype)
+    if not r["success"]:
+        return None
+    d = r["data"]
+    if isinstance(d.get("configs"), list) and d["configs"]:
+        d = d["configs"][0]
+    return d if isinstance(d, dict) else None
+
+
+def cfg_paused_state(d):
+    """True=متوقف، False=فعال، None=نامشخص."""
+    if not isinstance(d, dict):
+        return None
+    for k in ("paused", "isPaused", "disabled", "isDisabled"):
+        if isinstance(d.get(k), bool):
+            return d[k]
+    for k in ("enabled", "active", "isActive"):
+        if isinstance(d.get(k), bool):
+            return not d[k]
+    st = d.get("status")
+    if isinstance(st, str):
+        st = st.strip().lower()
+        if st in ("paused", "disabled", "inactive", "suspended", "stopped"):
+            return True
+        if st in ("active", "enabled", "running", "ok"):
+            return False
+    return None
 
 
 def cfg_usage_gb(config_id):
@@ -6251,7 +6291,7 @@ def user_config_action(user_id, rid, action):
         if egb < 0 or edays < 0 or (egb == 0 and edays == 0) or egb > 100000 or edays > 3650:
             flash("⚠️ حجم/روز نامعتبره (هر دو نمی‌تونن صفر باشن).")
             return back
-        r = cfg_call("POST", "/extend", config_id, {"gb": egb, "days": edays})
+        r = cfg_call("POST", "/extend", config_id, {"gb": egb, "days": edays}, ctype=ctype)
         if not r["success"]:
             flash("⚠️ تمدید روی پنل ناموفق: " + r["error"])
             return back
@@ -6269,26 +6309,44 @@ def user_config_action(user_id, rid, action):
         if not new:
             flash("⚠️ نام خالیه.")
             return back
-        r = cfg_call("PUT", "/label", config_id, {"label": new})
+        r = cfg_call("PUT", "/label", config_id, {"label": new}, ctype=ctype)
+        if not r["success"]:
+            _d = cfg_fetch(config_id, ctype)
+            if _d and str(_d.get("label") or "").strip() == new:
+                r = {"success": True, "data": {}}          # پنل جواب نداد ولی نام واقعاً عوض شده بود
         if not r["success"]:
             flash("⚠️ تغییر نام روی پنل ناموفق: " + r["error"])
             return back
         db_run("UPDATE user_configs SET label=? WHERE id=?", (new, rid))
         flash("نام تغییر کرد (برای اعمال تو لینک، «تغییر لینک» رو هم بزنید).")
     elif action in ("pause", "resume"):
-        r = cfg_call("POST", "/" + action, config_id)
+        r = cfg_call("POST", "/" + action, config_id, ctype=ctype)
+        if not r["success"]:
+            _st = cfg_paused_state(cfg_fetch(config_id, ctype))
+            if _st is not None and _st == (action == "pause"):
+                r = {"success": True, "data": {}}          # پنل جواب نداد/ارور داد ولی وضعیت همونیه که می‌خواستیم
         if not r["success"]:
             flash("⚠️ عملیات روی پنل ناموفق: " + r["error"])
             return back
         db_run("UPDATE user_configs SET status=? WHERE id=?", ("paused" if action == "pause" else "active", rid))
         flash("کانفیگ متوقف شد." if action == "pause" else "کانفیگ ازسرگرفته شد.")
     elif action == "rotate":
-        r = cfg_call("POST", "/rotate-link", config_id)
+        r = cfg_call("POST", "/rotate-link", config_id, ctype=ctype)
+        d = r["data"] if r["success"] else {}
+        new_url = d.get("sub_url") or d.get("subUrl") or d.get("link") or d.get("url")
+        if not new_url:
+            # جواب نیومد یا لینک تو جواب نبود: لینک فعلی رو مستقیم از پنل می‌خونیم (ممکنه لینک واقعاً عوض شده باشه)
+            _d = cfg_fetch(config_id, ctype) or {}
+            _cur = next((str(_d[k]).strip() for k in ("subUrl", "sub_url", "link", "url")
+                         if isinstance(_d.get(k), str) and _d[k].strip()), None)
+            if _cur and (r["success"] or _cur != str(sub_url or "").strip()):
+                new_url = _cur
+                r = {"success": True, "data": d}
         if not r["success"]:
             flash("⚠️ تغییر لینک ناموفق: " + r["error"])
             return back
-        d = r["data"]
-        new_url = d.get("sub_url") or d.get("subUrl") or d.get("url")
+        if ctype == "unlimited" and d.get("id") and str(d.get("id")) != str(config_id):
+            db_run("UPDATE user_configs SET config_id=? WHERE id=?", (str(d["id"]), rid))   # لینک نامحدود شناسه‌ی جدید هم می‌ده
         if new_url:
             db_run("UPDATE user_configs SET sub_url=? WHERE id=?", (new_url, rid))
             flash("لینک تغییر کرد.")
@@ -6297,7 +6355,7 @@ def user_config_action(user_id, rid, action):
         else:
             flash("لینک تغییر کرد ولی پنل لینک جدید رو برنگردوند.")
     elif action == "delete":
-        r = cfg_call("DELETE", "", config_id)
+        r = cfg_call("DELETE", "", config_id, ctype=ctype)
         if not r["success"] and request.form.get("force") != "1":
             flash("⚠️ حذف روی پنل ناموفق: " + r["error"] + " (برای حذف فقط از دیتابیس، گزینه‌ی اجباری رو تیک بزنید)")
             return back

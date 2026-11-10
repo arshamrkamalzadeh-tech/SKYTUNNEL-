@@ -427,7 +427,8 @@ UI_TEXT = {
     'fa': {
         'cur': 'تومان', 'unit_gb': 'گیگ', 'unit_day': 'روز',
         'btn_topup': '💠 شارژ کیف پول',
-        'btn_cancel': '❌ انصراف',
+        'btn_cancel': '❌ لغو',
+        'btn_back': '↩️ برگشت',
         'btn_recentorders': '🧾 سفارشات اخیر من',
         'btn_language': '🌐 تغییر زبان',
         'svc_wireguard': '🔒 فقط وایرگارد', 'svc_config': '⚙️ فقط کانفیگ',
@@ -716,6 +717,7 @@ UI_TEXT = {
     'en': {
         'cur': 'Toman', 'unit_gb': 'GB', 'unit_day': 'day(s)',
         'btn_cancel': '❌ Cancel',
+        'btn_back': '↩️ Back',
         'btn_buy': '🛍 Buy Config',
         'btn_trial': '🧪 Free Trial',
         'btn_topup': '💠 Top Up Wallet',
@@ -1799,7 +1801,35 @@ def admin_add_channel_label():
 
 
 def cancel_kb(chat_id):
+    """دکمه‌ی «لغو» — فقط برای آخرین مرحله‌ی هر کار (تایید/ارسال نهایی)."""
     return {'inline_keyboard': [[{'text': u(chat_id, 'btn_cancel'), 'callback_data': 'cancel'}]]}
+
+
+def back_btn(chat_id, target='menu'):
+    """دکمه‌ی «برگشت» به مرحله/صفحه‌ی قبل (target = callback_data مقصد)."""
+    return {'text': u(chat_id, 'btn_back'), 'callback_data': target}
+
+
+def back_kb(chat_id, target='menu'):
+    return {'inline_keyboard': [[back_btn(chat_id, target)]]}
+
+
+def buy_back_cb(chat_id):
+    """مقصد «برگشت» از صفحه‌های خرید: اگه صفحه‌ی اصلی خرید بیشتر از یه گزینه داره همونجا، وگرنه منوی اصلی
+    (چون با یه گزینه‌ی تنها، صفحه‌ی خرید مستقیم همون گزینه رو باز می‌کنه و برگشت تو حلقه می‌افتاد)."""
+    try:
+        return 'buy_hub' if len(buy_layout(chat_id)['hub']) > 1 else 'menu'
+    except Exception:
+        return 'menu'
+
+
+def topup_back_cb():
+    """مقصد «برگشت» از صفحه‌های شارژ: انتخاب روش پرداخت (اگه بیشتر از یک روش فعاله)، وگرنه منوی اصلی."""
+    try:
+        n = [card_topup_enabled(), crypto_enabled(), donito_enabled()].count(True)
+    except Exception:
+        n = 0
+    return 'topup_back' if n > 1 else 'menu'
 
 
 def get_ctype_label(chat_id, ctype):
@@ -4557,7 +4587,7 @@ def build_unl_screen(chat_id, st):
         [{'text': u(chat_id, 'unl_week_minus_btn'), 'callback_data': 'unl_days_dec7'},
          {'text': u(chat_id, 'unl_week_plus_btn'), 'callback_data': 'unl_days_inc7'}],
         [{'text': u(chat_id, 'qty_continue'), 'callback_data': 'unl_confirm'},
-         {'text': u(chat_id, 'btn_cancel'), 'callback_data': 'cancel'}],
+         back_btn(chat_id, buy_back_cb(chat_id))],
     ]}
     return text, kb
 
@@ -4609,7 +4639,7 @@ def action_unl_days(chat_id, devices):
     if not rows:
         send_message(chat_id, u(chat_id, 'unl_unavailable'))
         return
-    rows.append([{'text': u(chat_id, 'btn_unl_back'), 'callback_data': 'buy_unl'}, {'text': u(chat_id, 'btn_cancel'), 'callback_data': 'cancel'}])
+    rows.append([{'text': u(chat_id, 'btn_unl_back'), 'callback_data': 'buy_unl'}])
     send_message(chat_id, u(chat_id, 'unl_pick_days', divider=DIVIDER, devices=devices, wallet=f'{get_wallet_db(chat_id):,}'),
                  reply_markup={'inline_keyboard': _tidy_rows(rows)})
 
@@ -4618,7 +4648,7 @@ def action_proxy_menu(chat_id):
     mn, mx = proxy_limits()
     cur = u(chat_id, 'cur')
     rows = [[{'text': u(chat_id, 'proxy_gb_option_btn', gb=g, price=f'{proxy_price(g):,}', cur=cur), 'callback_data': 'proxy_gb_' + str(g)}] for g in proxy_gb_options()]
-    rows.append([{'text': u(chat_id, 'btn_cancel'), 'callback_data': 'cancel'}])
+    rows.append([back_btn(chat_id, buy_back_cb(chat_id))])
     user_steps[str(chat_id)] = {'step': 'proxy_ask_gb'}
     send_message(chat_id, u(chat_id, 'proxy_pick_gb', divider=DIVIDER, min_gb=_fmt_gb(mn), max_gb=_fmt_gb(mx),
                             ppg=f'{proxy_price_per_gb():,}', wallet=f'{get_wallet_db(chat_id):,}'),
@@ -4765,7 +4795,7 @@ def delete_config_from_panel(config_id):
         return False
 
 
-def _panel_action(method, path_suffix, config_id, json_body=None):
+def _panel_action(method, path_suffix, config_id, json_body=None, read_timeout=20):
     """کمکی مشترک برای عملیات مدیریتی پنل (تمدید/تغییر نام/توقف/ازسرگیری/تغییر لینک)."""
     try:
         res = SESSION.request(
@@ -4773,9 +4803,9 @@ def _panel_action(method, path_suffix, config_id, json_body=None):
             _cfg_url(config_id) + path_suffix,
             headers={'Authorization': 'Bearer ' + CONFIG_KEY},
             json=json_body,
-            timeout=(PANEL_CONNECT_TIMEOUT, 20)
+            timeout=(PANEL_CONNECT_TIMEOUT, read_timeout)
         )
-        if res.status_code in (200, 201):
+        if 200 <= res.status_code < 300:       # ۲۰۴/۲۰۲ و... هم موفقیت‌اند (قبلاً فقط ۲۰۰/۲۰۱ قبول می‌شد)
             try:
                 return {'success': True, 'data': res.json()}
             except Exception:
@@ -4804,7 +4834,114 @@ def resume_config_on_panel(config_id):
 
 
 def rotate_link_config_on_panel(config_id):
-    return _panel_action('POST', '/rotate-link', config_id)
+    return _panel_action('POST', '/rotate-link', config_id, read_timeout=45)
+
+
+def _fetch_panel_config(config_id):
+    """اطلاعات فعلی کانفیگ را از پنل می‌خواند (dict یا None)."""
+    try:
+        res = SESSION.get(_cfg_url(config_id), headers={'Authorization': 'Bearer ' + CONFIG_KEY},
+                          timeout=(PANEL_CONNECT_TIMEOUT, 10))
+        if res.status_code not in (200, 201):
+            return None
+        d = res.json()
+        if isinstance(d, dict) and isinstance(d.get('configs'), list) and d['configs']:
+            d = d['configs'][0]
+        return d if isinstance(d, dict) else None
+    except Exception as e:
+        print('⚠️ خواندن اطلاعات کانفیگ از پنل ناموفق:', e)
+        return None
+
+
+def _panel_paused_state(d):
+    """True اگر کانفیگ روی پنل متوقفه، False اگر فعاله، None اگر از جواب پنل معلوم نیست."""
+    if not isinstance(d, dict):
+        return None
+    for k in ('paused', 'isPaused', 'disabled', 'isDisabled'):
+        if isinstance(d.get(k), bool):
+            return d[k]
+    for k in ('enabled', 'active', 'isActive'):
+        if isinstance(d.get(k), bool):
+            return not d[k]
+    st = d.get('status')
+    if isinstance(st, str):
+        st = st.strip().lower()
+        if st in ('paused', 'disabled', 'inactive', 'suspended', 'stopped'):
+            return True
+        if st in ('active', 'enabled', 'running', 'ok'):
+            return False
+    return None
+
+
+def set_config_paused(config_id, want_paused):
+    """توقف/ازسرگیری روی پنل. اگه پنل ارور داد/جواب نداد ولی وضعیت واقعاً همون شده بود (یا از قبل همون بود)، موفق حساب می‌شه."""
+    res = pause_config_on_panel(config_id) if want_paused else resume_config_on_panel(config_id)
+    if res.get('success'):
+        return True
+    low = str(res.get('error') or '').lower()
+    if want_paused and ('already disabled' in low or 'already paused' in low):
+        return True
+    if (not want_paused) and ('already active' in low or 'already enabled' in low or 'already resumed' in low):
+        return True
+    st = _panel_paused_state(_fetch_panel_config(config_id))
+    return st is not None and st == want_paused
+
+
+def rename_and_verify(config_id, label):
+    """تغییر نام روی پنل؛ اگه جواب نیومد ولی نام واقعاً عوض شده بود، موفق حساب می‌شه."""
+    res = rename_config_on_panel(config_id, label)
+    if res.get('success'):
+        return True
+    d = _fetch_panel_config(config_id)
+    return bool(d and str(d.get('label') or '').strip() == str(label).strip())
+
+
+def _fetch_panel_sub_url(config_id):
+    """لینک اشتراک فعلی کانفیگ را مستقیم از پنل می‌خواند (None اگر نشد)."""
+    try:
+        res = SESSION.get(_cfg_url(config_id), headers={'Authorization': 'Bearer ' + CONFIG_KEY},
+                          timeout=(PANEL_CONNECT_TIMEOUT, 10))
+        if res.status_code not in (200, 201):
+            return None
+        d = res.json()
+        if isinstance(d, dict) and isinstance(d.get('configs'), list) and d['configs']:
+            d = d['configs'][0]
+        if isinstance(d, dict):
+            for k in ('subUrl', 'sub_url', 'link', 'url'):
+                v = d.get(k)
+                if isinstance(v, str) and v.strip():
+                    return v.strip()
+    except Exception as e:
+        print('⚠️ خواندن لینک اشتراک از پنل ناموفق:', e)
+    return None
+
+
+def rotate_link_and_get_url(cfg):
+    """تغییر لینک روی پنل + پیدا کردن لینک جدید. خروجی: (ok, new_url|None, resp).
+    اگه پنل جواب نداد/خطا داد (مثلاً تایم‌اوت) ولی لینک واقعاً عوض شده بود، با خوندن مستقیم لینک از پنل
+    تشخیص می‌دیم و «موفق» حساب می‌کنیم (قبلاً همین حالت ارور «ارتباط با سرور» می‌داد با اینکه لینک عوض شده بود)."""
+    config_id = cfg[2]
+    old_url = str(cfg[1] or '').strip()
+    res = rotate_link_config_on_panel(config_id)
+    resp = res.get('data') or {}
+    ok = bool(res.get('success'))
+    new_url = None
+    if ok and isinstance(resp, dict):
+        new_url = resp.get('sub_url') or resp.get('subUrl') or resp.get('link') or resp.get('url')
+    if not new_url:
+        fetched = None
+        for _attempt in (1, 2):
+            fetched = _fetch_panel_sub_url(config_id)
+            if fetched:
+                break
+            time.sleep(1.0)
+        if fetched:
+            if ok:
+                new_url = fetched                      # پنل موفق گفت ولی لینک تو جواب نبود
+            elif fetched != old_url:
+                ok, new_url = True, fetched            # پنل جواب نداد، ولی لینک واقعاً عوض شده
+                print('ℹ️ تغییر لینک روی پنل انجام شده بود (تایید با خواندن مجدد):', config_id)
+    return ok, (str(new_url).strip() if new_url else None), (resp if isinstance(resp, dict) else {})
 
 
 def get_config_limit_gb(config_id):
@@ -6306,7 +6443,7 @@ def build_quantity_screen(chat_id, step_data):
     if step_data.get('label'):
         rows.append([{'text': u(chat_id, 'qty_name_reset_btn'), 'callback_data': 'qty_name_reset'}])
     rows.append([{'text': u(chat_id, 'qty_continue'), 'callback_data': 'qty_confirm'},
-                 {'text': u(chat_id, 'btn_cancel'), 'callback_data': 'cancel'}])
+                 back_btn(chat_id, step_data.get('back') or buy_back_cb(chat_id))])
     return text, {'inline_keyboard': rows}
 
 
@@ -6321,7 +6458,7 @@ def build_device_screen(chat_id, st):
         btns.append({'text': t, 'callback_data': f'dev_{n}'})
     btns.append({'text': u(chat_id, 'device_btn_unlimited', price=f'{device_price(0):,}'), 'callback_data': 'dev_0'})
     rows = _pair_buttons(btns)
-    rows.append([{'text': u(chat_id, 'btn_cancel'), 'callback_data': 'cancel'}])
+    rows.append([back_btn(chat_id, buy_back_cb(chat_id))])
     text = u(chat_id, 'devices_screen', extra=f'{get_device_extra_price():,}', unl=f'{get_device_unlimited_price():,}',
              base=f'{base:,}', wallet=f'{get_wallet_db(chat_id):,}')
     return text, {'inline_keyboard': rows}
@@ -6374,13 +6511,15 @@ def apply_device_limit(chat_id, config_id, limit, label=''):
 
 
 def send_ask_label_prompt(chat_id):
+    _t = (user_steps.get(str(chat_id)) or {}).get('type')
+    _back = {'unlimited': 'buy_unl', 'proxy': 'buy_proxy'}.get(_t) or buy_back_cb(chat_id)
     send_message(
         chat_id,
         u(chat_id, 'ask_label_prompt'),
         reply_markup={
             'inline_keyboard': [
                 [{'text': u(chat_id, 'ask_label_skip'), 'callback_data': 'skip_label'},
-                 {'text': u(chat_id, 'btn_cancel'), 'callback_data': 'cancel'}],
+                 back_btn(chat_id, _back)],
             ]
         }
     )
@@ -6620,6 +6759,8 @@ def _action_buy_custom_menu(chat_id):
         type_kb['inline_keyboard'].extend(_buy_rows(chat_id, buy_layout(chat_id)['custom']))
     except Exception as _e:
         print('⚠️ دکمه‌های اضافه‌ی صفحه‌ی خرید دلخواه:', _e)
+    if buy_back_cb(chat_id) == 'buy_hub':
+        type_kb['inline_keyboard'].append([back_btn(chat_id, 'buy_hub')])
     send_message(chat_id, text, reply_markup=type_kb)
 
 
@@ -6858,7 +6999,7 @@ def start_crypto_topup(chat_id):
         user_steps[str(chat_id)] = {'step': 'choose_topup_coin'}
         send_message(chat_id, u(chat_id, 'topup_choose_coin'), reply_markup={'inline_keyboard': _tidy_rows(
             [[{'text': c['label'], 'callback_data': 'tpc_' + c['id']}] for c in coins]
-            + [[{'text': u(chat_id, 'btn_cancel'), 'callback_data': 'cancel'}]])})
+            + [[back_btn(chat_id, topup_back_cb())]])})
 
 
 def handle_crypto_declared_amount(chat_id, step, text):
@@ -6963,7 +7104,7 @@ def show_topup_method_choice(chat_id):
         rows.append([{'text': u(chat_id, 'btn_topup_card'), 'callback_data': 'tpm_card'}])
     if crypto_enabled():
         rows.append([{'text': u(chat_id, 'btn_topup_crypto'), 'callback_data': 'tpm_crypto'}])
-    rows.append([{'text': u(chat_id, 'btn_cancel'), 'callback_data': 'cancel'}])
+    rows.append([back_btn(chat_id, 'menu')])
     send_message(chat_id, u(chat_id, 'topup_choose_method_first'), reply_markup={'inline_keyboard': _tidy_rows(rows)})
 
 
@@ -6973,7 +7114,7 @@ def ask_topup_amount_for(chat_id, method):
     min_txt = f'{get_min_topup_for(method):,}'
     text = (u(chat_id, 'topup_prompt', min_topup=min_txt) if get_user_lang(chat_id) == 'en'
             else get_bot_text_fmt('topup_prompt', DEFAULT_TOPUP_PROMPT, min_topup=min_txt))
-    send_message(chat_id, text, reply_markup=cancel_kb(chat_id))
+    send_message(chat_id, text, reply_markup=back_kb(chat_id, topup_back_cb()))
 
 
 def show_coin_choice(chat_id, amount, coins):
@@ -6984,7 +7125,7 @@ def show_coin_choice(chat_id, amount, coins):
     user_steps[str(chat_id)] = {'step': 'choose_topup_coin', 'amount': amount}
     send_message(chat_id, u(chat_id, 'topup_choose_coin'), reply_markup={'inline_keyboard': _tidy_rows(
         [[{'text': c['label'], 'callback_data': 'tpc_' + c['id']}] for c in coins]
-        + [[{'text': u(chat_id, 'btn_cancel'), 'callback_data': 'cancel'}]])})
+        + [[back_btn(chat_id, topup_back_cb())]])})
 
 
 def proceed_after_topup_amount(chat_id, amount, method):
@@ -7424,7 +7565,7 @@ def _reseller_creds_start(chat_id):
     """مرحله‌ی ۱: گرفتن نام کاربری (بعد از آن رمز). تا کامل نشه، در منو دکمه‌ی تغییر هست."""
     user_steps[str(chat_id)] = {'step': 'reseller_set_username'}
     send_message(chat_id, u(chat_id, 'reseller_ask_username', min_len=3, max_len=20),
-                 reply_markup=cancel_kb(chat_id))
+                 reply_markup=back_kb(chat_id, 'menu'))
 
 
 def action_reseller_menu(chat_id):
@@ -7780,7 +7921,7 @@ def action_delete_config_start(chat_id):
            else get_bot_text('delete_prompt', DEFAULT_DELETE_PROMPT)) + '\n\n'
     for i, cfg in enumerate(configs, 1):
         txt += '<b>' + str(i) + '.</b> ' + str(cfg[4]) + ' (' + str(cfg[3]) + 'GB)\n'
-    send_message(chat_id, txt, reply_markup=cancel_kb(chat_id))
+    send_message(chat_id, txt, reply_markup=back_kb(chat_id, 'menu'))
     user_steps[str(chat_id)] = {'step': 'waiting_delete_id'}
 
 
@@ -7790,7 +7931,7 @@ def action_support_start(chat_id):
         return
     user_steps[str(chat_id)] = {'step': 'support_message'}
     send_message(chat_id, u(chat_id, 'support_prompt') if get_user_lang(chat_id) == 'en'
-                 else get_bot_text('support_prompt', DEFAULT_SUPPORT_PROMPT), reply_markup=cancel_kb(chat_id))
+                 else get_bot_text('support_prompt', DEFAULT_SUPPORT_PROMPT), reply_markup=back_kb(chat_id, 'menu'))
 
 
 def action_recent_orders(chat_id):
@@ -7881,14 +8022,14 @@ def action_exchange_start(chat_id):
         send_message(chat_id, u(chat_id, 'disabled_feature'))
         return
     user_steps[str(chat_id)] = {'step': 'exchange_amount'}
-    send_message(chat_id, u(chat_id, 'exchange_prompt', divider=DIVIDER), reply_markup=cancel_kb(chat_id))
+    send_message(chat_id, u(chat_id, 'exchange_prompt', divider=DIVIDER), reply_markup=back_kb(chat_id, 'menu'))
 
 
 def handle_exchange_amount(chat_id, text):
     """مبلغ تومانی → مقدار تقریبی هر رمزارز فعال (قیمت لحظه‌ای نوبیتکس)."""
     t = (text or '').strip().translate(_PERSIAN_DIGITS).replace(',', '').replace('٬', '').replace(' ', '')
     if not re.fullmatch(r'\d{1,13}', t) or int(t) <= 0:
-        send_message(chat_id, u(chat_id, 'exchange_bad_amount'), reply_markup=cancel_kb(chat_id))
+        send_message(chat_id, u(chat_id, 'exchange_bad_amount'), reply_markup=back_kb(chat_id, 'menu'))
         return
     amount = int(t)
     coins = get_crypto_coins()
@@ -8325,7 +8466,7 @@ _TEXT_GROUP_RULES = [
     (('account_', 'btn_account'), '👤 حساب من'),
     (('guide_', 'plat_', 'btn_guide'), '📲 اپ و دانلود'),
     (('lang_', 'btn_language'), '🌐 زبان'),
-    (('flow_',), '🧭 لغو و پایان مراحل'),
+    (('flow_', 'btn_cancel', 'btn_back'), '🧭 لغو و پایان مراحل'),
     (('welcome_', 'main_menu', 'kb_'), '🏠 منوی اصلی و خوش‌آمدگویی'),
     (('cur', 'unit_'), '🔢 واحدها'),
 ]
@@ -8353,7 +8494,9 @@ def _is_obsolete_seller_key(key):
 
 
 TEXT_WHERE = {
-    'flow_cancelled': '🧭 پیامی که بعد از زدن «انصراف» جای صفحه‌ی فعلی می‌آید (به‌جای نمایش دوباره‌ی پیام اولیه‌ی منو)',
+    'btn_back': '↩️ دکمه‌ی «برگشت» (وسط مسیرها؛ به مرحله‌ی قبل برمی‌گردد)',
+    'btn_cancel': '❌ دکمه‌ی «لغو» (فقط در آخرین مرحله‌ی هر کار، مثل تایید حذف/تمدید/پرداخت)',
+    'flow_cancelled': '🧭 پیامی که بعد از زدن «لغو» جای صفحه‌ی فعلی می‌آید (به‌جای نمایش دوباره‌ی پیام اولیه‌ی منو)',
     'flow_expired': '🧭 وقتی کاربر دکمه‌ی یک صفحه‌ی قدیمی/منقضی‌شده را می‌زند',
     'flow_home': '🧭 پیام «بازگشت به منو» در حالت کیبورد پایین (دکمه‌ی 🏠 منوی اصلی)',
     'kb_placeholder': '⌨️ متن محوِ داخل کادر تایپ (به‌جای «پیام شما را بنویسید») وقتی کیبورد پایین فعاله؛ حداکثر ۶۴ کاراکتر. بعد از تغییر، برای هر کاربر با /start بعدی اعمال می‌شود',
@@ -8552,6 +8695,22 @@ def commands_watcher():
 
 
 @with_db_retry
+def reset_cancel_text_override_once():
+    """فقط یک‌بار: اگه قبلاً متن دکمه‌ی «انصراف» از پنل به‌عنوان سفارشی ذخیره شده بود پاک می‌شه تا متن جدید («لغو») اعمال بشه."""
+    conn = get_conn()
+    c = conn.cursor()
+    c.execute("SELECT 1 FROM settings WHERE key='cancel_btn_reset_v1'")
+    if c.fetchone():
+        conn.close()
+        return
+    c.execute('DELETE FROM settings WHERE key=?', (ui_setting_key('fa', 'btn_cancel'),))
+    c.execute("INSERT INTO settings (key, value) VALUES ('cancel_btn_reset_v1', '1') "
+              "ON CONFLICT(key) DO UPDATE SET value=excluded.value")
+    conn.commit()
+    conn.close()
+
+
+@with_db_retry
 def reset_seller_text_overrides_once():
     """فقط یک‌بار: متن‌ها و دکمه‌های قدیمیِ فروشندگی که از قبل در settings به‌عنوان «سفارشی» ذخیره شده بودن
     (و متن جدید را می‌پوشانند) پاک می‌شوند تا متن‌های جدید اعمال بشن. بعد از این، هر تغییری که از پنل بدهید می‌ماند."""
@@ -8600,6 +8759,10 @@ try:
     purge_seller_plain_passwords_once()
 except Exception as _pe:
     print('⚠️ purge_seller_plain_passwords_once:', _pe)
+try:
+    reset_cancel_text_override_once()
+except Exception as _ce:
+    print('⚠️ reset_cancel_text_override_once:', _ce)
 try:
     reset_seller_text_overrides_once()
     if not _load_settings_blocking(attempts=2, delay=0.5):
@@ -9131,7 +9294,7 @@ def _process_update_impl(update):
             if get_seller_account(chat_id):
                 user_steps[str(chat_id)] = {'step': 'reseller_chg_password'}
                 send_message(chat_id, u(chat_id, 'reseller_ask_new_password', min_len=RESELLER_PASSWORD_MIN),
-                             reply_markup=cancel_kb(chat_id))
+                             reply_markup=back_kb(chat_id, 'reseller_creds'))
             else:
                 action_reseller_menu(chat_id)
 
@@ -9377,7 +9540,7 @@ def _process_update_impl(update):
                 send_message(
                     chat_id,
                     u(chat_id, 'discount_ask_prompt'),
-                    reply_markup={'inline_keyboard': [[{'text': u(chat_id, 'btn_cancel'), 'callback_data': 'buy_discount_cancel'}]]}
+                    reply_markup={'inline_keyboard': [[back_btn(chat_id, 'buy_discount_cancel')]]}
                 )
             else:
                 flow_end(chat_id, 'expired')
@@ -9397,6 +9560,10 @@ def _process_update_impl(update):
             action_my_configs(chat_id)
 
         elif data == 'acc_topup':
+            action_topup_menu(chat_id)
+
+        elif data == 'topup_back':
+            user_steps[str(chat_id)] = {}
             action_topup_menu(chat_id)
 
         elif data == 'menu':
@@ -9432,6 +9599,7 @@ def _process_update_impl(update):
         # ---------------- مدیریت کانفیگ (تمدید/تغییر نام/توقف/ازسرگیری/تغییر لینک) ----------------
 
         elif data.startswith('managecfg_'):
+            user_steps[str(chat_id)] = {}
             row_id = _cb_int(data, 1, 1)
             cfg = get_config_row(chat_id, row_id)
             if not cfg:
@@ -9476,7 +9644,7 @@ def _process_update_impl(update):
                 send_message(chat_id, u(chat_id, 'unl_no_extend'))
             else:
                 user_steps[str(chat_id)] = {'step': 'ext_ask_gb', 'row_id': row_id}
-                send_message(chat_id, u(chat_id, 'ext_ask_gb'), reply_markup=cancel_kb(chat_id))
+                send_message(chat_id, u(chat_id, 'ext_ask_gb'), reply_markup=back_kb(chat_id, 'managecfg_' + str(row_id)))
 
         elif data.startswith('cfgrename_'):
             row_id = _cb_int(data, 1, 1)
@@ -9485,7 +9653,7 @@ def _process_update_impl(update):
                 send_message(chat_id, u(chat_id, 'config_not_found'))
             else:
                 user_steps[str(chat_id)] = {'step': 'rename_ask_label', 'row_id': row_id}
-                send_message(chat_id, u(chat_id, 'rename_ask'), reply_markup=cancel_kb(chat_id))
+                send_message(chat_id, u(chat_id, 'rename_ask'), reply_markup=back_kb(chat_id, 'managecfg_' + str(row_id)))
 
         elif data.startswith('cfgdiag_'):
             row_id = _cb_int(data, 1, 1)
@@ -9519,12 +9687,22 @@ def _process_update_impl(update):
                 else:
                     _qr_last_sent[str(chat_id)] = time.time()     # قبل از ساخت ثبت می‌شه تا کلیک‌های پشت‌سرهم هم‌زمان رد نشن
                     try:
-                        qr_buf = generate_qr_png_bytes(str(cfg[1]))
-                        send_photo_bytes(
-                            chat_id, qr_buf, filename='qr_' + str(row_id) + '.png',
-                            caption=u(chat_id, 'qr_caption', label=cfg[4], divider=DIVIDER, sub_url=cfg[1])
-                        )
-                    except Exception:
+                        _qr_url = str(cfg[1] or '').strip()
+                        if not _qr_url:
+                            raise ValueError('empty sub_url')
+                        _qr_fn = 'qr_' + str(row_id) + '.png'
+                        _r = send_photo_bytes(
+                            chat_id, generate_qr_png_bytes(_qr_url), filename=_qr_fn,
+                            caption=u(chat_id, 'qr_caption', label=_html.escape(str(cfg[4])), divider=DIVIDER,
+                                      sub_url=_html.escape(_qr_url)))
+                        if not (isinstance(_r, dict) and _r.get('ok')):
+                            # کپشن HTML یا آپلود مشکل داشت: یک‌بار دیگه با کپشن ساده
+                            _r = send_photo_bytes(chat_id, generate_qr_png_bytes(_qr_url), filename=_qr_fn,
+                                                  caption=_qr_url, parse_mode=None)
+                        if not (isinstance(_r, dict) and _r.get('ok')):
+                            raise RuntimeError('sendPhoto failed: %s' % (_r,))
+                    except Exception as _qe:
+                        print('⚠️ ارسال QR Code ناموفق بود:', _qe)
                         _qr_last_sent.pop(str(chat_id), None)      # ساخت نشد؛ محدودیت اعمال نشه
                         send_message(chat_id, u(chat_id, 'qr_error'))
 
@@ -9534,8 +9712,7 @@ def _process_update_impl(update):
             if not cfg:
                 send_message(chat_id, u(chat_id, 'config_not_found'))
             else:
-                res = pause_config_on_panel(cfg[2])
-                if res['success']:
+                if set_config_paused(cfg[2], True):
                     update_config_status_db(row_id, 'paused')
                     cfg = get_config_row(chat_id, row_id)
                     send_manage_panel(chat_id, cfg, note=u(chat_id, 'pause_success', label=cfg[4]))
@@ -9548,8 +9725,7 @@ def _process_update_impl(update):
             if not cfg:
                 send_message(chat_id, u(chat_id, 'config_not_found'))
             else:
-                res = resume_config_on_panel(cfg[2])
-                if res['success']:
+                if set_config_paused(cfg[2], False):
                     update_config_status_db(row_id, 'active')
                     cfg = get_config_row(chat_id, row_id)
                     send_manage_panel(chat_id, cfg, note=u(chat_id, 'resume_success', label=cfg[4]))
@@ -9590,18 +9766,14 @@ def _process_update_impl(update):
             elif not cfg:
                 send_message(chat_id, u(chat_id, 'config_not_found'))
             else:
-                res = rotate_link_config_on_panel(cfg[2])
-                if res['success']:
-                    resp = res.get('data') or {}
-                    new_url = None
-                    if isinstance(resp, dict):
-                        new_url = resp.get('sub_url') or resp.get('subUrl') or resp.get('url')
-                    if isinstance(resp, dict) and resp.get('id') and len(cfg) > 9 and cfg[9] == 'unlimited' \
+                _ok, new_url, resp = rotate_link_and_get_url(cfg)
+                if _ok:
+                    if resp.get('id') and len(cfg) > 9 and cfg[9] == 'unlimited' \
                             and str(resp.get('id')) != str(cfg[2]):
                         update_config_id_db(row_id, resp['id'])      # تغییر لینک نامحدود، شناسه‌ی جدید هم می‌ده
                     if new_url:
                         update_config_suburl_db(row_id, new_url)
-                        send_message(chat_id, u(chat_id, 'rotate_success', label=cfg[4], sub_url=new_url))
+                        send_message(chat_id, u(chat_id, 'rotate_success', label=cfg[4], sub_url=_html.escape(new_url)))
                     else:
                         send_message(chat_id, u(chat_id, 'rotate_success_no_url'))
                 else:
@@ -9785,6 +9957,7 @@ def _process_update_impl(update):
             else:
                 user_steps[str(chat_id)] = new_quantity_state(_plan['type'], _plan['gb'], _plan['days'],
                                                               fixed_price=_plan['price'], title=_plan['title'])
+                user_steps[str(chat_id)]['back'] = 'buy_plans'
                 text, kb = build_quantity_screen(chat_id, user_steps[str(chat_id)])
                 send_message(chat_id, text, reply_markup=kb)
 
@@ -9795,6 +9968,7 @@ def _process_update_impl(update):
                 send_message(chat_id, u(chat_id, 'disabled_feature'))
             else:
                 user_steps[str(chat_id)] = new_quantity_state(ctype, get_default_gb(), get_default_days())
+                user_steps[str(chat_id)]['back'] = 'buy_custom'
                 text, kb = build_quantity_screen(chat_id, user_steps[str(chat_id)])
                 send_message(chat_id, text, reply_markup=kb)
 
@@ -9837,7 +10011,15 @@ def _process_update_impl(update):
             else:
                 send_message(chat_id, u(chat_id, 'ask_label_prompt'), reply_markup={'inline_keyboard': [[
                     {'text': u(chat_id, 'ask_label_skip'), 'callback_data': 'qty_name_skip'},
-                    {'text': u(chat_id, 'btn_cancel'), 'callback_data': 'cancel'}]]})
+                    back_btn(chat_id, 'qty_name_back')]]})
+
+        elif data == 'qty_name_back':
+            s = user_steps.get(str(chat_id), {})
+            if s.get('step') != 'pick_quantity':
+                flow_end(chat_id, 'expired')
+            else:
+                _t, _kb = build_quantity_screen(chat_id, s)
+                send_message(chat_id, _t, reply_markup=_kb)
 
         elif data == 'qty_name_skip':
             s = user_steps.get(str(chat_id), {})
@@ -10138,7 +10320,7 @@ def _process_update_impl(update):
             else:
                 user_steps[str(chat_id)] = {'step': 'reseller_set_password', 'username': uname}
                 send_message(chat_id, u(chat_id, 'reseller_ask_password', min_len=RESELLER_PASSWORD_MIN),
-                             reply_markup=cancel_kb(chat_id))
+                             reply_markup=back_kb(chat_id, 'reseller_activate'))
 
         elif step.get('step') == 'reseller_set_password':
             pw = text or ''
@@ -10212,7 +10394,7 @@ def _process_update_impl(update):
 
         elif step.get('step') == 'ext_ask_gb':
             try:
-                extra_gb = float(text)
+                extra_gb = float(str(text).strip().replace('٫', '.').replace(',', '.'))   # اعشار فارسی/کاما هم قبول
                 if extra_gb <= 0 or not math.isfinite(extra_gb) or extra_gb > get_buy_max_gb():
                     send_message(chat_id, u(chat_id, 'ext_number_error'))
                 elif extra_gb < get_extend_min_gb():
@@ -10220,7 +10402,8 @@ def _process_update_impl(update):
                 else:
                     user_steps[str(chat_id)]['step'] = 'ext_ask_days'
                     user_steps[str(chat_id)]['extra_gb'] = extra_gb
-                    send_message(chat_id, u(chat_id, 'ext_ask_days'), reply_markup=cancel_kb(chat_id))
+                    send_message(chat_id, u(chat_id, 'ext_ask_days'),
+                                 reply_markup=back_kb(chat_id, 'cfgext_' + str(step.get('row_id'))))
             except ValueError:
                 send_message(chat_id, u(chat_id, 'number_only_error'))
 
@@ -10274,24 +10457,21 @@ def _process_update_impl(update):
                 if not cfg:
                     send_message(chat_id, u(chat_id, 'config_not_found'))
                 else:
-                    res = rename_config_on_panel(cfg[2], new_label)
-                    if res['success']:
+                    if rename_and_verify(cfg[2], new_label):
                         update_config_label_db(row_id, new_label)
                         # فقط تغییر لیبل کافی نیست: خودِ فایل/ساب‌لینک قبلاً
                         # با نام قدیمی روی پنل ساخته و کش شده، برای همین بعد
                         # از تغییر نام، لینک رو هم رفرش (rotate) می‌کنیم تا
                         # نام جدید واقعاً داخل ساب‌لینک/فایل دیده بشه.
-                        rotate_res = (rotate_link_config_on_panel(cfg[2]) if not (len(cfg) > 9 and cfg[9] == 'unlimited')
-                                      else {'success': False})
                         new_url = None
-                        if rotate_res.get('success'):
-                            resp = rotate_res.get('data') or {}
-                            if isinstance(resp, dict):
-                                new_url = resp.get('sub_url') or resp.get('subUrl') or resp.get('url')
-                            if new_url:
+                        if not (len(cfg) > 9 and cfg[9] == 'unlimited'):
+                            _rok, new_url, _rresp = rotate_link_and_get_url(cfg)
+                            if _rok and new_url:
                                 update_config_suburl_db(row_id, new_url)
+                            else:
+                                new_url = None
                         if new_url:
-                            send_message(chat_id, u(chat_id, 'rename_success_new_url', label=new_label, sub_url=new_url))
+                            send_message(chat_id, u(chat_id, 'rename_success_new_url', label=new_label, sub_url=_html.escape(new_url)))
                         else:
                             send_message(chat_id, u(chat_id, 'rename_success_no_url', label=new_label))
                     else:
@@ -11842,7 +12022,7 @@ def admin_wallet_ask(chat_id, uid, sign):
     verb = 'افزایش' if sign > 0 else 'کاهش'
     send_message(chat_id, f'💰 موجودی فعلی کاربر {uid}: {_adm_toman(row[3])} تومان\n'
                           f'مبلغ {verb} را به تومان ارسال کنید (فقط عدد):', parse_mode=None,
-                 reply_markup={'inline_keyboard': [[{'text': '❌ انصراف', 'callback_data': f'admin_u_{uid}'}]]})
+                 reply_markup={'inline_keyboard': [[{'text': '↩️ برگشت', 'callback_data': f'admin_u_{uid}'}]]})
 
 
 def admin_wallet_submit(chat_id, text, step):
@@ -12007,14 +12187,14 @@ def admin_add_channel_ask(chat_id):
     user_steps[str(chat_id)] = {'step': 'admin_add_channel'}
     send_message(chat_id, '🔗 لینک یا @یوزرنیم کانال را ارسال کنید (مثلاً https://splus.ir/mychannel).\n'
                           f'اکانت ({_G["account"] or "؟"}) باید مالک/ادمین آن کانال باشد.',
-                 parse_mode=None, reply_markup=cancel_kb(chat_id))
+                 parse_mode=None, reply_markup=back_kb(chat_id, 'admin_channels'))
 
 
 def admin_add_channel_submit(chat_id, text):
     norm = g_normalize_channel_link(text)
     if not norm:
         send_message(chat_id, '⚠️ این لینک/یوزرنیم معتبر نیست (لینک دعوت خصوصی هم پشتیبانی نمی‌شود). '
-                              'دوباره ارسال کنید یا انصراف بزنید.', parse_mode=None, reply_markup=cancel_kb(chat_id))
+                              'دوباره ارسال کنید یا برگشت بزنید.', parse_mode=None, reply_markup=back_kb(chat_id, 'admin_channels'))
         return
     link, name = norm
     links = get_gate_channels()
