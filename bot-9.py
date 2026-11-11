@@ -5520,6 +5520,17 @@ def _load_settings_blocking(attempts=3, delay=0.8):
     return _settings_cache_ts > 0.0
 
 
+def fresh_settings(max_age=2.0):
+    """تنظیمات رو همین لحظه از دیتابیس تازه می‌کنه (اگه کش کهنه‌تر از max_age ثانیه باشه).
+    برای جاهایی که وضعیت روشن/خاموش پنل باید فوری دیده بشه (مثلاً دکمه‌های روش شارژ)؛ وگرنه اولین کلیک بعد از تغییر پنل
+    هنوز مقدار قدیمی کش رو می‌دید و مثلاً دکمه‌ی کارت‌به‌کارت نمی‌آمد."""
+    try:
+        if time.time() - _settings_cache_ts > max_age:
+            _refresh_settings_cache()
+    except Exception:
+        pass
+
+
 def _schedule_settings_refresh():
     global _settings_refreshing
     with _settings_refresh_lock:
@@ -7096,6 +7107,7 @@ def check_crypto_for_user_async(chat_id, req_id, stage):
 
 def show_topup_method_choice(chat_id):
     """مرحله‌ی اول شارژ: انتخاب روش پرداخت (قبل از پرسیدن مبلغ)."""
+    fresh_settings()
     user_steps[str(chat_id)] = {'step': 'choose_topup_method'}
     rows = []
     if donito_enabled():
@@ -7152,6 +7164,7 @@ def proceed_after_topup_amount(chat_id, amount, method):
 
 
 def action_topup_menu(chat_id):
+    fresh_settings()
     if not is_feature_enabled('topup'):
         send_message(chat_id, u(chat_id, 'disabled_feature'))
         return
