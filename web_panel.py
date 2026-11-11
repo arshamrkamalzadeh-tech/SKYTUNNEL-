@@ -7061,6 +7061,10 @@ def alerts_page():
         {sw("alert_expired_notice", "1", "پیام بعد از انقضا", "روشن: وقتی کانفیگ منقضی شد هم یه پیام می‌ره (فقط برای منقضی‌های ۲ روز اخیر، تا روی کانفیگ‌های قدیمی اسپم نشه).")}
         {num("alert_interval_min", "30", "هر چند دقیقه یک‌بار بررسی بشه؟", "ربات هر چند دقیقه کانفیگ‌ها رو برای هشدار بررسی می‌کنه. عدد کمتر = دقیق‌تر ولی فشار بیشتر (حداقل ۵).", 5, 1440, "دقیقه")}
       </div>
+      <div class="card sec"><h3>🤔 پیام «مشکلی پیش اومده؟» (عدم اتصال)</h3>
+        {sw("inactive_alert_enabled", "1", "پیام به کسی که چند روزه به کانفیگش وصل نشده", "روشن: اگه مصرف کانفیگ یه کاربر چند روز تکون نخوره (یا کانفیگ تازه‌اش هیچ‌وقت وصل نشده)، ربات یه‌بار پیام «مشکلی پیش اومده؟» با دکمه‌ی عیب‌یابی و پشتیبانی می‌فرسته. کانفیگ تست، متوقف، منقضی و تمام‌حجم پیام نمی‌گیره.")}
+        {num("inactive_alert_days", "3", "بعد از چند روز عدم اتصال پیام بره؟", "اگه مصرف کانفیگ این تعداد روز بالا نره پیام می‌ره. اگه کاربر وصل بشه و دوباره همین‌قدر ساکت بمونه، پیام دوباره مجازه.", 1, 60, "روز")}
+      </div>
       <div class="card sec"><h3>👋 یادآوری به کسی که تست گرفته و نخریده</h3>
         {sw("nudge_trial_enabled", "1", "یادآوری بعد از تست رایگان", "روشن: کسی که تست رایگان گرفته ولی هنوز نخریده، یه‌بار پیام تشویقی به خرید می‌گیره.")}
         {num("nudge_trial_hours", "48", "چند ساعت بعد از گرفتن تست پیام بره؟", "فاصله‌ی بین گرفتن تست و فرستادن پیام یادآوری.", 1, 168, "ساعت")}
@@ -7086,6 +7090,8 @@ def alerts_save():
     set_setting("alert_expiry_days", num("alert_expiry_days", 1, 60, 3))
     set_setting("alert_volume_percent", num("alert_volume_percent", 1, 99, 90))
     set_setting("alert_interval_min", num("alert_interval_min", 5, 1440, 30))
+    set_setting("inactive_alert_enabled", "1" if f.get("inactive_alert_enabled") == "1" else "0")
+    set_setting("inactive_alert_days", num("inactive_alert_days", 1, 60, 3))
     set_setting("nudge_trial_enabled", "1" if f.get("nudge_trial_enabled") == "1" else "0")
     set_setting("nudge_trial_hours", num("nudge_trial_hours", 1, 168, 48))
     flash("تنظیمات هشدار ذخیره شد.")

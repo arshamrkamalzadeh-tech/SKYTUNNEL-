@@ -1480,6 +1480,33 @@ UI_TEXT['en'].update({
     ),
 })
 
+UI_TEXT['fa'].update({
+    'btn_alert_support': '💬 پشتیبانی',
+    'alert_inactive': (
+        '🤔 <b>مشکلی پیش اومده؟</b>\n{divider}\n'
+        'حدود <b>{days}</b> روزه که به کانفیگ <b>{label}</b> وصل نشدی.\n'
+        'اگه موقع اتصال به مشکل خوردی، دکمه‌ی «عیب‌یابی» رو بزن یا به پشتیبانی پیام بده تا سریع کمکت کنیم. 💙'
+    ),
+    'alert_inactive_never': (
+        '👋 <b>هنوز وصل نشدی؟</b>\n{divider}\n'
+        'کانفیگ <b>{label}</b> رو <b>{days}</b> روزه گرفتی ولی هنوز ازش استفاده نکردی.\n'
+        'اگه تو وصل شدن مشکل داری، دکمه‌ی «عیب‌یابی» رو بزن یا به پشتیبانی پیام بده تا قدم‌به‌قدم راهنماییت کنیم. 💙'
+    ),
+})
+UI_TEXT['en'].update({
+    'btn_alert_support': '💬 Support',
+    'alert_inactive': (
+        '🤔 <b>Is something wrong?</b>\n{divider}\n'
+        "You haven't connected to config <b>{label}</b> for about <b>{days}</b> days.\n"
+        'If you ran into a problem, tap "Troubleshoot" below or message support and we will help right away. 💙'
+    ),
+    'alert_inactive_never': (
+        '👋 <b>Still not connected?</b>\n{divider}\n'
+        'You got config <b>{label}</b> <b>{days}</b> days ago but have not used it yet.\n'
+        'If you have trouble connecting, tap "Troubleshoot" below or message support and we will guide you step by step. 💙'
+    ),
+})
+
 # بعضی متن‌های فارسی از قبل تو پنل زیر کلیدهای قدیمی (text_*, ctype_label_*)
 # ذخیره می‌شدن؛ برای اینکه سفارشی‌سازی‌های قبلی ادمین از بین نره، همون کلیدها
 # رو نگه می‌داریم. بقیه‌ی متن‌ها: ui_<زبان>_<کلید>.
@@ -2106,6 +2133,9 @@ def init_db():
     c.execute('CREATE TABLE IF NOT EXISTS user_nudges (user_id INTEGER, kind TEXT, sent_at TEXT, PRIMARY KEY (user_id, kind))')
     c.execute('CREATE TABLE IF NOT EXISTS config_alerts (config_row_id INTEGER, kind TEXT, ref TEXT, sent_at TEXT, '
               'PRIMARY KEY (config_row_id, kind))')
+    # پیگیری آخرین باری که مصرف هر کانفیگ تغییر کرده (برای پیام «چند روزه وصل نشدی»)
+    c.execute('CREATE TABLE IF NOT EXISTS config_usage_watch (config_row_id INTEGER PRIMARY KEY, last_used REAL, '
+              'last_change_at TEXT, checked_at TEXT)')
     c.execute('CREATE TABLE IF NOT EXISTS settings (key TEXT PRIMARY KEY, value TEXT)')
     c.execute('''CREATE TABLE IF NOT EXISTS discount_codes (
         code TEXT PRIMARY KEY,
@@ -9031,6 +9061,131 @@ def run_config_alerts():
             _alerts_mark(rid, 'vol_low', ref)
 
 
+# ---------------------------------------------------------------------------
+# پیام «چند روزه وصل نشدی» (عدم اتصال/عدم مصرف)
+# پنل تاریخ آخرین اتصال نمی‌ده، پس مصرف (usedGb) هر کانفیگ رو هر چند ساعت یه‌بار می‌خونیم و آخرین باری که
+# مصرف بالا رفته ثبت می‌شه. اگه مصرف ≥ N روز (پیش‌فرض ۳) تکون نخورده → یه‌بار پیام «مشکلی پیش اومده؟».
+# اگه کاربر وصل بشه و دوباره N روز ساکت بمونه، پیام دوباره مجازه. تنظیم از پنل ادمین (صفحه‌ی «هشدارها»):
+# inactive_alert_enabled, inactive_alert_days.
+# ---------------------------------------------------------------------------
+_INACTIVE_CHECK_HOURS = 6        # هر کانفیگ حداکثر هر ۶ ساعت یه‌بار از پنل پرسیده می‌شه (فشار کم روی API)
+
+
+@with_db_retry
+def _inactive_load_watch():
+    conn = get_conn()
+    c = conn.cursor()
+    c.execute('SELECT config_row_id, last_used, last_change_at, checked_at FROM config_usage_watch')
+    rows = c.fetchall()
+    conn.close()
+    return {r[0]: (r[1], r[2], r[3]) for r in rows}
+
+
+@with_db_retry
+def _inactive_save_watch(row_id, last_used, last_change_at, checked_at):
+    conn = get_conn()
+    c = conn.cursor()
+    c.execute('INSERT INTO config_usage_watch (config_row_id, last_used, last_change_at, checked_at) VALUES (?, ?, ?, ?) '
+              'ON CONFLICT(config_row_id) DO UPDATE SET last_used=excluded.last_used, '
+              'last_change_at=excluded.last_change_at, checked_at=excluded.checked_at',
+              (row_id, last_used, last_change_at, checked_at))
+    conn.commit()
+    conn.close()
+
+
+@with_db_retry
+def _inactive_candidates():
+    conn = get_conn()
+    c = conn.cursor()
+    c.execute("SELECT id, user_id, config_id, gb, label, expires_at, type, created_at FROM user_configs "
+              "WHERE COALESCE(status, 'active')='active'")
+    rows = c.fetchall()
+    conn.close()
+    return rows
+
+
+def _inactive_send(uid, row_id, key, **kw):
+    kb = {'inline_keyboard': [
+        [{'text': u(uid, 'btn_troubleshoot'), 'callback_data': 'cfgdiag_' + str(row_id)},
+         {'text': u(uid, 'btn_alert_support'), 'callback_data': 'menu_support'}],
+        [{'text': u(uid, 'btn_alert_manage'), 'callback_data': 'managecfg_' + str(row_id)}]]}
+    try:
+        send_message(uid, u(uid, key, divider=DIVIDER, **kw), reply_markup=kb)
+    except Exception as e:
+        print('⚠️ ارسال پیام عدم اتصال ناموفق:', e)
+
+
+def run_inactive_alerts():
+    if get_setting('inactive_alert_enabled', '1') != '1':
+        return
+    idle_days = max(1, _setting_int('inactive_alert_days', 3))
+    trial_prefix = get_trial_label()
+    watch = _inactive_load_watch()
+    sent = _alerts_load_sent()
+    now = datetime.now()
+    for rid, uid, cfg_id, gb, label, expires_at, ctype, created_at in _inactive_candidates():
+        try:
+            if ctype in ('proxy', 'unlimited') or not cfg_id:
+                continue                                   # مصرف این دو نوع از همین مسیر خونده نمی‌شه
+            raw_label = str(label or '')
+            if trial_prefix and raw_label.startswith(trial_prefix):
+                continue                                   # کانفیگ تست رایگان
+            if expires_at:
+                try:
+                    if datetime.fromisoformat(expires_at) <= now:
+                        continue                           # منقضی‌شده: پیام انقضا جداگانه می‌ره
+                except Exception:
+                    pass
+            w = watch.get(rid)
+            if w and w[2]:
+                try:
+                    if (now - datetime.fromisoformat(w[2])).total_seconds() < _INACTIVE_CHECK_HOURS * 3600:
+                        # به‌تازگی چک شده؛ فقط اگه قبلاً ساکت بوده و پیامش نرفته، بدون سوال از پنل تصمیم می‌گیریم
+                        pass_check = False
+                    else:
+                        pass_check = True
+                except Exception:
+                    pass_check = True
+            else:
+                pass_check = True
+            if pass_check:
+                used = get_config_usage_gb(cfg_id)
+                time.sleep(0.15)                           # فشار نیاد روی API پنل
+                if used is None:
+                    continue
+                used = max(0.0, float(used))
+                last_used, last_change = (w[0], w[1]) if w else (None, None)
+                if last_used is None or not last_change:
+                    # اولین بار: کانفیگی که هیچ‌وقت مصرف نشده از روز خریدش حساب می‌شه (یعنی اگه ≥ N روز از خریدش گذشته،
+                    # همین الان پیام می‌گیره)؛ کانفیگی که قبلاً مصرف داشته تاریخ آخرین مصرفش معلوم نیست و از همین لحظه شمارش می‌شه
+                    last_change = now.isoformat()
+                    if used < 0.005 and created_at:
+                        try:
+                            last_change = datetime.fromisoformat(created_at).isoformat()
+                        except Exception:
+                            pass
+                elif used > float(last_used) + 0.005:
+                    last_change = now.isoformat()          # مصرف بالا رفته = وصل شده
+                _inactive_save_watch(rid, used, last_change, now.isoformat())
+                watch[rid] = (used, last_change, now.isoformat())
+            used, last_change, _ck = watch.get(rid, (None, None, None))
+            if used is None or not last_change:
+                continue
+            gb_total = float(gb or 0)
+            if gb_total > 0 and used >= gb_total * 0.999:
+                continue                                   # حجم تموم شده؛ پیام حجم جداگانه می‌ره
+            idle = (now - datetime.fromisoformat(last_change)).total_seconds()
+            if idle < idle_days * 86400 or sent.get((rid, 'inactive')) == last_change:
+                continue
+            _inactive_send(uid, rid, 'alert_inactive_never' if used < 0.005 else 'alert_inactive',
+                           label=_html.escape(raw_label), days=int(idle // 86400))
+            _alerts_mark(rid, 'inactive', last_change)
+            sent[(rid, 'inactive')] = last_change
+            time.sleep(0.1)                                # فاصله بین پیام‌ها (محدودیت ارسال تلگرام/سروش)
+        except Exception as e:
+            print('⚠️ run_inactive_alerts:', e)
+
+
 def config_alerts_watcher():
     time.sleep(90)
     while True:
@@ -9043,6 +9198,10 @@ def config_alerts_watcher():
             run_trial_nudges()
         except Exception as e:
             print('⚠️ run_trial_nudges:', e)
+        try:
+            run_inactive_alerts()
+        except Exception as e:
+            print('⚠️ run_inactive_alerts:', e)
         time.sleep(max(5, _setting_int('alert_interval_min', 30)) * 60)
 
 
