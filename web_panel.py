@@ -6334,19 +6334,36 @@ def user_config_action(user_id, rid, action):
         r = cfg_call("POST", "/rotate-link", config_id, ctype=ctype)
         d = r["data"] if r["success"] else {}
         new_url = d.get("sub_url") or d.get("subUrl") or d.get("link") or d.get("url")
-        if not new_url:
-            # جواب نیومد یا لینک تو جواب نبود: لینک فعلی رو مستقیم از پنل می‌خونیم (ممکنه لینک واقعاً عوض شده باشه)
-            _d = cfg_fetch(config_id, ctype) or {}
+        if not new_url or (r["success"] and not d.get("id")):
+            # جواب نیومد/ناقص بود. طبق مستندات پنل بعد از تغییر لینک شناسه هم عوض می‌شه و شناسه‌ی قدیمی جواب نمی‌ده؛
+            # پس (برای کانفیگ عادی) کانفیگ رو با اسمش تو لیست پنل پیدا می‌کنیم.
+            d = dict(d)
+            _d = None
+            if ctype not in ("unlimited", "proxy"):
+                try:
+                    _res = SESSION.get(CONFIG_API, params={"q": str(label), "status": "all", "limit": 50},
+                                       headers={"Authorization": "Bearer " + CONFIG_KEY}, timeout=(5, 12))
+                    if _res.status_code in (200, 201):
+                        _d = next((it for it in (_res.json().get("configs") or [])
+                                   if isinstance(it, dict) and str(it.get("label") or "").strip() == str(label).strip()), None)
+                except Exception:
+                    _d = None
+            else:
+                _d = cfg_fetch(config_id, ctype)
+            _d = _d or {}
             _cur = next((str(_d[k]).strip() for k in ("subUrl", "sub_url", "link", "url")
                          if isinstance(_d.get(k), str) and _d[k].strip()), None)
-            if _cur and (r["success"] or _cur != str(sub_url or "").strip()):
-                new_url = _cur
+            _fid = _d.get("id")
+            if (_cur or _fid) and (r["success"] or (_fid and str(_fid) != str(config_id)) or (_cur and _cur != str(sub_url or "").strip())):
+                new_url = new_url or _cur
+                if _fid and not d.get("id"):
+                    d["id"] = _fid
                 r = {"success": True, "data": d}
         if not r["success"]:
             flash("⚠️ تغییر لینک ناموفق: " + r["error"])
             return back
-        if ctype == "unlimited" and d.get("id") and str(d.get("id")) != str(config_id):
-            db_run("UPDATE user_configs SET config_id=? WHERE id=?", (str(d["id"]), rid))   # لینک نامحدود شناسه‌ی جدید هم می‌ده
+        if d.get("id") and str(d.get("id")) != str(config_id):
+            db_run("UPDATE user_configs SET config_id=? WHERE id=?", (str(d["id"]), rid))   # تغییر لینک شناسه‌ی جدید هم می‌ده (همه‌ی انواع)
         if new_url:
             db_run("UPDATE user_configs SET sub_url=? WHERE id=?", (new_url, rid))
             flash("لینک تغییر کرد.")

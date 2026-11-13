@@ -4851,6 +4851,34 @@ def extend_config_on_panel(config_id, gb, days):
     return _panel_action('POST', '/extend', config_id, {'gb': gb, 'days': days})
 
 
+def revive_config_on_panel(config_id, gb, days):
+    """فعال‌سازی دوباره‌ی کانفیگ تمام‌شده/منقضی با همون شناسه و لینک. gb = «کل حجم جدید» (نه افزایشی)."""
+    body = {'gb': gb}
+    if days and int(days) > 0:
+        body['days'] = int(days)
+    return _panel_action('POST', '/revive', config_id, body, read_timeout=30)
+
+
+@with_db_retry
+def revive_config_db(row_id, new_gb, extra_days, price):
+    """بعد از revive: حجم کل = حجم جدید (مصرف صفر شده)، انقضا از همین الان؛ نشانه‌های هشدار و مصرف پاک می‌شن."""
+    conn = get_conn()
+    c = conn.cursor()
+    c.execute('SELECT gb, days, price FROM user_configs WHERE id=?', (row_id,))
+    row = c.fetchone()
+    if row:
+        gb, days, old_price = row
+        new_expires = (datetime.now() + timedelta(days=extra_days)).isoformat() if extra_days else None
+        c.execute('UPDATE user_configs SET base_gb=COALESCE(base_gb, ?), base_days=COALESCE(base_days, ?), '
+                  'gb=?, days=?, expires_at=COALESCE(?, expires_at), status=\'active\', price=? WHERE id=?',
+                  (gb or 0, days or 0, new_gb, (days or 0) + extra_days, new_expires,
+                   (old_price or 0) + max(0, int(price or 0)), row_id))
+        c.execute('DELETE FROM config_alerts WHERE config_row_id=?', (row_id,))
+        c.execute('DELETE FROM config_usage_watch WHERE config_row_id=?', (row_id,))
+        conn.commit()
+    conn.close()
+
+
 def rename_config_on_panel(config_id, label):
     return _panel_action('PUT', '/label', config_id, {'label': label})
 
@@ -4946,32 +4974,63 @@ def _fetch_panel_sub_url(config_id):
     return None
 
 
-def rotate_link_and_get_url(cfg):
+def _find_config_by_label(label):
+    """کانفیگ رو با اسمش تو لیست پنل پیدا می‌کنه (GET /configs?q=...). بعد از تغییر لینک، شناسه عوض می‌شه
+    و شناسه‌ی قدیمی دیگه جواب نمی‌ده؛ اسم تنها چیزیه که ثابت می‌مونه."""
+    if not label:
+        return None
+    try:
+        res = SESSION.get(CONFIG_API, params={'q': str(label), 'status': 'all', 'limit': 50},
+                          headers={'Authorization': 'Bearer ' + CONFIG_KEY}, timeout=(PANEL_CONNECT_TIMEOUT, 12))
+        if res.status_code not in (200, 201):
+            return None
+        for it in (res.json().get('configs') or []):
+            if isinstance(it, dict) and str(it.get('label') or '').strip() == str(label).strip():
+                return it
+    except Exception as e:
+        print('⚠️ جستجوی کانفیگ با اسم ناموفق:', e)
+    return None
+
+
+def rotate_link_and_get_url(cfg, label=None):
     """تغییر لینک روی پنل + پیدا کردن لینک جدید. خروجی: (ok, new_url|None, resp).
     اگه پنل جواب نداد/خطا داد (مثلاً تایم‌اوت) ولی لینک واقعاً عوض شده بود، با خوندن مستقیم لینک از پنل
     تشخیص می‌دیم و «موفق» حساب می‌کنیم (قبلاً همین حالت ارور «ارتباط با سرور» می‌داد با اینکه لینک عوض شده بود)."""
     config_id = cfg[2]
     old_url = str(cfg[1] or '').strip()
     res = rotate_link_config_on_panel(config_id)
-    resp = res.get('data') or {}
+    resp = dict(res.get('data') or {}) if isinstance(res.get('data'), dict) else {}
     ok = bool(res.get('success'))
     new_url = None
-    if ok and isinstance(resp, dict):
+    if ok:
         new_url = resp.get('sub_url') or resp.get('subUrl') or resp.get('link') or resp.get('url')
-    if not new_url:
-        fetched = None
-        for _attempt in (1, 2):
-            fetched = _fetch_panel_sub_url(config_id)
-            if fetched:
-                break
-            time.sleep(1.0)
-        if fetched:
+    kind = _cfg_kind(config_id)
+    if not new_url or (ok and not resp.get('id')):
+        # جواب نیومد / ناقص بود: طبق مستندات پنل بعد از تغییر لینک «شناسه هم عوض می‌شه» و شناسه‌ی قدیمی دیگه
+        # جواب نمی‌ده، پس کانفیگ رو با اسمش تو لیست پنل پیدا می‌کنیم.
+        found = None
+        if kind not in ('unlimited', 'proxy'):
+            for _attempt in (1, 2):
+                found = _find_config_by_label(label or cfg[4])
+                if found:
+                    break
+                time.sleep(1.0)
+        if found:
+            f_id, f_url = found.get('id'), str(found.get('subUrl') or '').strip()
             if ok:
-                new_url = fetched                      # پنل موفق گفت ولی لینک تو جواب نبود
-            elif fetched != old_url:
-                ok, new_url = True, fetched            # پنل جواب نداد، ولی لینک واقعاً عوض شده
-                print('ℹ️ تغییر لینک روی پنل انجام شده بود (تایید با خواندن مجدد):', config_id)
-    return ok, (str(new_url).strip() if new_url else None), (resp if isinstance(resp, dict) else {})
+                new_url = new_url or f_url or None
+                if f_id and not resp.get('id'):
+                    resp['id'] = f_id
+            elif (f_id and str(f_id) != str(config_id)) or (f_url and f_url != old_url):
+                ok, new_url = True, (f_url or None)    # پنل جواب نداد، ولی لینک/شناسه واقعاً عوض شده بود
+                if f_id:
+                    resp['id'] = f_id
+                print('ℹ️ تغییر لینک روی پنل انجام شده بود (تایید با جستجوی اسم):', config_id)
+        elif kind in ('unlimited', 'proxy') or not found:
+            fetched = _fetch_panel_sub_url(config_id)
+            if fetched and (ok or fetched != old_url):
+                ok, new_url = True, (new_url or fetched)
+    return ok, (str(new_url).strip() if new_url else None), resp
 
 
 def get_config_limit_gb(config_id):
@@ -5013,6 +5072,57 @@ def get_config_limit_gb(config_id):
                 continue
             return 'error', None
     return 'error', None
+
+
+_cfg_usage_cache = {'t': 0.0, 'fail': 0.0, 'm': {}}
+
+
+def _config_usage_map(force=False, ttl=240):
+    """همه‌ی کانفیگ‌های فعال با مصرفشون رو با GET /configs (تا ۵۰۰ تا در هر درخواست) می‌خونه.
+    پنل فقط ۱۲۰ درخواست در دقیقه اجازه می‌ده؛ پرسیدن تک‌تکِ کانفیگ‌ها برای هشدارها به این سقف می‌خورد."""
+    now = time.time()
+    c = _cfg_usage_cache
+    if not force and c['m'] and now - c['t'] < ttl:
+        return c['m']
+    if now - c['fail'] < 60 and not force:
+        return c['m']
+    m, page = {}, 1
+    try:
+        while page <= 40:
+            res = SESSION.get(CONFIG_API, params={'status': 'active', 'limit': 500, 'page': page},
+                              headers={'Authorization': 'Bearer ' + CONFIG_KEY}, timeout=(PANEL_CONNECT_TIMEOUT, 25))
+            if res.status_code not in (200, 201):
+                raise RuntimeError('status %s' % res.status_code)
+            d = res.json()
+            items = d.get('configs') if isinstance(d, dict) else None
+            if not isinstance(items, list):
+                raise RuntimeError('bad body')
+            for it in items:
+                if isinstance(it, dict) and it.get('id') is not None:
+                    m[str(it['id'])] = it
+            if not d.get('hasMore') or not items:
+                break
+            page += 1
+    except Exception as e:
+        print('⚠️ خواندن دسته‌ای لیست کانفیگ‌ها ناموفق:', e)
+        c['fail'] = now
+        return c['m']
+    c['m'], c['t'], c['fail'] = m, now, 0.0
+    return m
+
+
+def get_usage_cached(config_id):
+    """مصرف از لیست دسته‌ای (بدون درخواست جدا)؛ اگه کانفیگ تو لیست فعال‌ها نبود، تک‌درخواستی با فاصله."""
+    if _cfg_kind(config_id) in ('unlimited', 'proxy'):
+        return get_config_usage_gb(config_id)
+    it = _config_usage_map().get(str(config_id))
+    if it and it.get('usedGb') is not None:
+        try:
+            return float(it['usedGb'])
+        except Exception:
+            pass
+    time.sleep(0.6)                                   # سقف ۱۲۰ درخواست در دقیقه
+    return get_config_usage_gb(config_id)
 
 
 def get_config_usage_gb(config_id):
@@ -9020,6 +9130,7 @@ def run_config_alerts():
     trial_prefix = get_trial_label()
     sent = _alerts_load_sent()
     now = datetime.now()
+    _config_usage_map(force=True)                      # یک درخواست دسته‌ای برای مصرف همه‌ی کانفیگ‌ها
     for rid, uid, cfg_id, gb, label, expires_at in _alerts_candidates():
         try:
             exp = datetime.fromisoformat(expires_at)
@@ -9046,8 +9157,7 @@ def run_config_alerts():
         ref = '%g' % gb_total
         if sent.get((rid, 'vol_done')) == ref:
             continue
-        used = get_config_usage_gb(cfg_id)
-        time.sleep(0.15)                               # فشار نیاد روی API پنل
+        used = get_usage_cached(cfg_id)
         if used is None:
             continue
         used = max(0.0, float(used))
@@ -9149,8 +9259,7 @@ def run_inactive_alerts():
             else:
                 pass_check = True
             if pass_check:
-                used = get_config_usage_gb(cfg_id)
-                time.sleep(0.15)                           # فشار نیاد روی API پنل
+                used = get_usage_cached(cfg_id)
                 if used is None:
                     continue
                 used = max(0.0, float(used))
@@ -9940,9 +10049,8 @@ def _process_update_impl(update):
             else:
                 _ok, new_url, resp = rotate_link_and_get_url(cfg)
                 if _ok:
-                    if resp.get('id') and len(cfg) > 9 and cfg[9] == 'unlimited' \
-                            and str(resp.get('id')) != str(cfg[2]):
-                        update_config_id_db(row_id, resp['id'])      # تغییر لینک نامحدود، شناسه‌ی جدید هم می‌ده
+                    if resp.get('id') and str(resp.get('id')) != str(cfg[2]):
+                        update_config_id_db(row_id, resp['id'])      # تغییر لینک شناسه‌ی جدید هم می‌ده (برای همه‌ی انواع)
                     if new_url:
                         update_config_suburl_db(row_id, new_url)
                         send_message(chat_id, u(chat_id, 'rotate_success', label=cfg[4], sub_url=_html.escape(new_url)))
@@ -9968,18 +10076,50 @@ def _process_update_impl(update):
                 price = s['price']
                 cfg = get_config_row(chat_id, row_id)
                 _lim_st, _lim_before = ('error', None)
+                _revive, _pc = False, None
                 if cfg:
                     _lim_st, _lim_before = get_config_limit_gb(cfg[2])   # حجم کل قبل از تمدید (برای تشخیص نتیجه‌ی مبهم)
+                    if _cfg_kind(cfg[2]) not in ('unlimited', 'proxy'):
+                        _pc = _fetch_panel_config(cfg[2])
+                        # کانفیگ تمام‌شده/منقضی (غیرفعال روی پنل): با «فعال‌سازی دوباره» همون لینک زنده می‌شه
+                        _revive = bool(_pc and str(_pc.get('status') or '').lower() in ('disabled', 'finished', 'expired'))
                 if not cfg:
                     send_message(chat_id, u(chat_id, 'config_not_found'))
                 elif get_wallet_db(chat_id) < price:
                     send_message(chat_id, u(chat_id, 'ext_insufficient'))
                 elif extra_gb < get_extend_min_gb():
                     send_message(chat_id, u(chat_id, 'ext_min_gb_error', min_gb=f'{get_extend_min_gb():g}'))
-                elif _lim_st == 'error':
+                elif _lim_st == 'error' and not _revive:
                     send_message(chat_id, u(chat_id, 'ext_panel_error'))      # پنل در دسترس نیست؛ هنوز پولی کم نشده
                 elif not try_deduct_wallet_db(chat_id, price, 'extend'):
                     send_message(chat_id, u(chat_id, 'ext_insufficient'))
+                elif _revive:
+                    # کانفیگ تمام‌شده: حجم کل جدید = باقیمانده‌ی قبلی (اگه فقط زمانش تموم شده) + حجم خریداری‌شده
+                    _reason = str(_pc.get('disableReason') or '').lower()
+                    try:
+                        _remain = 0.0 if 'traffic' in _reason else max(0.0, float(_pc.get('limitGb') or 0) - float(_pc.get('usedGb') or 0))
+                    except Exception:
+                        _remain = 0.0
+                    _new_total = round(_remain + extra_gb, 3)
+                    # پول همین بالا (شرط قبلی try_deduct_wallet_db) کم شده؛ اگه فعال‌سازی نشد برمی‌گرده
+                    try:
+                        res = revive_config_on_panel(cfg[2], _new_total, extra_days)
+                    except Exception as _rv_err:
+                        print('⚠️ استثنا هنگام فعال‌سازی دوباره:', _rv_err)
+                        res = {'success': False}
+                    if not res['success']:
+                        _pc2 = _fetch_panel_config(cfg[2])              # شاید انجام شده و فقط جواب نیومده
+                        if _pc2 and str(_pc2.get('status') or '').lower() == 'active':
+                            res = {'success': True}
+                    if res['success']:
+                        try:
+                            revive_config_db(row_id, _new_total, extra_days, price)
+                        except Exception as _rd_err:
+                            print('🚨 فعال‌سازی روی پنل انجام شد ولی دیتابیس آپدیت نشد:', chat_id, row_id, _rd_err)
+                        send_message(chat_id, u(chat_id, 'ext_success', label=cfg[4], extra_gb=extra_gb, extra_days=extra_days, price=price))
+                    else:
+                        update_wallet_db(chat_id, price, 'refund_extend_failed')
+                        send_message(chat_id, u(chat_id, 'ext_panel_error'))
                 else:
                     try:
                         res = extend_config_on_panel(cfg[2], extra_gb, extra_days)
@@ -10637,7 +10777,9 @@ def _process_update_impl(update):
                         # نام جدید واقعاً داخل ساب‌لینک/فایل دیده بشه.
                         new_url = None
                         if not (len(cfg) > 9 and cfg[9] == 'unlimited'):
-                            _rok, new_url, _rresp = rotate_link_and_get_url(cfg)
+                            _rok, new_url, _rresp = rotate_link_and_get_url(cfg, label=new_label)
+                            if _rok and _rresp.get('id') and str(_rresp.get('id')) != str(cfg[2]):
+                                update_config_id_db(row_id, _rresp['id'])
                             if _rok and new_url:
                                 update_config_suburl_db(row_id, new_url)
                             else:
