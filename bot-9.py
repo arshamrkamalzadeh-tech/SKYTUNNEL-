@@ -553,6 +553,7 @@ UI_TEXT = {
         'rename_success_new_url': '✅ نام کانفیگ به «{label}» تغییر کرد.\n🔗 لینک به‌روزشده:\n<code>{sub_url}</code>\n\n⚠️ لطفاً این لینک جدید را دوباره در برنامه‌ی خود وارد کنید.',
         'rename_success_no_url': '✅ نام کانفیگ به «{label}» تغییر کرد.\nبرای دیدن لینک فعلی، دوباره «🗂 کانفیگ‌های من» را بزنید.',
         'rename_panel_error': '❌ خطا در تغییر نام از سمت پنل. لطفاً بعداً دوباره تلاش کنید.',
+        'rename_duplicate_error': '❌ این نام قبلاً استفاده شده. لطفاً یک نام دیگر (حداکثر ۴۰ کاراکتر) بفرستید.',
         'qr_not_available': '❌ ساخت QR Code روی سرور فعال نیست.\nادمین باید کتابخانه‌ی لازم را نصب کند.',
         'qr_caption': '📷 <b>QR Code کانفیگ «{label}»</b>\n{divider}\n🔗 <code>{sub_url}</code>',
         'qr_error': '❌ خطا در ساخت QR Code. لطفاً دوباره تلاش کنید.',
@@ -868,6 +869,7 @@ UI_TEXT = {
         'rename_success_new_url': '✅ The config name was changed to "{label}".\n🔗 Updated link:\n<code>{sub_url}</code>\n\n⚠️ Please enter this new link in your app again.',
         'rename_success_no_url': '✅ The config name was changed to "{label}".\nTap "🗂 My Configs" again to see the current link.',
         'rename_panel_error': '❌ Error renaming on the panel. Please try again later.',
+        'rename_duplicate_error': '❌ This name is already in use. Please send a different name (max 40 characters).',
         'qr_not_available': '❌ QR Code generation is not enabled on the server.\nThe admin needs to install the required library.',
         'qr_caption': '📷 <b>QR Code for "{label}"</b>\n{divider}\n🔗 <code>{sub_url}</code>',
         'qr_error': '❌ Error generating the QR Code. Please try again.',
@@ -4945,13 +4947,21 @@ def set_config_paused(config_id, want_paused):
     return st is not None and st == want_paused
 
 
-def rename_and_verify(config_id, label):
-    """تغییر نام روی پنل؛ اگه جواب نیومد ولی نام واقعاً عوض شده بود، موفق حساب می‌شه."""
+def rename_and_verify_ex(config_id, label):
+    """مثل rename_and_verify ولی خروجی: (ok, duplicate). duplicate=True یعنی پنل گفته این اسم تکراری است."""
     res = rename_config_on_panel(config_id, label)
     if res.get('success'):
-        return True
+        return True, False
     d = _fetch_panel_config(config_id)
-    return bool(d and str(d.get('label') or '').strip() == str(label).strip())
+    if d and str(d.get('label') or '').strip() == str(label).strip():
+        return True, False
+    err = str(res.get('error') or '').lower()
+    return False, ('label_duplicate' in err or 'duplicate' in err)
+
+
+def rename_and_verify(config_id, label):
+    """تغییر نام روی پنل؛ اگه جواب نیومد ولی نام واقعاً عوض شده بود، موفق حساب می‌شه."""
+    return rename_and_verify_ex(config_id, label)[0]
 
 
 def _fetch_panel_sub_url(config_id):
@@ -10769,28 +10779,18 @@ def _process_update_impl(update):
                 if not cfg:
                     send_message(chat_id, u(chat_id, 'config_not_found'))
                 else:
-                    if rename_and_verify(cfg[2], new_label):
+                    _rn_ok, _rn_dup = rename_and_verify_ex(cfg[2], new_label)
+                    if _rn_ok:
                         update_config_label_db(row_id, new_label)
-                        # فقط تغییر لیبل کافی نیست: خودِ فایل/ساب‌لینک قبلاً
-                        # با نام قدیمی روی پنل ساخته و کش شده، برای همین بعد
-                        # از تغییر نام، لینک رو هم رفرش (rotate) می‌کنیم تا
-                        # نام جدید واقعاً داخل ساب‌لینک/فایل دیده بشه.
-                        new_url = None
-                        if not (len(cfg) > 9 and cfg[9] == 'unlimited'):
-                            _rok, new_url, _rresp = rotate_link_and_get_url(cfg, label=new_label)
-                            if _rok and _rresp.get('id') and str(_rresp.get('id')) != str(cfg[2]):
-                                update_config_id_db(row_id, _rresp['id'])
-                            if _rok and new_url:
-                                update_config_suburl_db(row_id, new_url)
-                            else:
-                                new_url = None
-                        if new_url:
-                            send_message(chat_id, u(chat_id, 'rename_success_new_url', label=new_label, sub_url=_html.escape(new_url)))
-                        else:
-                            send_message(chat_id, u(chat_id, 'rename_success_no_url', label=new_label))
+                        # تغییر نام فقط نمایشی است و در هیچ حالتی لینک عوض نمی‌شود.
+                        # تغییر لینک فقط با درخواست صریح کاربر از «تغییر لینک» (cfgrotate_) انجام می‌شود.
+                        send_message(chat_id, u(chat_id, 'rename_success_no_url', label=new_label))
+                    elif _rn_dup:
+                        send_message(chat_id, u(chat_id, 'rename_duplicate_error'))
                     else:
                         send_message(chat_id, u(chat_id, 'rename_panel_error'))
-                user_steps[str(chat_id)] = {}
+                if not locals().get('_rn_dup'):
+                    user_steps[str(chat_id)] = {}
                 # پیام نتیجه (لینک جدید یا خطا) همین بالا فرستاده شده.
 
         elif step.get('step') == 'waiting_delete_id':

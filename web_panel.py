@@ -6318,7 +6318,7 @@ def user_config_action(user_id, rid, action):
             flash("⚠️ تغییر نام روی پنل ناموفق: " + r["error"])
             return back
         db_run("UPDATE user_configs SET label=? WHERE id=?", (new, rid))
-        flash("نام تغییر کرد (برای اعمال تو لینک، «تغییر لینک» رو هم بزنید).")
+        flash("نام تغییر کرد. لینک اشتراک دست‌نخورده موند.")
     elif action in ("pause", "resume"):
         r = cfg_call("POST", "/" + action, config_id, ctype=ctype)
         if not r["success"]:
